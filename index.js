@@ -1,21 +1,30 @@
+//EXTERNAL
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const appRoot = require('./utils/pathUtils');
 const app = express();
+const cors = require('cors')
 
+//Core Modules
+const appRoot = require('./utils/pathUtils');
 const userRouter = require(path.join(appRoot, 'router', 'user.js'));
-const orderRouter = require(path.join(appRoot, 'router', 'orders.js'));
+const authRouter = require('./router/authRouter')
+const adminAuthRouter = require('./router/admin/authAdminRouter')
+const productRouter = require('./router/admin/productRouter')
 
+// CORS setup (replace with your actual frontend domain)
+app.use(cors())
+app.use(express.json())
 app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-    console.log('Middleware requested');
-    next();
-});
 
 app.use('/api/user', userRouter); //user apis
-app.use('/api/order', orderRouter); //order apis
+app.use('/api/auth', authRouter)
+app.use('/api/products', productRouter)
+
+
+// ADMIN ROUTE
+app.use('/api/admin', adminAuthRouter);
 
 app.listen(process.env.PORT, () => {
     console.log('Server Started');
