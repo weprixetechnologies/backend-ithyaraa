@@ -11,6 +11,7 @@ const userRouter = require(path.join(appRoot, 'router', 'user.js'));
 const authRouter = require('./router/authRouter')
 const adminAuthRouter = require('./router/admin/authAdminRouter')
 const productRouter = require('./router/admin/productRouter')
+const offerRouter = require('./router/admin/offerAdminRouter')
 
 // CORS setup (replace with your actual frontend domain)
 app.use(cors())
@@ -21,6 +22,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use('/api/user', userRouter); //user apis
 app.use('/api/auth', authRouter)
 app.use('/api/products', productRouter)
+app.use('/api/offer', offerRouter)
 
 
 // ADMIN ROUTE

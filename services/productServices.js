@@ -1,3 +1,8 @@
+const model = require('./../model/productModel');
+const attributeModel = require('./../model/attributesModel');
+const db = require('./../utils/dbconnect');
+const { get } = require('../router/admin/productRouter');
+
 const generateRandomID = () => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let id = '';
@@ -6,6 +11,31 @@ const generateRandomID = () => {
     }
     return `ITHYP${id}`;
 };
+
+const generateRandomString = (length = 7) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+};
+
+const generateUniqueVariationID = async () => {
+    const prefix = 'VAR-';
+    let variationID = '';
+
+    while (true) {
+        const randomPart = generateRandomString(7);
+        variationID = `${prefix}${randomPart}`;
+
+        const exists = await model.checkIfVariationIDExists(variationID);
+        if (!exists) break;
+    }
+
+    return variationID;
+};
+
 
 const generateUniqueProductID = async () => {
     let unique = false;
@@ -28,7 +58,10 @@ const generateUniqueProductID = async () => {
 };
 
 const uploadVariationMap = async ({ variations, productID }) => {
+    // console.log('🔄 Starting uploadVariationMap...');
+
     if (!variations) {
+        console.warn('⚠️ No variation data provided');
         return {
             success: false,
             message: 'No variation data provided'
@@ -39,36 +72,81 @@ const uploadVariationMap = async ({ variations, productID }) => {
         const results = [];
 
         if (Array.isArray(variations)) {
-            for (const variation of variations) {
-                const result = await uploadVariations({ ...variation, productID });
+            // console.log(`🧩 Variations is an array with ${variations.length} item(s)`);
+
+            for (const [index, variation] of variations.entries()) {
+                // console.log(`➡️ Processing variation[${index}]:`, variation);
+
+                const variationID = await generateUniqueVariationID();
+                // console.log(`🆔 Generated variationID: ${variationID}`);
+
+                const payload = {
+                    ...variation,
+                    productID,
+                    variationID
+                };
+
+                // console.log('📤 Uploading variation to model.uploadVariations with payload:', payload);
+
+                const result = await model.uploadVariations(payload);
+
                 if (!result.success) {
+                    console.error(`❌ Upload failed for variation[${index}]:`, result.error);
                     return {
                         success: false,
                         message: 'One or more variations failed to upload',
                         error: result.error
                     };
                 }
+
+                // console.log(`✅ Upload succeeded for variation[${index}] with ID ${variationID}`);
                 results.push(result);
             }
+
         } else if (typeof variations === 'object') {
-            const result = await uploadVariations({ ...variations, productID });
+            // console.log('🧩 Single variation object detected:', variations);
+
+            const variationID = await generateUniqueVariationID();
+            // console.log(`🆔 Generated variationID: ${variationID}`);
+
+            const payload = {
+                ...variations,
+                productID,
+                variationID
+            };
+
+            // console.log('📤 Uploading single variation to model.uploadVariations with payload:', payload);
+
+            const result = await model.uploadVariations(payload);
+
             if (!result.success) {
+                console.error('❌ Upload failed for single variation:', result.error);
                 return {
                     success: false,
                     message: 'Variation upload failed',
                     error: result.error
                 };
             }
+
+            // console.log(`✅ Upload succeeded for single variation with ID ${variationID}`);
             results.push(result);
+        } else {
+            console.warn('⚠️ Invalid variations format. Must be array or object:', variations);
+            return {
+                success: false,
+                message: 'Invalid variation format'
+            };
         }
 
+        // console.log('🎉 All variation(s) uploaded successfully');
         return {
             success: true,
             message: 'Variation(s) uploaded successfully',
             data: results
         };
+
     } catch (error) {
-        console.error('uploadVariationMap error:', error);
+        console.error('🔥 Exception during uploadVariationMap:', error);
         return {
             success: false,
             message: 'Unexpected error during variation upload',
@@ -77,5 +155,297 @@ const uploadVariationMap = async ({ variations, productID }) => {
     }
 };
 
+const editVariationMap = async ({ variations, productID }) => {
+    if (!variations) {
+        return {
+            success: false,
+            message: 'No variation data provided'
+        };
+    }
 
-module.exports = { generateUniqueProductID, uploadVariationMap };
+    try {
+        await model.deleteVariationsByProductID(productID); // Overwrite logic
+
+        const results = [];
+
+        const variationsArray = Array.isArray(variations) ? variations : [variations];
+
+        for (const variation of variationsArray) {
+            const variationID = await generateUniqueVariationID();
+
+            const payload = {
+                ...variation,
+                productID,
+                variationID
+            };
+
+            const result = await model.uploadVariations(payload);
+
+            if (!result.success) {
+                return {
+                    success: false,
+                    message: 'One or more variations failed to upload',
+                    error: result.error
+                };
+            }
+
+            results.push(result);
+        }
+
+        return {
+            success: true,
+            message: 'Variation(s) updated successfully',
+            data: results
+        };
+    } catch (error) {
+        console.error('editVariationMap error:', error);
+        return {
+            success: false,
+            message: 'Unexpected error during variation update',
+            error: error.message
+        };
+    }
+};
+
+const uploadAttributeService = async (attributesArray) => {
+
+    if (!Array.isArray(attributesArray) || attributesArray.length === 0) {
+        console.error("Invalid attributesArray: Must be a non-empty array");
+        return {
+            success: false,
+            message: 'An array of attributes is required'
+        };
+    }
+
+    const results = [];
+
+    for (const attr of attributesArray) {
+        const { name, values } = attr;
+
+        // Validation
+        if (!name || !Array.isArray(values) || values.length === 0) {
+            console.warn(`Skipping attribute "${name}" due to invalid format`);
+            results.push({
+                success: false,
+                name,
+                message: 'Invalid attribute format (missing name or non-array/empty values)'
+            });
+            continue;
+        }
+
+        try {
+            const result = await attributeModel.uploadAttribute({ name, values });
+
+            if (result.success) {
+                results.push({
+                    success: true,
+                    name,
+                    id: result.insertId || result.insertedId
+                });
+            } else {
+                console.error(`Failed to upload attribute "${name}":`, result.error);
+                results.push({
+                    success: false,
+                    name,
+                    message: result.error
+                });
+            }
+        } catch (error) {
+            console.error(`Error uploading attribute "${name}":`, error.message);
+            results.push({
+                success: false,
+                name,
+                message: error.message
+            });
+        }
+    }
+
+    const allSuccessful = results.every(r => r.success);
+    return {
+        success: allSuccessful,
+        message: 'Attribute upload process completed',
+        data: results
+    };
+};
+
+const editAttributeService = async (attributesArray, productID) => {
+    if (!Array.isArray(attributesArray) || attributesArray.length === 0) {
+        return {
+            success: false,
+            message: 'An array of attributes is required'
+        };
+    }
+
+    try {
+        await model.deleteVariationsByProductID(productID); // overwrite behavior
+
+        const results = [];
+
+        for (const attr of attributesArray) {
+            const { name, values } = attr;
+
+            if (!name || !Array.isArray(values) || values.length === 0) {
+                results.push({
+                    success: false,
+                    name,
+                    message: 'Invalid attribute format'
+                });
+                continue;
+            }
+
+            const result = await attributeModel.uploadAttribute({ name, values, productID });
+
+            if (result.success) {
+                results.push({
+                    success: true,
+                    name,
+                    id: result.insertId || result.insertedId
+                });
+            } else {
+                results.push({
+                    success: false,
+                    name,
+                    message: result.error
+                });
+            }
+        }
+
+        const allSuccessful = results.every(r => r.success);
+
+        return {
+            success: allSuccessful,
+            message: 'Attribute update process completed',
+            data: results
+        };
+    } catch (error) {
+        console.error('editAttributeService error:', error);
+        return {
+            success: false,
+            message: 'Unexpected error during attribute update',
+            error: error.message
+        };
+    }
+};
+
+const getProductCount = async (query) => {
+    const filters = [];
+    const values = [];
+
+    const allowedFilters = [
+        'name',
+        'regularPrice',
+        'salePrice',
+        'discountType',
+        'discountValue',
+        'type',
+        'categoryName',
+        'categoryID',
+        'status',
+        'offerID',
+        'overridePrice',
+        'tab1',
+        'tab2',
+        'productID',
+        'featuredImage'
+    ];
+
+    for (const key in query) {
+        if (allowedFilters.includes(key)) {
+            const value = query[key];
+            const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
+            filters.push(`${key} = ?`);
+            values.push(cleanedValue);
+        }
+    }
+
+    let countQuery = `SELECT COUNT(*) as total FROM products`;
+    if (filters.length > 0) {
+        countQuery += ` WHERE ${filters.join(' AND ')}`;
+    }
+
+    // console.log('📤 Count Query:', countQuery);
+    // console.log('📤 Count Values:', values);
+
+    const [rows] = await db.execute(countQuery, values);
+
+
+    return {
+        totalItems: rows[0]?.total || 0
+    };
+};
+
+const paginate = async ({ baseQuery, values, page, limit, db }) => {
+    const offset = (page - 1) * limit;
+
+    const [data] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+
+    return {
+        currentPage: page,
+        data
+    };
+};
+
+const fetchPaginatedProducts = async (query) => {
+    console.log(query);
+
+    let page = parseInt(query.page) || 1;
+    let limit = parseInt(query.limit) || 10;
+
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+
+    const filters = [];
+    const values = [];
+
+    const allowedFilters = [
+        'name', 'regularPrice', 'salePrice', 'discountType',
+        'discountValue', 'type', 'categoryName', 'categoryID',
+        'status', 'offerID', 'overridePrice', 'tab1', 'tab2',
+        'productID', 'featuredImage'
+    ];
+
+    const likeFields = ['name', 'type', 'categoryName', 'productID'];
+
+    for (const key in query) {
+        if (allowedFilters.includes(key)) {
+            let value = query[key];
+            const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
+
+            if (likeFields.includes(key)) {
+                filters.push(`${key} LIKE ?`);
+                values.push(`%${cleanedValue}%`);
+            } else {
+                filters.push(`${key} = ?`);
+                values.push(cleanedValue);
+            }
+        }
+    }
+
+    let baseQuery = `SELECT * FROM products`;
+
+    if (filters.length > 0) {
+        baseQuery += ` WHERE ${filters.join(' AND ')}`;
+    }
+
+    baseQuery += ` ORDER BY createdAt DESC`;
+
+    console.log('🧪 baseQuery:', baseQuery);
+    console.log('🧪 values:', values);
+
+    const result = await paginate({
+        baseQuery,
+        values,
+        page,
+        limit,
+        db
+    });
+
+    return result;
+};
+const getProductDetails = async (productID) => {
+    return await model.getProductWithVariations(productID);
+};
+
+
+
+module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap };

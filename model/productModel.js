@@ -1,5 +1,13 @@
 const db = require('../utils/dbconnect')
 
+const getFilteredProductQuery = (filters, values) => {
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const baseQuery = `SELECT * FROM products ${whereClause} ORDER BY createdAt DESC`;
+    const countQuery = `SELECT COUNT(*) AS total FROM products ${whereClause}`;
+    return { baseQuery, countQuery, values };
+};
+
+
 const uploadProduct = async ({
     name,
     description,
@@ -16,8 +24,12 @@ const uploadProduct = async ({
     tab1,
     tab2,
     productID,
-    featuredImage
+    featuredImage,
+    attributes
 }) => {
+    const safeString = (str) =>
+        typeof str === 'string' ? str.replace(/'/g, "''") : str;
+
     const query = `
         INSERT INTO products (
             name,
@@ -35,30 +47,31 @@ const uploadProduct = async ({
             tab1,
             tab2,
             productID,
-            featuredImage
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ,? ,?, ?, ?, ?, ?, ?, ?,?)
+            featuredImage,
+            productAttributes
+        ) VALUES (
+            '${safeString(name)}',
+            '${safeString(description)}',
+            ${regularPrice},
+            ${salePrice},
+            '${safeString(discountType)}',
+            ${discountValue},
+            '${safeString(type)}',
+            '${safeString(categoryName || 'No Category')}',
+            '${safeString(categoryID || '0')}',
+            '${safeString(status || 'In Stock')}',
+            '${safeString(offerID)}',
+            '${safeString(overridePrice || 'null')}',
+            '${safeString(tab1)}',
+            '${safeString(tab2)}',
+            '${safeString(productID)}',
+            '${safeString(JSON.stringify(featuredImage))}',
+            '${safeString(JSON.stringify(attributes))}'
+        );
     `;
 
     try {
-        const [result] = await db.query(query, [
-            name,
-            description,
-            regularPrice,
-            salePrice,
-            discountType,
-            discountValue,
-            type,
-            categoryName,
-            categoryID,
-            status,
-            offerID,
-            overridePrice,
-            tab1,
-            tab2,
-            productID,
-            JSON.stringify(featuredImage)
-        ]);
-
+        const [result] = await db.query(query);
         return {
             success: true,
             message: 'Product inserted successfully',
@@ -73,6 +86,43 @@ const uploadProduct = async ({
         };
     }
 };
+const deleteAttributesByProductID = async (productID) => {
+    return db.query(`DELETE FROM attributes WHERE productID = ?`, [productID]);
+};
+
+const editProductModel = async (product) => {
+    const {
+        name, description, regularPrice, salePrice, discountType, discountValue,
+        type, categoryName, categoryID, status, offerID, overridePrice, tab1, tab2,
+        productID, featuredImage, attributes
+    } = product;
+
+    const query = `
+        UPDATE products SET
+            name = ?, description = ?, regularPrice = ?, salePrice = ?,
+            discountType = ?, discountValue = ?, type = ?, categoryName = ?, categoryID = ?,
+            status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
+            featuredImage = ?, productAttributes = ?
+        WHERE productID = ?
+    `;
+
+    const values = [
+        name, description, regularPrice, salePrice, discountType, discountValue,
+        type, categoryName || 'No Category', categoryID || '0',
+        status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
+        JSON.stringify(featuredImage), JSON.stringify(attributes),
+        productID
+    ];
+
+    try {
+        await db.query(query, values);
+        return { success: true, message: 'Product updated successfully' };
+    } catch (error) {
+        console.error('Error updating product:', error);
+        return { success: false, message: 'Failed to update product', error: error.message };
+    }
+};
+
 
 
 const uploadVariations = async ({
@@ -82,7 +132,8 @@ const uploadVariations = async ({
     variationPrice,
     variationStock,
     variationValues,
-    productID
+    productID,
+    variationSalePrice
 }) => {
     const query = `
         INSERT INTO variations (
@@ -92,8 +143,9 @@ const uploadVariations = async ({
             variationPrice, 
             variationStock, 
             variationValues, 
-            productID
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            productID,
+            variationSalePrice
+        ) VALUES (?, ?, ?, ?, ?, ?, ?,?)
     `;
 
     try {
@@ -104,7 +156,8 @@ const uploadVariations = async ({
             variationPrice,
             variationStock,
             JSON.stringify(variationValues),
-            productID
+            productID,
+            variationSalePrice
         ]);
 
         return {
@@ -124,7 +177,31 @@ const uploadVariations = async ({
     }
 };
 
+const checkIfVariationIDExists = async (variationID) => {
+    const [rows] = await db.query(
+        'SELECT variationID FROM variations WHERE variationID = ?',
+        [variationID]
+    );
+    return rows.length > 0;
+};
+const getProductWithVariations = async (productID) => {
+    const [productRows] = await db.query(`SELECT * FROM products WHERE productID = ? LIMIT 1`, [productID]);
+
+    if (productRows.length === 0) return null;
+
+    const product = productRows[0];
+
+    const [variationRows] = await db.query(`SELECT * FROM variations WHERE productID = ?`, [productID]);
+
+    product.variations = variationRows;
+
+    return product;
+};
+const deleteVariationsByProductID = async (productID) => {
+    return db.query(`DELETE FROM variations WHERE productID = ?`, [productID]);
+};
 
 
 
-module.exports = { uploadVariations, uploadProduct }
+
+module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, editProductModel, deleteAttributesByProductID, }
