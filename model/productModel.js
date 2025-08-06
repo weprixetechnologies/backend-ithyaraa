@@ -16,16 +16,15 @@ const uploadProduct = async ({
     discountType,
     discountValue,
     type,
-    categoryName,
-    categoryID,
     status,
-    offerID,
+    offerId,
     overridePrice,
     tab1,
     tab2,
     productID,
     featuredImage,
-    attributes
+    attributes,
+    categories
 }) => {
     const safeString = (str) =>
         typeof str === 'string' ? str.replace(/'/g, "''") : str;
@@ -39,8 +38,6 @@ const uploadProduct = async ({
             discountType,
             discountValue,
             type,
-            categoryName,
-            categoryID,
             status,
             offerID,
             overridePrice,
@@ -48,7 +45,8 @@ const uploadProduct = async ({
             tab2,
             productID,
             featuredImage,
-            productAttributes
+            productAttributes,
+            categories
         ) VALUES (
             '${safeString(name)}',
             '${safeString(description)}',
@@ -57,16 +55,15 @@ const uploadProduct = async ({
             '${safeString(discountType)}',
             ${discountValue},
             '${safeString(type)}',
-            '${safeString(categoryName || 'No Category')}',
-            '${safeString(categoryID || '0')}',
             '${safeString(status || 'In Stock')}',
-            '${safeString(offerID)}',
+            '${safeString(offerId)}',
             '${safeString(overridePrice || 'null')}',
             '${safeString(tab1)}',
             '${safeString(tab2)}',
             '${safeString(productID)}',
             '${safeString(JSON.stringify(featuredImage))}',
-            '${safeString(JSON.stringify(attributes))}'
+            '${safeString(JSON.stringify(attributes))}',
+            '${safeString(JSON.stringify(categories))}'
         );
     `;
 
@@ -93,24 +90,24 @@ const deleteAttributesByProductID = async (productID) => {
 const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
-        type, categoryName, categoryID, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes
+        type, status, offerID, overridePrice, tab1, tab2,
+        productID, featuredImage, attributes, categories
     } = product;
 
     const query = `
         UPDATE products SET
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
-            discountType = ?, discountValue = ?, type = ?, categoryName = ?, categoryID = ?,
+            discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            featuredImage = ?, productAttributes = ?
+            featuredImage = ?, productAttributes = ?, categories = ?
         WHERE productID = ?
     `;
 
     const values = [
         name, description, regularPrice, salePrice, discountType, discountValue,
-        type, categoryName || 'No Category', categoryID || '0',
+        type,
         status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
-        JSON.stringify(featuredImage), JSON.stringify(attributes),
+        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories),
         productID
     ];
 

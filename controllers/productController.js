@@ -39,9 +39,6 @@ const addProduct = async (req, res) => {
                 }
             }
         }
-
-        // 3. Upload Featured Images
-        const featuredImage = payload.featuredImage;
        
         // 4. Upload Product Core Data
         const uploadProduct = await model.uploadProduct({ ...payload, productID });
@@ -138,6 +135,8 @@ const addProduct = async (req, res) => {
 };
 
 const editProduct = async (req, res) => {
+    console.log(req.body);
+    
     try {
         const payload = req.body;
         const productID = payload.productID;

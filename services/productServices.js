@@ -384,7 +384,6 @@ const paginate = async ({ baseQuery, values, page, limit, db }) => {
         data
     };
 };
-
 const fetchPaginatedProducts = async (query) => {
     console.log(query);
 
@@ -399,19 +398,26 @@ const fetchPaginatedProducts = async (query) => {
 
     const allowedFilters = [
         'name', 'regularPrice', 'salePrice', 'discountType',
-        'discountValue', 'type', 'categoryName', 'categoryID',
-        'status', 'offerID', 'overridePrice', 'tab1', 'tab2',
-        'productID', 'featuredImage'
+        'discountValue', 'type', 'status', 'offerID',
+        'overridePrice', 'tab1', 'tab2', 'productID',
+        'featuredImage', 'categoryID', 'categoryName'
     ];
 
-    const likeFields = ['name', 'type', 'categoryName', 'productID'];
+    const likeFields = ['name', 'type', 'productID'];
 
     for (const key in query) {
         if (allowedFilters.includes(key)) {
             let value = query[key];
             const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
 
-            if (likeFields.includes(key)) {
+            if (key === 'categoryID') {
+                filters.push(`JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+                values.push(Number(cleanedValue));
+            } else if (key === 'categoryName') {
+                // Use LIKE on JSON_EXTRACT to allow partial match
+                filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
+                values.push(`%${cleanedValue}%`);
+            } else if (likeFields.includes(key)) {
                 filters.push(`${key} LIKE ?`);
                 values.push(`%${cleanedValue}%`);
             } else {
@@ -442,6 +448,8 @@ const fetchPaginatedProducts = async (query) => {
 
     return result;
 };
+
+
 const getProductDetails = async (productID) => {
     return await model.getProductWithVariations(productID);
 };
