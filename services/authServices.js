@@ -1,90 +1,183 @@
-const argon2 = require('argon2')
-const authModel = require('./../model/authModel')
+const userModel = require("../model/authModel.js");
+const tokenUtils = require('./../utils/tokenUtils.js')
+const { generateUID } = require('./../utils/uidUtils.js')
+const { generateAccessToken, generateRefreshToken } = require('./../utils/tokenUtils.js')
+const sessionModel = require('./../model/sessionModel.js')
+const argon = require('argon2')
 const jwt = require('jsonwebtoken')
 
-const generateAccessToken = (payload) => {
-    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '30m' });
-};
+const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.JWT_SECRET;
 
-const generateRefreshToken = (payload) => {
-    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-};
+const register = async (data) => {
+    const { username, emailID, phonenumber, deviceInfo, name, password, role } = data;
 
-const hashPassword = (password) => {
-    const hashedPass = argon2.hash(password)
-    return hashedPass;
-}
-
-const verifyAccessToken = (token) => {
-    try {
-        const payload = jwt.verify(token, process.env.JWT_SECRET);
-        return {
-            valid: true,
-            payload
-        };
-    } catch (err) {
-        return {
-            valid: false,
-            error: err.message
-        };
-    }
-};
-
-const decodePassword = (hashed, password) => {
-    const decoded = argon2.verify(hashed, password)
-    return decoded;
-}
-const generateUID = async () => {
-    const prefix = 'UITHY';
-    const length = 6;
-
-    const randomString = () => Math.random().toString(36).substring(2, 2 + length).toUpperCase();
-
-    let uid;
-    let exists = true;
-
-    while (exists) {
-        uid = prefix + randomString();
-        exists = await authModel.checkUidExists(uid);
+    if (!username || !emailID || !phonenumber || !password) {
+        const err = new Error("Missing required fields");
+        err.status = 400;
+        throw err;
     }
 
-    return uid;
+    // Check if email or phone exists
+    const existing = await userModel.findByEmailOrPhone(emailID, phonenumber);
+    if (existing.length > 0) {
+        const err = new Error("Email or phone already exists. Please change them.");
+        err.status = 400;
+        throw err;
+    }
+
+    // Hash password
+    const hashedPassword = await argon.hash(password);
+
+    // Generate UID
+    const uid = generateUID();
+
+    // Fallback for deviceInfo
+    const safeDeviceInfo = deviceInfo && deviceInfo.trim() ? deviceInfo : "unknown-device";
+
+    // Insert user
+    await userModel.createUser({
+        uid,
+        username,
+        emailID,
+        phonenumber,
+        deviceInfo: safeDeviceInfo,
+        name,
+        password: hashedPassword,
+        role: role || "user"
+    });
+
+    // Create tokens
+    const accessToken = tokenUtils.generateAccessToken({ uid, username, emailID, role });
+    const refreshToken = tokenUtils.generateRefreshToken({ uid, username, emailID, role });
+
+    // Store session
+    await userModel.createSession({
+        username,
+        emailID,
+        phonenumber,
+        refreshToken,
+        deviceInfo: safeDeviceInfo
+    });
+
+    return { accessToken, refreshToken };
 };
 
-const refreshUserSession = async (oldRefreshToken) => {
-    let decoded;
+const loginUser = async (email, password, deviceInfo) => {
+    // 1. Fetch user from DB
+    console.log(email);
 
+    const user = await userModel.findUserByEmail(email);
+    if (!user) {
+        console.log('Error 7');
+
+        throw new Error('Invalid email or password');
+    }
+
+    // 2. Validate password
+    const isPasswordValid = await argon.verify(user.password, password);
+    if (!isPasswordValid) {
+        console.log('Error 8');
+
+        throw new Error('Invalid password');
+    }
+
+    // 3. Create JWT payload
+    const payload = { userID: user.id, email: user.emailID, role: user.role };
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+    console.log(refreshToken);
+
+    // 4. Remove old session if exists
+    await sessionModel.deleteSessionByEmail(user.emailID);
+
+    // 5. Create expiry date for refresh token (from .env value in days)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + parseInt(process.env.REFRESH_TOKEN_EXPIRY, 10));
+
+    // 6. Save new session
+    await sessionModel.createSession({
+        username: user.username,
+        email: user.emailID,
+        phonenumber: user.phonenumber,
+        refreshToken: refreshToken,
+        deviceInfo: deviceInfo || 'No Info',
+        expiry: expiryDate || 'No Info'
+    });
+    return { accessToken, refreshToken, user };
+};
+
+const verifyToken = (token, secret) => {
     try {
-        decoded = jwt.verify(oldRefreshToken, process.env.JWT_SECRET);
-    } catch (err) {
+        return jwt.verify(token, secret);
+    } catch {
+        return null;
+    }
+}
+const refreshTokens = async (refreshToken) => {
+    console.log('Received refresh token:', refreshToken);
+
+    const decoded = verifyToken(refreshToken, REFRESH_TOKEN_SECRET);
+    if (!decoded) {
+        console.log('Error 1: Invalid or expired refresh token');
         throw new Error('Invalid or expired refresh token');
     }
-    console.log(decoded);
+    console.log('Decoded refresh token payload:', decoded);
 
     const email = decoded.email;
-    const session = await authModel.getSessionByEmail(email);
+    console.log('Extracted email from token:', email);
 
-    if (!session || session.refreshToken !== oldRefreshToken) {
-        throw new Error('Session not found or token mismatch');
+    const user = await userModel.findUserByEmail(email);
+    if (!user) {
+        console.log('Error 2: No user found with email:', email);
+        throw new Error('NO USER EXIST');
     }
+    console.log('User found:', user);
 
-    const payload = { uid: decoded.uid, email: decoded.email };
-    const accessToken = generateAccessToken(payload);
-    const newRefreshToken = generateRefreshToken(payload);
+    const session = await sessionModel.findSessionByEmail(email);
+    if (!session) {
+        console.log('Error 3: No session found for email:', email);
+        throw new Error('PLEASE LOGIN AGAIN');
+    }
+    console.log('Session found:', session);
 
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
-    const formattedExpiry = expiryDate.toISOString().slice(0, 19).replace('T', ' ');
+    // Uncomment if you want to enforce strict refresh token matching
+    /*
+    if (session.refreshToken !== refreshToken) {
+        console.log('Error 4: Refresh token mismatch');
+        console.log('Session token:', session.refreshToken);
+        console.log('Provided token:', refreshToken);
+        throw new Error('Invalid session refresh token');
+    }
+    */
 
-    await authModel.updateSessionTokens(email, newRefreshToken, formattedExpiry);
+    // Strip out exp and iat before signing again
+    const { exp, iat, ...payload } = decoded;
+    console.log('Payload for new tokens:', payload);
 
-    return {
-        accessToken,
-        newRefreshToken
-    };
+    const newAccessToken = jwt.sign(
+        { ...payload },
+        ACCESS_TOKEN_SECRET,
+        { expiresIn: '15m' }
+    );
+    console.log('New access token generated');
+
+    const newRefreshToken = jwt.sign(
+        { ...payload },
+        REFRESH_TOKEN_SECRET,
+        { expiresIn: '7d' }
+    );
+    console.log('New refresh token generated:', newRefreshToken);
+
+    const updated = await sessionModel.updateRefreshToken(email, newRefreshToken);
+    if (!updated) {
+        console.log('Error 5: Failed to update refresh token for email:', email);
+        throw new Error('Failed to update refresh token');
+    }
+    console.log('Session refresh token updated successfully');
+
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 };
 
-module.exports = {
-    generateAccessToken,
-    generateRefreshToken, hashPassword, decodePassword, generateUID, refreshUserSession, verifyAccessToken
-};
+
+module.exports = { register, loginUser, refreshTokens }

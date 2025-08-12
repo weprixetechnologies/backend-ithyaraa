@@ -71,6 +71,8 @@ const editOffer = async (req, res) => {
     try {
         const { offerID } = req.params;
         const updatedData = req.body;
+        console.log(updatedData);
+
 
         if (!offerID) {
             return res.status(400).json({ success: false, message: 'offerID param is required' });

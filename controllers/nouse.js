@@ -1,5 +1,5 @@
-const adminAuthService = require('./../services/adminAuthServices')
-const modelNormal = require('./../model/authModel')
+const adminAuthService = require('../services/adminAuthServices')
+const modelNormal = require('../model/authModel')
 
 const adminAuthRegister = async (req, res) => {
     try {

@@ -15,6 +15,8 @@ const offerRouter = require('./router/admin/offerAdminRouter')
 const categoryRouter = require('./router/admin/categoryRouter')
 const commonRouter = require('./router/commonRouter')
 const couponsRouter = require('./router/admin/couponsRouter')
+const makeComboRouter = require('./router/admin/makeComboRouter')
+const comboRouter = require('./router/admin/comboRouter')
 
 // CORS setup (replace with your actual frontend domain)
 app.use(cors())
@@ -28,6 +30,8 @@ app.use('/api/products', productRouter)
 app.use('/api/offer', offerRouter)
 app.use('/api/categories', categoryRouter)
 app.use('/api/coupons', couponsRouter)
+app.use('/api/make-combo', makeComboRouter)
+app.use('/api/combo', comboRouter)
 
 
 // ADMIN ROUTE

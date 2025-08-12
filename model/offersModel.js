@@ -82,7 +82,8 @@ const updateOfferByID = async (offerID, data) => {
             buyCount,
             getCount,
             offerBanner,
-            offerMobileBanner
+            offerMobileBanner,
+            products
         } = data;
 
         const [result] = await db.query(
@@ -92,9 +93,10 @@ const updateOfferByID = async (offerID, data) => {
                  buyCount = ?, 
                  getCount = ?, 
                  offerBanner = ?, 
-                 offerMobileBanner = ? 
+                 offerMobileBanner = ?,
+                 products = ?
              WHERE offerID = ?`,
-            [offerName, offerType, buyCount, getCount, offerBanner, offerMobileBanner, offerID]
+            [offerName, offerType, buyCount, getCount, offerBanner, offerMobileBanner, products, offerID]
         );
 
         return {

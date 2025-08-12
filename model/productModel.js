@@ -24,7 +24,8 @@ const uploadProduct = async ({
     productID,
     featuredImage,
     attributes,
-    categories
+    categories,
+    brand
 }) => {
     const safeString = (str) =>
         typeof str === 'string' ? str.replace(/'/g, "''") : str;
@@ -46,7 +47,8 @@ const uploadProduct = async ({
             productID,
             featuredImage,
             productAttributes,
-            categories
+            categories,
+            brand
         ) VALUES (
             '${safeString(name)}',
             '${safeString(description)}',
@@ -63,7 +65,8 @@ const uploadProduct = async ({
             '${safeString(productID)}',
             '${safeString(JSON.stringify(featuredImage))}',
             '${safeString(JSON.stringify(attributes))}',
-            '${safeString(JSON.stringify(categories))}'
+            '${safeString(JSON.stringify(categories))}',
+             '${safeString(brand)}'
         );
     `;
 
@@ -83,6 +86,7 @@ const uploadProduct = async ({
         };
     }
 };
+
 const deleteAttributesByProductID = async (productID) => {
     return db.query(`DELETE FROM attributes WHERE productID = ?`, [productID]);
 };
@@ -91,7 +95,7 @@ const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes, categories
+        productID, featuredImage, attributes, categories, brand
     } = product;
 
     const query = `
@@ -99,7 +103,7 @@ const editProductModel = async (product) => {
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            featuredImage = ?, productAttributes = ?, categories = ?
+            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?
         WHERE productID = ?
     `;
 
@@ -107,7 +111,7 @@ const editProductModel = async (product) => {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type,
         status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
-        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories),
+        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories), brand,
         productID
     ];
 

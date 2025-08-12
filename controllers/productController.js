@@ -6,7 +6,7 @@ const service = require('./../services/productServices');
 const addProduct = async (req, res) => {
     try {
         const payload = req.body;
-    console.log(payload);
+        console.log(payload);
 
         if (!payload || typeof payload !== 'object') {
             return res.status(400).json({ message: 'Invalid payload' });
@@ -257,6 +257,8 @@ const getProductPageCount = async (req, res) => {
       res.status(500).json({ success: false, message: 'Server error' });
     }
 };
+
+
 const getProductDetails = async (req, res) => {
     const { productID } = req.params;
 

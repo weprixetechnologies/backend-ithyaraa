@@ -332,47 +332,48 @@ const getProductCount = async (query) => {
     const values = [];
 
     const allowedFilters = [
-        'name',
-        'regularPrice',
-        'salePrice',
-        'discountType',
-        'discountValue',
-        'type',
-        'categoryName',
-        'categoryID',
-        'status',
-        'offerID',
-        'overridePrice',
-        'tab1',
-        'tab2',
-        'productID',
-        'featuredImage'
+        'name', 'regularPrice', 'salePrice', 'discountType',
+        'discountValue', 'type', 'status', 'offerID',
+        'overridePrice', 'tab1', 'tab2', 'productID',
+        'featuredImage', 'categoryID', 'categoryName'
     ];
 
+    const likeFields = ['name', 'type', 'productID'];
+
     for (const key in query) {
-        if (allowedFilters.includes(key)) {
-            const value = query[key];
-            const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
+        if (!allowedFilters.includes(key)) continue;
+
+        let value = query[key];
+        const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
+
+        if (key === 'categoryID') {
+            filters.push(`JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+            values.push(Number(cleanedValue));
+        } else if (key === 'categoryName') {
+            filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
+            values.push(`%${cleanedValue}%`);
+        } else if (likeFields.includes(key)) {
+            filters.push(`${key} LIKE ?`);
+            values.push(`%${cleanedValue}%`);
+        } else {
             filters.push(`${key} = ?`);
             values.push(cleanedValue);
         }
     }
 
     let countQuery = `SELECT COUNT(*) as total FROM products`;
+
     if (filters.length > 0) {
         countQuery += ` WHERE ${filters.join(' AND ')}`;
     }
 
-    // console.log('📤 Count Query:', countQuery);
-    // console.log('📤 Count Values:', values);
-
     const [rows] = await db.execute(countQuery, values);
-
 
     return {
         totalItems: rows[0]?.total || 0
     };
 };
+
 
 const paginate = async ({ baseQuery, values, page, limit, db }) => {
     const offset = (page - 1) * limit;
@@ -403,7 +404,7 @@ const fetchPaginatedProducts = async (query) => {
         'featuredImage', 'categoryID', 'categoryName'
     ];
 
-    const likeFields = ['name', 'type', 'productID'];
+    const likeFields = ['name', 'productID'];
 
     for (const key in query) {
         if (allowedFilters.includes(key)) {

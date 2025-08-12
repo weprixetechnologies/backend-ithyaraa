@@ -1,12 +1,11 @@
 const express = require('express')
 const authRouter = express.Router()
-const adminController = require('./../../controllers/adminAuthController')
+const adminController = require('../../controllers/nouse')
 const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 
-authRouter.post('/register', authAdminMiddleware.isRegistered, adminController.adminAuthRegister)
+authRouter.post('/register', authAdminMiddleware.verifyAccessToken, adminController.adminAuthRegister)
 
 authRouter.post('/login', (req, res) => {
-
 })
 
 module.exports = authRouter 

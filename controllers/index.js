@@ -3,9 +3,12 @@ const commonService = require('../services/index');
 const getCountController = async (req, res) => {
     const { dataType } = req.query;
     console.log(dataType);
+    console.log(req.query);
+
 
 
     if (!dataType) {
+        console.log(req.query);
         return res.status(400).json({ success: false, message: 'tableName is required' });
     }
 
@@ -14,6 +17,7 @@ const getCountController = async (req, res) => {
     delete filters.dataType;
 
     const result = await commonService.getCountService({ tableName: dataType, filters });
+    console.log(result);
 
     if (result.success) {
         res.status(200).json(result);

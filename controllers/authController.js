@@ -1,154 +1,82 @@
-const auth = require('./../model/authModel')
 const authService = require('./../services/authServices')
 
-const createSession = async (req, res) => {
-    console.log('Req Started');
-
+const register = async (req, res) => {
     try {
-        const sessionData = {
-            session_id: 3,
-            username: 'Bonnet Singh',
-            email: 'bunny@honey.com',
-            phonenumber: '7654edfv',
-            refreshToken: 'REFRESH_TOKEN1',
-            deviceInfo: 'MACINTOSH',
-            expiry: '2025-08-31 23:59:59'
-        };
+        const { accessToken, refreshToken } = await authService.register(req.body);
 
-        const result = await auth.addSessionDb(sessionData);
-        res.status(201).json({ message: 'Session added successfully', insertId: result.insertId });
-    } catch (error) {
-        console.error('Error in createSession:', error);
-        res.status(500).json({ message: 'Internal Server Error', error: error.message });
-    }
-};
-
-const registerUser = async (req, res) => {
-    console.log('Register Route Working');
-    console.log(req.body);
-
-    try {
-        const { email, password, name, phonenumber, deviceInfo } = req.body;
-
-        // 1. Check if user already exists
-        const isExist = await auth.findUserExist(email);
-        if (isExist) {
-            return res.status(409).json({ message: 'User already exists' });
-        }
-
-        // 2. Generate UID & hash password
-        const uid = await authService.generateUID();
-        const hashedPassword = await authService.hashPassword(password);
-
-        // 3. Create user in database
-        const newUser = await auth.createUser({ name, email, password: hashedPassword, uid });
-
-        // 4. Generate tokens
-        const payload = { uid, email };
-        const accessToken = authService.generateAccessToken(payload);
-        const refreshToken = authService.generateRefreshToken(payload);
-
-        // 5. Create session in DB
-        const sessionData = {
-            session_id: null, // use auto-increment in DB
-            username: name,
-            email: email,
-            phonenumber: phonenumber || 0,
-            refreshToken: refreshToken,
-            deviceInfo: deviceInfo || req.headers['user-agent'],
-            expiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
-        };
-
-        const sessionResult = await auth.addSessionDb(sessionData);
-
-        // 6. Return response
-        return res.status(201).json({
-            message: 'User registered successfully',
-            user: newUser,
-            tokens: {
-                accessToken,
-                refreshToken
-            },
-            sessionId: sessionResult.insertId
-        });
-
-    } catch (error) {
-        console.error('Error registering user:', error);
-        return res.status(500).json({ message: 'Internal server error' });
-    }
-};
-
-const loginUser = async (req, res) => {
-    const { email, password } = req.body;
-
-    try {
-        const user = await auth.findUserExist(email);
-        if (!user) return res.status(404).json({ message: 'User not found' });
-        console.log('✅ User Found:', user);
-
-        const isPasswordValid = await authService.decodePassword(user.password, password);
-        if (!isPasswordValid) return res.status(401).json({ message: 'Invalid credentials' });
-        console.log('✅ Password Matched');
-
-        const payload = { uid: user.uid, email: user.emailID };
-        console.log(payload);
-        const accessToken = authService.generateAccessToken(payload);
-        const refreshToken = authService.generateRefreshToken(payload);
-        console.log('✅ Tokens Generated:', { accessToken, refreshToken });
-
-        // Set session expiry (30 days from now)
-        const expiryDate = new Date();
-        expiryDate.setDate(expiryDate.getDate() + 30);
-
-        const sessionData = {
-            username: user.name,
-            email: user.emailID,
-            phonenumber: user.phonenumber || '0',
-            refreshToken,
-            deviceInfo: req.headers['user-agent'],
-            expiry: expiryDate.toISOString().slice(0, 19).replace('T', ' ')
-        };
-
-        // ✅ Delete existing session if any
-        await auth.deleteSessionByEmail(user.emailID);
-
-        // ✅ Create new session
-        await auth.createSession(sessionData);
-        console.log('✅ Session Replaced');
-
-        res.status(200).json({
-            message: 'Login successful',
+        res.status(201).json({
+            message: "User registered successfully",
             accessToken,
             refreshToken
         });
-    } catch (err) {
-        console.error('❌ Login Error:', err);
-        res.status(500).json({ message: 'Internal Server Error' });
+    } catch (error) {
+        console.error(error);
+        res.status(error.status || 500).json({ message: error.message || "Server error" });
     }
 };
 
-const refreshTokenController = async (req, res) => {
-    const refreshToken = req.headers['authorization'];
+
+const login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        console.log(req.body);
+        const deviceInfo = req.headers['user-agent'] || 'Unknown device';
+
+
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
+
+        const { accessToken, refreshToken, user } = await authService.loginUser(email, password, deviceInfo);
+        console.log({
+            accessToken, refreshToken, user
+        });
+
+        res.json({
+            message: 'Login successful',
+            user,
+            accessToken,
+            refreshToken
+        });
+    } catch (error) {
+        res.status(401).json({ message: error.message });
+    }
+};
+
+const refreshToken = async (req, res) => {
+    const { refreshToken } = req.body;
+
+    console.log('Received refresh token request:', refreshToken ? '[token present]' : '[no token]');
 
     if (!refreshToken) {
-        return res.status(401).json({ message: 'Refresh token missing' });
+        console.log('Error 6: No refresh token provided in request body');
+        return res.status(400).json({ message: 'Refresh token required' });
     }
 
     try {
-        const { accessToken, newRefreshToken } = await authService.refreshUserSession(refreshToken);
-
-        res.status(200).json({
-            message: 'Token refreshed',
-            accessToken,
-            refreshToken: newRefreshToken
-        });
-
+        const tokens = await authService.refreshTokens(refreshToken);
+        console.log('Token refresh successful, sending new tokens');
+        res.json(tokens);
     } catch (err) {
-        console.error('❌ Refresh error:', err.message);
-        return res.status(403).json({ message: err.message });
+        const msg = err.message || 'Internal server error';
+        console.log('Error during token refresh:', msg);
+
+        if (msg === 'NO USER EXIST') {
+            console.log('Responding with 404 - user not found');
+            return res.status(404).json({ message: msg });
+        }
+        if (msg === 'PLEASE LOGIN AGAIN' || msg === 'Invalid session refresh token') {
+            console.log('Responding with 401 - invalid session or token');
+            return res.status(401).json({ message: msg });
+        }
+        if (msg === 'Invalid or expired refresh token') {
+            console.log('Responding with 401 - invalid or expired refresh token');
+            return res.status(401).json({ message: msg });
+        }
+
+        console.log('Responding with 500 - internal server error');
+        res.status(500).json({ message: msg });
     }
 };
 
-
-
-module.exports = { createSession, registerUser, loginUser, refreshTokenController }
+module.exports = { register, login, refreshToken }

@@ -123,7 +123,16 @@ const fetchOfferCount = async (query) => {
 const updateOffer = async (offerID, updatedData) => {
     try {
         // Step 1: Update the offer in the DB
-        const result = await offerModel.updateOfferByID(offerID, updatedData);
+        const productIDs = Array.isArray(updatedData.products)
+            ? updatedData.products.map(p => typeof p === 'object' ? p.productID : p)
+            : [];
+
+        const payload = {
+            ...updatedData,
+            products: JSON.stringify(productIDs), // Store in `products` column
+        };
+
+        const result = await offerModel.updateOfferByID(offerID, payload);
 
         // Step 2: Clear offerID from all products that previously had this offer
         await offerModel.clearOfferIDFromProducts(offerID);
@@ -131,10 +140,7 @@ const updateOffer = async (offerID, updatedData) => {
         // Step 3: Assign offerID to new productIDs
         if (Array.isArray(updatedData.products)) {
             for (const product of updatedData.products) {
-                console.log(product);
-
                 await offerModel.updateProductOfferID(product, offerID);
-
             }
         }
 
@@ -150,6 +156,7 @@ const updateOffer = async (offerID, updatedData) => {
         };
     }
 };
+
 
 const fetchOfferDetails = async (offerID) => {
     const offer = await offerModel.getOfferByID(offerID);
