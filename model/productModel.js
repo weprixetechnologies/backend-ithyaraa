@@ -25,7 +25,8 @@ const uploadProduct = async ({
     featuredImage,
     attributes,
     categories,
-    brand
+    brand,
+    galleryImage
 }) => {
     const safeString = (str) =>
         typeof str === 'string' ? str.replace(/'/g, "''") : str;
@@ -48,7 +49,8 @@ const uploadProduct = async ({
             featuredImage,
             productAttributes,
             categories,
-            brand
+            brand,
+            galleryImage
         ) VALUES (
             '${safeString(name)}',
             '${safeString(description)}',
@@ -59,14 +61,15 @@ const uploadProduct = async ({
             '${safeString(type)}',
             '${safeString(status || 'In Stock')}',
             '${safeString(offerId)}',
-            '${safeString(overridePrice || 'null')}',
+            ${overridePrice === null || overridePrice === undefined ? 'NULL' : `'${safeString(overridePrice)}'`},
             '${safeString(tab1)}',
             '${safeString(tab2)}',
             '${safeString(productID)}',
             '${safeString(JSON.stringify(featuredImage))}',
             '${safeString(JSON.stringify(attributes))}',
-            '${safeString(JSON.stringify(categories))}',
-             '${safeString(brand)}'
+            ${categories === null || categories === undefined ? 'NULL' : `'${safeString(JSON.stringify(categories))}'`},
+            '${safeString(brand)}',
+            '${safeString(JSON.stringify(galleryImage))}'
         );
     `;
 
@@ -95,15 +98,16 @@ const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes, categories, brand
+        productID, featuredImage, attributes, categories, brand, galleryImage
     } = product;
+console.log(categories);
 
     const query = `
         UPDATE products SET
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?
+            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?
         WHERE productID = ?
     `;
 
@@ -111,8 +115,8 @@ const editProductModel = async (product) => {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type,
         status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
-        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories), brand,
-        productID
+        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories), brand, JSON.stringify(galleryImage),
+        productID,  
     ];
 
     try {

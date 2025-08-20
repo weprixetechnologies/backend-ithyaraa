@@ -1,4 +1,5 @@
 const userModel = require("../model/authModel.js");
+const { addSendEmailJob } = require('../queue/emailProducer.js');
 const tokenUtils = require('./../utils/tokenUtils.js')
 const { generateUID } = require('./../utils/uidUtils.js')
 const { generateAccessToken, generateRefreshToken } = require('./../utils/tokenUtils.js')
@@ -9,10 +10,11 @@ const jwt = require('jsonwebtoken')
 const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.JWT_SECRET;
 
-const register = async (data) => {
-    const { username, emailID, phonenumber, deviceInfo, name, password, role } = data;
 
-    if (!username || !emailID || !phonenumber || !password) {
+const register = async (data) => {
+    const {username, emailID, phonenumber, deviceInfo, name, password, role } = data;
+
+    if (!emailID || !phonenumber || !password || !name) {
         const err = new Error("Missing required fields");
         err.status = 400;
         throw err;
@@ -24,6 +26,33 @@ const register = async (data) => {
         const err = new Error("Email or phone already exists. Please change them.");
         err.status = 400;
         throw err;
+    }
+
+    // Ensure unique username
+    let finalUsername = username && username.trim() ? username.trim() : null;
+    if (finalUsername) {
+        const userExists = await userModel.findByUsername(finalUsername);
+        if (userExists) {
+            finalUsername = null; // force auto-generate
+        }
+    }
+    if (!finalUsername) {
+        // Auto-generate username from name
+        let base = name.replace(/\s+/g, '').toLowerCase();
+        let suffix = 1;
+        let candidate;
+        do {
+            candidate = `${base}_${String(suffix).padStart(2, '0')}`;
+            const exists = await userModel.findByUsername(candidate);
+            if (!exists) {
+                finalUsername = candidate;
+                break;
+            }
+            suffix++;
+        } while (suffix < 1000); // avoid infinite loop
+        if (!finalUsername) {
+            throw new Error("Could not generate unique username");
+        }
     }
 
     // Hash password
@@ -38,7 +67,7 @@ const register = async (data) => {
     // Insert user
     await userModel.createUser({
         uid,
-        username,
+        username: finalUsername,
         emailID,
         phonenumber,
         deviceInfo: safeDeviceInfo,
@@ -48,16 +77,28 @@ const register = async (data) => {
     });
 
     // Create tokens
-    const accessToken = tokenUtils.generateAccessToken({ uid, username, emailID, role });
-    const refreshToken = tokenUtils.generateRefreshToken({ uid, username, emailID, role });
+    const accessToken = tokenUtils.generateAccessToken({ uid, username: finalUsername, emailID, role });
+    const refreshToken = tokenUtils.generateRefreshToken({ uid, username: finalUsername, emailID, role });
 
     // Store session
     await userModel.createSession({
-        username,
+        username: finalUsername,
         emailID,
         phonenumber,
         refreshToken,
         deviceInfo: safeDeviceInfo
+    });
+
+    // Send welcome email via queue
+    await addSendEmailJob({
+        to: emailID,
+        templateName: 'welcome',
+        variables: {
+            name,
+            username: finalUsername,
+            time: new Date().toLocaleString()
+        },
+        subject: 'Welcome to Ithyaraa!'
     });
 
     return { accessToken, refreshToken };

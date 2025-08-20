@@ -1,13 +1,11 @@
 //EXTERNAL
 require('dotenv').config();
 const express = require('express');
-const path = require('path');
 const app = express();
 const cors = require('cors')
 
 //Core Modules
-const appRoot = require('./utils/pathUtils');
-const userRouter = require(path.join(appRoot, 'router', 'user.js'));
+const userRouter = require('./router/usersRouter')
 const authRouter = require('./router/authRouter')
 const adminAuthRouter = require('./router/admin/authAdminRouter')
 const productRouter = require('./router/admin/productRouter')
@@ -17,6 +15,7 @@ const commonRouter = require('./router/commonRouter')
 const couponsRouter = require('./router/admin/couponsRouter')
 const makeComboRouter = require('./router/admin/makeComboRouter')
 const comboRouter = require('./router/admin/comboRouter')
+const addressRouter = require('./router/addressRouter')
 
 // CORS setup (replace with your actual frontend domain)
 app.use(cors())
@@ -32,6 +31,7 @@ app.use('/api/categories', categoryRouter)
 app.use('/api/coupons', couponsRouter)
 app.use('/api/make-combo', makeComboRouter)
 app.use('/api/combo', comboRouter)
+app.use('/api/address', addressRouter)
 
 
 // ADMIN ROUTE

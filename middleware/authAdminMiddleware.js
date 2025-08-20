@@ -6,7 +6,9 @@ const verifyAccessToken = (req, res, next) => {
         const token =
             req.headers?.authorization?.split(" ")[1]
 
-        console.log('Access Token', token);
+        console.log('Access Token 1', token);
+        console.log(req.params);
+        
 
         if (!token) {
             return res.status(401).json({ message: "Access token missing. Please login." });

@@ -195,3 +195,10 @@ REQUIREMENT - WHILE CREATING PRODUCT AND SELECTING THE PRODUCTS NEED 'GET /produ
 -- in the param, userID
 -- delete the session of the userID
 FRONTEND : - remove the accessID & refreshToken from the sessionStorage or the localstorage or the cookies
+
+
+<!-- TASK -->
+1. CREATE USER LOGIN - REGISTER PAGES (USER PANEL)
+2. CREATE CUSTOMISABLE PRODUCT - CREATE - LIST - EDIT
+3. DESIGN THE LOGIN - REGISTER - VERIFY EMAILS
+4. IMPLEMENT THE OTP FUNCTIONALITY

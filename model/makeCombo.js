@@ -16,12 +16,12 @@ const insertProduct = async (product) => {
         tab1,
         tab2,
         overridePrice,
-        offerID } = product;
+        offerID, galleryImage } = product;
 
     const query = `
         INSERT INTO products 
-        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status,  categories, tab1, tab2, overridePrice, offerID)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status,  categories, tab1, tab2, overridePrice, offerID, galleryImage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?,?)
     `;
     console.log('Product ', product);
 
@@ -29,7 +29,7 @@ const insertProduct = async (product) => {
         productID, name, description, type, JSON.stringify(featuredImage || []),
         regularPrice, salePrice, discountType, discountValue, status,
         JSON.stringify(categories || []),
-        tab1 || null, tab2 || null, overridePrice || null, offerID || null
+        tab1 || null, tab2 || null, overridePrice || null, offerID || null, JSON.stringify(galleryImage || [])
     ];
 
     await db.query(query, values);
@@ -70,7 +70,7 @@ const updateProduct = async (productID, data) => {
         'id', 'name', 'productID', 'description', 'regularPrice', 'salePrice',
         'discountType', 'discountValue', 'type', 'offerID', 'overridePrice',
         'tab1', 'tab2', 'featuredImage',
-        'categories'
+        'categories', 'galleryImage'
     ]);
 
     const fields = [];

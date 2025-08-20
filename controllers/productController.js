@@ -18,27 +18,7 @@ const addProduct = async (req, res) => {
             return res.status(500).json({ message: 'Failed to generate product ID' });
         }
 
-        // 2. Upload Gallery Images
-        const galleryImages = payload.galleryImage;
-        if (galleryImages != null) {
-            if (!Array.isArray(galleryImages)) {
-                return res.status(400).json({ message: '`galleryImages` must be an array or null' });
-            }
-
-            if (galleryImages.length > 0) {
-                const uploadImagesResult = await imageService.uploadImageMap({
-                    imageArray: galleryImages,
-                    identity: productID
-                });
-
-                if (!uploadImagesResult.success) {
-                    return res.status(500).json({
-                        message: 'Gallery image upload failed',
-                        error: uploadImagesResult.error || 'Unknown image error'
-                    });
-                }
-            }
-        }
+       
        
         // 4. Upload Product Core Data
         const uploadProduct = await model.uploadProduct({ ...payload, productID });
@@ -145,49 +125,7 @@ const editProduct = async (req, res) => {
             return res.status(400).json({ message: 'Invalid payload or missing productID' });
         }
 
-        // 1. Upload Gallery Images (if any)
-        const galleryImages = payload.galleryImage;
-        if (galleryImages != null) {
-            if (!Array.isArray(galleryImages)) {
-                return res.status(400).json({ message: '`galleryImage` must be an array or null' });
-            }
-
-            if (galleryImages.length > 0) {
-                const uploadImagesResult = await imageService.editImageMap({
-                    imageArray: galleryImages,
-                    identity: productID
-                });
-
-                if (!uploadImagesResult.success) {
-                    return res.status(500).json({
-                        message: 'Gallery image upload failed',
-                        error: uploadImagesResult.error || 'Unknown image error'
-                    });
-                }
-            }
-        }
-
-        // 2. Upload Featured Images (if any)
-        const featuredImage = payload.featuredImage;
-        if (featuredImage != null) {
-            if (!Array.isArray(featuredImage)) {
-                return res.status(400).json({ message: '`featuredImage` must be an array or null' });
-            }
-
-            if (featuredImage.length > 0) {
-                const uploadImagesResult = await imageService.editImageMap({
-                    imageArray: featuredImage,
-                    identity: productID
-                });
-
-                if (!uploadImagesResult.success) {
-                    return res.status(500).json({
-                        message: 'Featured image upload failed',
-                        error: uploadImagesResult.error || 'Unknown image error'
-                    });
-                }
-            }
-        }
+      
 
         // 3. Update Product Core Info
         const updateProduct = await model.editProductModel({ ...payload, productID });
@@ -223,11 +161,13 @@ const editProduct = async (req, res) => {
         }
 
         // ✅ 6. Final Success Response
-        return res.status(200).json({
-            success: true,
-            message: 'Product updated successfully',
-            productID
-        });
+       return res.status(200).json({
+    success: true,
+    message: 'Product updated successfully',
+    productID,
+    timestamp: new Date().toISOString() // e.g., "2025-08-13T12:34:56.789Z"
+});
+
 
     } catch (err) {
         console.error('Error in editProduct:', err);
@@ -239,8 +179,12 @@ const editProduct = async (req, res) => {
 };
 
 const getPaginatedProducts = async (req, res) => {
+    // console.log(req);
+    
     try {
       const result = await service.fetchPaginatedProducts(req.query);
+      console.log(result);
+      
       res.status(200).json({ success: true, ...result });
     } catch (error) {
       console.error('Error getting products:', error);

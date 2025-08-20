@@ -17,12 +17,13 @@ const createProduct = async (product) => {
         tab1,
         tab2,
         overridePrice,
+        galleryImage,
         offerID } = product;
 
     const query = `
         INSERT INTO products 
-        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status,  categories, tab1, tab2, overridePrice, offerID)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status,  categories, tab1, tab2, overridePrice,galleryImage, offerID)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
     `;
     console.log('Product ', product);
 
@@ -30,7 +31,7 @@ const createProduct = async (product) => {
         productID, name, description, type, JSON.stringify(featuredImage || []),
         regularPrice, salePrice, discountType, discountValue, status,
         JSON.stringify(categories || []),
-        tab1 || null, tab2 || null, overridePrice || null, offerID || null
+        tab1 || null, tab2 || null, overridePrice || null,JSON.stringify(galleryImage || []), offerID || null
     ];
 
     await db.query(query, values);
@@ -45,9 +46,10 @@ const getAllProducts = async () => {
     const [rows] = await db.query(`SELECT * FROM products`);
     return rows;
 };
+
 const addComboItem = async (comboID, product) => {
     await db.query(
-        `INSERT INTO combo_item (comboID, productID, name, featuredImage) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO combo_item (comboID, productID, productName, featuredImage) VALUES (?, ?, ?, ?)`,
         [
             comboID,
             product.productID,
@@ -90,7 +92,7 @@ async function updateComboProduct(productID, data) {
     const allowedColumns = [
         "name", "description", "type", "featuredImage", "regularPrice", "salePrice",
         "discountType", "discountValue", "status", "categories", "tab1", "tab2",
-        "overridePrice", "offerID"
+        "overridePrice", "offerID", "galleryImage"
     ];
 
     for (const key of Object.keys(data)) {

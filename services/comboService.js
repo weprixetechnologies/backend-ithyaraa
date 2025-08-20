@@ -69,6 +69,8 @@ async function editComboProduct(productID, updateData, productIDs) {
         for (const id of productIDs) {
             const productData = await comboModel.getProductByID(id);
             if (productData) {
+                console.log(`Adding product ${productData.productID} to combo ${productID}`);
+                
                 await comboModel.addComboItem(productID, {
                     productID: productData.productID,
                     name: productData.name,

@@ -43,12 +43,22 @@ const getCategoryByID = async (req, res) => {
     }
 };
 
-const updateCategory = async (req, res) => {
-    console.log(req.body);
+const editCategory = async (req, res) => {
+    const { categoryID } = req.params;
+    const { categoryName, slug, featuredImage, categoryBanner } = req.body;
+
+    if (!categoryID || !categoryName || !slug || !featuredImage) {
+        return res.status(400).json({ success: false, message: 'Required fields missing' });
+    }
 
     try {
-        const payload = req.body;
-        const result = await categoryService.updateCategory(payload);
+        const result = await categoryService.updateCategory({
+            categoryID,
+            categoryName,
+            slug,
+            featuredImage,
+            categoryBanner
+        });
 
         if (!result.success) {
             return res.status(400).json(result);
@@ -56,13 +66,13 @@ const updateCategory = async (req, res) => {
 
         res.json(result);
     } catch (error) {
-        console.error('updateCategory error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error'
-        });
+        console.error('editCategory error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 module.exports = {
-    postCategory, getCategories, getCategoryByID, updateCategory
+    postCategory,
+    getCategories,
+    getCategoryByID,
+    editCategory
 };

@@ -42,8 +42,14 @@ const createSession = async (session) => {
     );
 };
 
+
 const findUserByEmail = async (email) => {
     const [rows] = await db.query('SELECT * FROM users WHERE emailID = ?', [email]);
+    return rows[0] || null;
+};
+
+const findByUsername = async (username) => {
+    const [rows] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
     return rows[0] || null;
 };
 
@@ -63,4 +69,4 @@ const updateRefreshToken = async (email, newRefreshToken) => {
 
 
 
-module.exports = { updateRefreshToken, createSession, createUser, findByEmailOrPhone, findUserByEmail }
+module.exports = { updateRefreshToken, createSession, createUser, findByEmailOrPhone, findUserByEmail, findByUsername }

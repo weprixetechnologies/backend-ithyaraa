@@ -446,6 +446,8 @@ const fetchPaginatedProducts = async (query) => {
         limit,
         db
     });
+    // console.log(result);
+
 
     return result;
 };
