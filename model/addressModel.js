@@ -1,9 +1,11 @@
 const db = require('../utils/dbconnect');
 
 const addAddress = async (addressData) => {
+    console.log(addressData);
+
     const sql = `INSERT INTO address 
-      (uid, emailID, line1, line2, pincode, city, state, landmark, type, addressID)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      (uid, emailID, line1, line2, pincode, city, state, landmark, type, addressID, phonenumber)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`;
 
     const params = [
         addressData.uid,
@@ -15,7 +17,8 @@ const addAddress = async (addressData) => {
         addressData.state,
         addressData.landmark,
         addressData.type,
-        addressData.addressID
+        addressData.addressID,
+        addressData.phonenumber
     ];
 
     const [result] = await db.execute(sql, params);
@@ -34,5 +37,25 @@ const checkUserExists = async (uid) => {
     const [rows] = await db.execute(sql, [uid]);
     return rows.length > 0;
 }
+const getAddresses = async (uid, emailID) => {
+    let sql = `SELECT * FROM address WHERE 1=1`;
+    const params = [];
 
-module.exports = { addAddress, checkAddressIDExists, checkUserExists };
+    if (uid) {
+        sql += ` AND uid = ?`;
+        params.push(uid);
+    }
+    if (emailID) {
+        sql += ` AND emailID = ?`;
+        params.push(emailID);
+    }
+
+    const [rows] = await db.execute(sql, params);
+    return rows;
+};
+const deleteAddress = async (addressID) => {
+    const sql = `DELETE FROM address WHERE addressID = ?`;
+    const [result] = await db.execute(sql, [addressID]);
+    return result.affectedRows > 0; // true if deleted, false if not found
+};
+module.exports = { addAddress, checkAddressIDExists, checkUserExists, getAddresses, deleteAddress };

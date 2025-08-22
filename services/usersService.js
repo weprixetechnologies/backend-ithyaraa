@@ -5,7 +5,6 @@ const jwt = require('jsonwebtoken');
 const argon2 = require('argon2');
 const usersModel = require('../model/usersModel');
 const tokenUtils = require('./../utils/tokenUtils')
-const sessionModel = require('./../model/sessionModel')
 const db = require('./../utils/dbconnect')
 const { addSendEmailJob } = require('../queue/emailProducer');
 const { generateUID } = require('./../utils/uidUtils');

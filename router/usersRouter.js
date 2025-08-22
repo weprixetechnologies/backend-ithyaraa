@@ -3,10 +3,12 @@ const express = require('express')
 const userRouter = express.Router()
 const usersController = require('./../controllers/usersController')
 const otpController = require('./../controllers/otpController')
+const authMiddleware = require('./../middleware/authAdminMiddleware')
 
 userRouter.post('/create-user', usersController.createUser);
 userRouter.post('/login', usersController.loginUser);
-userRouter.get("/detail/:uid", usersController.getUserByUID);
+userRouter.get("/detail/:uid", authMiddleware.verifyAccessToken, usersController.getUserByUID);
+userRouter.get("/detail-by-user", authMiddleware.verifyAccessToken, usersController.getUserByUIDbyUser);
 userRouter.get('/all-users', usersController.getAllUsers);
 // Forgot password: send reset link
 userRouter.post('/forgot-password-tokenised', usersController.forgotPasswordTokenised); //will use later

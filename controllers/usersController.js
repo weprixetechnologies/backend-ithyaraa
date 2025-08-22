@@ -97,6 +97,22 @@ const getUserByUID = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+const getUserByUIDbyUser = async (req, res) => {
+    try {
+        const { uid } = req.user;
+
+        const user = await usersService.getUserByuid(uid);
+
+        if (!user) {
+            return res.status(404).json({ message: "No such user" });
+        }
+
+        res.status(200).json(user);
+    } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
 
 const getAllUsers = async (req, res, next) => {
     try {
@@ -227,5 +243,5 @@ module.exports = {
     createUser, getUserByUID,
     loginUser, forgotPasswordTokenised, resetPasswordTokenised, getAllUsers,
     verifyEmail,
-    sendVerificationEmail, forgotPasswordController
+    sendVerificationEmail, forgotPasswordController, getUserByUIDbyUser
 };

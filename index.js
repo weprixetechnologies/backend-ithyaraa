@@ -16,6 +16,8 @@ const couponsRouter = require('./router/admin/couponsRouter')
 const makeComboRouter = require('./router/admin/makeComboRouter')
 const comboRouter = require('./router/admin/comboRouter')
 const addressRouter = require('./router/addressRouter')
+const giftcardRouter = require('./router/giftcardRouter')
+const affiliateRouter = require('./router/affiliateRouter')
 
 // CORS setup (replace with your actual frontend domain)
 app.use(cors())
@@ -32,6 +34,8 @@ app.use('/api/coupons', couponsRouter)
 app.use('/api/make-combo', makeComboRouter)
 app.use('/api/combo', comboRouter)
 app.use('/api/address', addressRouter)
+app.use('/api/giftcard', giftcardRouter)
+app.use('/api/affiliate', affiliateRouter)
 
 
 // ADMIN ROUTE

@@ -12,7 +12,7 @@ const REFRESH_TOKEN_SECRET = process.env.JWT_SECRET;
 
 
 const register = async (data) => {
-    const {username, emailID, phonenumber, deviceInfo, name, password, role } = data;
+    const { username, emailID, phonenumber, deviceInfo, name, password, role } = data;
 
     if (!emailID || !phonenumber || !password || !name) {
         const err = new Error("Missing required fields");
@@ -124,7 +124,7 @@ const loginUser = async (email, password, deviceInfo) => {
     }
 
     // 3. Create JWT payload
-    const payload = { userID: user.id, email: user.emailID, role: user.role };
+    const payload = { userID: user.uid, email: user.emailID, role: user.role };
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
     console.log(refreshToken);
@@ -165,7 +165,7 @@ const refreshTokens = async (refreshToken) => {
     }
     console.log('Decoded refresh token payload:', decoded);
 
-    const email = decoded.email;
+    const email = decoded.emailID;
     console.log('Extracted email from token:', email);
 
     const user = await userModel.findUserByEmail(email);

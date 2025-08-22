@@ -144,6 +144,14 @@ async function getUserByIdentifier(identifierType, identifier) {
 
     return rows[0];
 }
+
+async function creditUserBalance(uid, amount) {
+    await db.execute(
+        `UPDATE users SET balance = balance + ? WHERE uid = ?`,
+        [amount, uid]
+    );
+}
+
 module.exports = {
     findUserByEmailOrPhone,
     insertUser,
@@ -157,5 +165,5 @@ module.exports = {
     findUserByUsername,
     setEmailVerified,
     findUserByEmail, findUserByPhone,
-    getOtpRecord, getUserByIdentifier
+    getOtpRecord, getUserByIdentifier, creditUserBalance
 };
