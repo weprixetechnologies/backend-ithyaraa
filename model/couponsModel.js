@@ -133,8 +133,21 @@ const updateCoupon = async (couponID, updateData) => {
 };
 
 
+const incrementCouponUsage = async (couponCode) => {
+    try {
+        const [result] = await db.query(
+            'UPDATE coupons SET couponUsage = couponUsage + 1 WHERE couponCode = ?',
+            [couponCode]
+        );
+        return result.affectedRows > 0;
+    } catch (error) {
+        console.error(`Error incrementing coupon usage for '${couponCode}':`, error.message);
+        throw new Error('Failed to update coupon usage');
+    }
+};
+
 module.exports = {
     checkCouponExists,
     insertCoupon,
-    getPaginatedCoupons, getCouponCount, getCouponByID, updateCoupon
+    getPaginatedCoupons, getCouponCount, getCouponByID, updateCoupon, incrementCouponUsage
 };

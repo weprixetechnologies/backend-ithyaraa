@@ -125,7 +125,8 @@ const createUser = async (userData) => {
         balance: userData.wallet,
         createdOn: new Date(),
         name: userData.name,
-        password: hashedPassword
+        password: hashedPassword, 
+        referCode: userData.referCode
     };
 
     // 6. Insert into DB
@@ -206,6 +207,11 @@ const getUserByuid = async (uid) => {
     const user = await usersModel.findUserByUIDFull(uid);
     return user || null;
 };
+const updateUserByuid = async (uid, data) => {
+    const user = await usersModel.updateUserByUID(uid, data);
+    return user; // Will contain updated user details
+};
+
 
 const getAllUsers = async (filters, limit = 10, page = 1) => {
     const allowedColumns = ['uid', 'username', 'emailID', 'status', 'createdAt'];
@@ -358,5 +364,5 @@ module.exports = {
     createUser, loginUser, getUserByuid, getAllUsers,
     sendResetPasswordEmail, resetPasswordWithToken,
     verifyEmail,
-    sendVerificationEmail, handleForgotPassword, verifyOtpResetPasswordService
+    sendVerificationEmail, handleForgotPassword, verifyOtpResetPasswordService, updateUserByuid
 };

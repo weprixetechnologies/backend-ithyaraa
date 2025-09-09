@@ -5,7 +5,8 @@ const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 
 
 comboRouter.post('/create-combo', authAdminMiddleware.verifyAccessToken, comboController.createComboProduct);
-comboRouter.get('/detail/:comboID', authAdminMiddleware.verifyAccessToken, comboController.getCombobyID);
+comboRouter.get('/detail/:comboID', comboController.getCombobyID);
+comboRouter.get('/detail-user/:comboID', comboController.getCombobyIDbyUser);
 comboRouter.put('/edit/:comboID', authAdminMiddleware.verifyAccessToken, comboController.editCombo);
 comboRouter.delete('/delete/:comboID', authAdminMiddleware.verifyAccessToken, comboController.deleteComboController);
 

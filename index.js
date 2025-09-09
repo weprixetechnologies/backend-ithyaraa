@@ -7,6 +7,7 @@ const cors = require('cors')
 //Core Modules
 const userRouter = require('./router/usersRouter')
 const authRouter = require('./router/authRouter')
+const cartRouter = require('./router/cartRouter')
 const adminAuthRouter = require('./router/admin/authAdminRouter')
 const productRouter = require('./router/admin/productRouter')
 const offerRouter = require('./router/admin/offerAdminRouter')
@@ -18,8 +19,12 @@ const comboRouter = require('./router/admin/comboRouter')
 const addressRouter = require('./router/addressRouter')
 const giftcardRouter = require('./router/giftcardRouter')
 const affiliateRouter = require('./router/affiliateRouter')
-
+const wishlistRouter = require('./router/wishlistRouter')
+const userCouponsRouter = require('./router/userCouponRouter')
+const orderRouter = require('./router/orderRouter')
+const phonepeRouter = require('./router/phonepeRouter')
 // CORS setup (replace with your actual frontend domain)
+
 app.use(cors())
 app.use(express.json())
 app.use(express.urlencoded({ extended: false }));
@@ -36,7 +41,11 @@ app.use('/api/combo', comboRouter)
 app.use('/api/address', addressRouter)
 app.use('/api/giftcard', giftcardRouter)
 app.use('/api/affiliate', affiliateRouter)
-
+app.use('/api/wishlist', wishlistRouter)
+app.use('/api/cart', cartRouter)
+app.use('/api/user-coupon', userCouponsRouter)
+app.use('/api/order', orderRouter)
+app.use('/api/phonepe', phonepeRouter)
 
 // ADMIN ROUTE
 app.use('/api/admin', adminAuthRouter);

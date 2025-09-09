@@ -34,4 +34,45 @@ const approveAffiliate = async (req, res) => {
     }
 };
 
-module.exports = { applyAffiliate, approveAffiliate }
+const getAllTransactions = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        const {
+            status,
+            type,
+            startDate,
+            endDate,
+            minAmount,
+            maxAmount,
+            page,
+            limit,
+            sortBy,
+            sortOrder
+        } = req.query;
+
+        const filters = {
+            status,
+            type,
+            startDate,
+            endDate,
+            minAmount: minAmount != null ? Number(minAmount) : undefined,
+            maxAmount: maxAmount != null ? Number(maxAmount) : undefined,
+            page: page != null ? Number(page) : undefined,
+            limit: limit != null ? Number(limit) : undefined,
+            sortBy,
+            sortOrder
+        };
+
+        const result = await affiliateService.getAllAffiliateTransactions(uid, filters);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+module.exports = { applyAffiliate, approveAffiliate, getAllTransactions }

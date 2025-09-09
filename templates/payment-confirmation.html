@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Confirmation - Ithyaraa</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+
+        .success-icon {
+            font-size: 48px;
+            color: #4CAF50;
+            margin-bottom: 20px;
+        }
+
+        .payment-details {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+            font-weight: bold;
+            font-size: 18px;
+            color: #4CAF50;
+        }
+
+        .label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .value {
+            color: #333;
+        }
+
+        .message {
+            background: #e8f5e8;
+            border-left: 4px solid #4CAF50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .button {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+
+        .button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Ithyaraa</div>
+            <div class="success-icon">✓</div>
+            <h1>Payment Confirmed!</h1>
+            <p>Your payment has been successfully processed.</p>
+        </div>
+
+        <div class="message">
+            <strong>Dear {{customerName}},</strong><br>
+            We're pleased to confirm that your payment has been successfully processed. Your order is now confirmed and
+            will be processed shortly.
+        </div>
+
+        <div class="payment-details">
+            <h3 style="margin-top: 0; color: #4CAF50;">Payment Details</h3>
+            <div class="detail-row">
+                <span class="label">Order Number:</span>
+                <span class="value">#{{orderID}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Transaction ID:</span>
+                <span class="value">{{merchantTransactionId}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Payment Date:</span>
+                <span class="value">{{paymentDate}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Amount Paid:</span>
+                <span class="value">₹{{amount}}</span>
+            </div>
+        </div>
+
+        <div style="text-align: center;">
+            <a href="{{websiteUrl}}/track-order/{{orderID}}" class="button">Track Your Order</a>
+        </div>
+
+        <div class="footer">
+            <p>Thank you for choosing Ithyaraa!</p>
+            <p>If you have any questions, please contact our customer support.</p>
+            <p>Visit us at: <a href="{{websiteUrl}}">{{websiteUrl}}</a></p>
+        </div>
+    </div>
+</body>
+
+</html>

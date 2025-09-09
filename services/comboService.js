@@ -1,5 +1,7 @@
 const comboModel = require('../model/comboModel');
 const crypto = require('crypto');
+const productModel = require('../model/productModel');
+const { deepParse } = require('../utils/responseUtils');
 
 const createComboProduct = async (payload) => {
     // Generate unique combo ID
@@ -45,11 +47,38 @@ async function fetchComboWithProducts(comboID) {
 
     // Get product IDs in combo
     const products = await comboModel.getComboItems(comboID);
+    console.log(products);
 
     return {
         ...comboDetails,
         products
     };
+}
+async function fetchComboWithProductsUser(comboID) {
+    // Get combo main details
+    const comboDetails = await comboModel.getComboDetails(comboID);
+    if (!comboDetails) {
+        const error = new Error(`Combo with ID '${comboID}' not found`);
+        error.statusCode = 404;
+        throw error;
+    }
+
+    // Get product IDs in combo
+    const productIDs = await comboModel.getComboItems(comboID);
+
+    // Fetch each product's details along with variations
+    const products = await Promise.all(productIDs.map(async (productID) => {
+        const productData = await productModel.getProductWithVariations(productID);
+        return productData;
+    }));
+
+    const response = {
+        ...comboDetails,
+        products
+    };
+
+    // Deep parse the response before sending
+    return deepParse(response);
 }
 
 async function editComboProduct(productID, updateData, productIDs) {
@@ -70,7 +99,7 @@ async function editComboProduct(productID, updateData, productIDs) {
             const productData = await comboModel.getProductByID(id);
             if (productData) {
                 console.log(`Adding product ${productData.productID} to combo ${productID}`);
-                
+
                 await comboModel.addComboItem(productID, {
                     productID: productData.productID,
                     name: productData.name,
@@ -98,4 +127,10 @@ const deleteCombo = async (comboID) => {
     return { message: 'Combo deleted successfully (skipped missing entries).' };
 };
 
-module.exports = { createComboProduct, fetchComboWithProducts, editComboProduct, deleteCombo }
+module.exports = {
+    createComboProduct,
+    fetchComboWithProducts,
+    fetchComboWithProductsUser,
+    editComboProduct,
+    deleteCombo
+};

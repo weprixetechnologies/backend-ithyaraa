@@ -31,14 +31,14 @@ const insertUser = async (userData) => {
         balance,
         createdOn,
         name,
-        password
+        password, referCode
     } = userData;
 
     await db.query(
         `INSERT INTO users 
-        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`,
-        [uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, 'user']
+        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role, referCode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?)`,
+        [uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, 'user', referCode]
     );
 };
 
@@ -57,6 +57,39 @@ const findUserByUIDFull = async (uid) => {
     console.log(rows); // This will log the full user object(s)
 
     return rows[0]; // Return the first (and only) user
+};
+const updateUserByUID = async (uid, { name, profilePhoto }) => {
+    // Build dynamic update query (only update provided fields)
+    const fields = [];
+    const values = [];
+
+    if (name) {
+        fields.push("name = ?");
+        values.push(name);
+    }
+    if (profilePhoto) {
+        fields.push("profilePhoto = ?");
+        values.push(profilePhoto);
+    }
+
+    if (fields.length === 0) return null;
+
+    values.push(uid);
+
+    const query = `
+    UPDATE users 
+    SET ${fields.join(", ")}
+    WHERE uid = ?
+    LIMIT 1
+  `;
+
+    const [result] = await db.query(query, values);
+
+    if (result.affectedRows === 0) return null;
+
+    // Fetch updated user
+    const updatedUser = await findUserByUIDFull(uid);
+    return updatedUser;
 };
 
 
@@ -152,6 +185,14 @@ async function creditUserBalance(uid, amount) {
     );
 }
 
+// Increment pendingPayment balance for affiliate earnings
+async function incrementPendingPayment(uid, amount) {
+    await db.execute(
+        `UPDATE users SET pendingPayment = COALESCE(pendingPayment, 0) + ? WHERE uid = ?`,
+        [amount, uid]
+    );
+}
+
 module.exports = {
     findUserByEmailOrPhone,
     insertUser,
@@ -165,5 +206,5 @@ module.exports = {
     findUserByUsername,
     setEmailVerified,
     findUserByEmail, findUserByPhone,
-    getOtpRecord, getUserByIdentifier, creditUserBalance
+    getOtpRecord, getUserByIdentifier, creditUserBalance, updateUserByUID, incrementPendingPayment
 };

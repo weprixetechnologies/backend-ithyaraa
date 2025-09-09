@@ -101,6 +101,8 @@ const updateCoupon = async (req, res) => {
     }
 };
 
+
+
 module.exports = {
     createCoupon,
     getAllCoupons,
@@ -108,5 +110,3 @@ module.exports = {
     getCouponDetail,
     updateCoupon
 };
-
-

@@ -37,4 +37,8 @@ const approveAffiliateService = async (uid, emailID, phonenumber) => {
     return { message: 'Affiliate approved successfully' };
 };
 
-module.exports = { applyAffiliateService, approveAffiliateService }
+const getAllAffiliateTransactions = async (uid, filters = {}) => {
+    return await affiliateModel.getAffiliateTransactions(uid, filters);
+};
+
+module.exports = { applyAffiliateService, approveAffiliateService, getAllAffiliateTransactions }

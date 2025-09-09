@@ -1,4 +1,4 @@
-const authService = require('./../services/authServices');
+const authService = require('../services/authServices');
 
 const verifyToken = (token, secret) => {
     try {

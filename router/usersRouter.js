@@ -10,6 +10,12 @@ userRouter.post('/login', usersController.loginUser);
 userRouter.get("/detail/:uid", authMiddleware.verifyAccessToken, usersController.getUserByUID);
 userRouter.get("/detail-by-user", authMiddleware.verifyAccessToken, usersController.getUserByUIDbyUser);
 userRouter.get('/all-users', usersController.getAllUsers);
+userRouter.put(
+    "/update-by-user",
+    authMiddleware.verifyAccessToken,
+    usersController.updateUserByUIDbyUser
+);
+
 // Forgot password: send reset link
 userRouter.post('/forgot-password-tokenised', usersController.forgotPasswordTokenised); //will use later
 userRouter.post('/forgot-password', usersController.forgotPasswordController); //in use with otp

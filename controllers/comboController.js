@@ -43,6 +43,35 @@ async function getCombobyID(req, res) {
         });
     }
 }
+async function getCombobyIDbyUser(req, res) {
+    try {
+        const { comboID } = req.params;
+
+        // Validate comboID
+        if (!comboID || comboID.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'comboID parameter is required'
+            });
+        }
+
+        const comboData = await comboService.fetchComboWithProductsUser(comboID);
+
+        return res.status(200).json({
+            success: true,
+            data: comboData
+        });
+
+    } catch (error) {
+        console.error('Error fetching combo:', error.message);
+
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || 'Internal server error',
+            ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+        });
+    }
+}
 async function editCombo(req, res) {
     try {
         const { comboID, products, ...updateData } = req.body;
@@ -87,4 +116,4 @@ const deleteComboController = async (req, res) => {
         return res.status(500).json({ message: 'Internal server error' });
     }
 };
-module.exports = { createComboProduct, getCombobyID, editCombo, deleteComboController }
+module.exports = { createComboProduct, getCombobyID, editCombo, deleteComboController, getCombobyIDbyUser }

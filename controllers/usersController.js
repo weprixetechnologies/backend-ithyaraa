@@ -22,7 +22,7 @@ const sendVerificationEmail = async (req, res) => {
 
 const createUser = async (req, res) => {
     try {
-        const { email, phonenumber, name, password, wallet } = req.body;
+        const { email, phonenumber, name, password, wallet, referCode } = req.body;
         console.log(req.body);
 
 
@@ -36,6 +36,7 @@ const createUser = async (req, res) => {
             name,
             password,
             wallet: wallet || 0,
+            referCode : referCode || 'ITHY-ADMIN',
             deviceInfo: req.headers['user-agent'] || 'unknown' // ✅ simple user-agent capture
         });
 
@@ -113,6 +114,30 @@ const getUserByUIDbyUser = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
+const updateUserByUIDbyUser = async (req, res) => {
+    try {
+        const { uid } = req.user; // comes from verified token
+        const { name, profilePhoto } = req.body;
+
+        // Basic validation (optional)
+        if (!name && !profilePhoto) {
+            return res.status(400).json({ message: "No fields to update" });
+        }
+
+        const updatedUser = await usersService.updateUserByuid(uid, { name, profilePhoto });
+
+        if (!updatedUser) {
+            return res.status(404).json({ message: "User not found or not updated" });
+        }
+
+        res.status(200).json({ message: "User updated successfully", user: updatedUser });
+    } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 
 const getAllUsers = async (req, res, next) => {
     try {
@@ -243,5 +268,5 @@ module.exports = {
     createUser, getUserByUID,
     loginUser, forgotPasswordTokenised, resetPasswordTokenised, getAllUsers,
     verifyEmail,
-    sendVerificationEmail, forgotPasswordController, getUserByUIDbyUser
+    sendVerificationEmail, forgotPasswordController, getUserByUIDbyUser, updateUserByUIDbyUser
 };

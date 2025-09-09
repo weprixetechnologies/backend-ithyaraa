@@ -31,7 +31,7 @@ const createProduct = async (product) => {
         productID, name, description, type, JSON.stringify(featuredImage || []),
         regularPrice, salePrice, discountType, discountValue, status,
         JSON.stringify(categories || []),
-        tab1 || null, tab2 || null, overridePrice || null,JSON.stringify(galleryImage || []), offerID || null
+        tab1 || null, tab2 || null, overridePrice || null, JSON.stringify(galleryImage || []), offerID || null
     ];
 
     await db.query(query, values);
@@ -73,6 +73,13 @@ async function getComboItems(comboID) {
         [comboID]
     );
     return rows.map(row => row.productID);
+}
+async function getComboItemsUser(comboID) {
+    const [rows] = await db.query(
+        `SELECT * FROM combo_item WHERE comboID = ?`,
+        [comboID]
+    );
+    return rows.map(row => row);
 }
 
 // Remove all items for a combo
@@ -137,4 +144,4 @@ const deleteComboItemsByComboID = async (comboID) => {
     return result.affectedRows;
 };
 
-module.exports = { createProduct, getProductByID, getAllProducts, addComboItem, getComboDetails, getComboItems, updateComboProduct, deleteComboItems, deleteComboItemsByComboID, deleteProductByID }
+module.exports = { createProduct, getProductByID, getComboItemsUser, getAllProducts, addComboItem, getComboDetails, getComboItems, updateComboProduct, deleteComboItems, deleteComboItemsByComboID, deleteProductByID }
