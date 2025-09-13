@@ -100,7 +100,7 @@ const editProductModel = async (product) => {
         type, status, offerID, overridePrice, tab1, tab2,
         productID, featuredImage, attributes, categories, brand, galleryImage
     } = product;
-console.log(categories);
+    console.log(categories);
 
     const query = `
         UPDATE products SET
@@ -116,7 +116,7 @@ console.log(categories);
         type,
         status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
         JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories), brand, JSON.stringify(galleryImage),
-        productID,  
+        productID,
     ];
 
     try {
@@ -206,7 +206,57 @@ const deleteVariationsByProductID = async (productID) => {
     return db.query(`DELETE FROM variations WHERE productID = ?`, [productID]);
 };
 
+const deleteProduct = async (productID) => {
+    try {
+        // Check if product exists first
+        const [productRows] = await db.query(`SELECT productID FROM products WHERE productID = ?`, [productID]);
+        if (productRows.length === 0) {
+            return {
+                success: false,
+                error: 'Product not found'
+            };
+        }
+
+        // Check for existing orders with this product
+        const [orderRows] = await db.query(`SELECT COUNT(*) as count FROM order_items WHERE productID = ?`, [productID]);
+        if (orderRows[0].count > 0) {
+            return {
+                success: false,
+                error: 'Cannot delete product: It has been ordered by customers'
+            };
+        }
+
+        // Delete related data first (foreign key constraints)
+        // Note: Attributes are stored as JSON in products table, so no separate deletion needed
+
+        // Delete from cart items
+        await db.query(`DELETE FROM cart_items WHERE productID = ?`, [productID]);
+
+        // Delete from wishlist items
+        await db.query(`DELETE FROM wishlist_items WHERE productID = ?`, [productID]);
+
+        // Delete from make combo items
+        await db.query(`DELETE FROM make_combo_items WHERE productID = ?`, [productID]);
+
+        // Delete variations
+        await deleteVariationsByProductID(productID);
+
+        // Delete the main product
+        const [result] = await db.query(`DELETE FROM products WHERE productID = ?`, [productID]);
+
+        return {
+            success: result.affectedRows > 0,
+            affectedRows: result.affectedRows
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
 
 
 
-module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, editProductModel, deleteAttributesByProductID, }
+
+module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, editProductModel, deleteAttributesByProductID, deleteProduct }

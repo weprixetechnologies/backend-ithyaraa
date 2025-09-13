@@ -66,6 +66,27 @@ const getComboDetails = async (comboID) => {
         products: productIDs,
     };
 };
+
+const getComboDetailsForUser = async (comboID) => {
+    const comboDetails = await makeComboModel.getComboDetailsWithProducts(comboID);
+    if (!comboDetails) {
+        return null;
+    }
+
+    // Parse JSON fields for the main combo product
+    const jsonFields = ['featuredImage', 'galleryImage', 'categories', 'productAttributes'];
+    jsonFields.forEach(field => {
+        if (comboDetails[field]) {
+            try {
+                comboDetails[field] = JSON.parse(comboDetails[field]);
+            } catch (e) {
+                console.warn(`Failed to parse ${field} for combo ${comboID}:`, e.message);
+            }
+        }
+    });
+
+    return comboDetails;
+};
 const updateComboProduct = async (productID, updateData) => {
     const { products, ...productInfo } = updateData;
 
@@ -94,4 +115,4 @@ const updateComboProduct = async (productID, updateData) => {
     }
 };
 
-module.exports = { createCombo, getComboDetails, updateComboProduct };
+module.exports = { createCombo, getComboDetails, getComboDetailsForUser, updateComboProduct };

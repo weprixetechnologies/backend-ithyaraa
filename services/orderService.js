@@ -4,6 +4,8 @@ const couponsModel = require('./../model/couponsModel')
 const db = require('./../utils/dbconnect');
 const usersModel = require('./../model/usersModel');
 const affiliateModel = require('./../model/affiliateModel');
+const invoiceService = require('./invoiceService');
+const { addSendEmailJob } = require('../queue/emailProducer');
 const { randomUUID } = require('crypto');
 
 async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null) {
@@ -54,102 +56,74 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         }
     }
 
-    // Step 5: Process referBy commissions for cart items (OPTIMIZED)
-    try {
-        // Group items by referBy and calculate commissions in one pass
-        const referByGroups = {};
-        const referByUids = new Set();
+    // Step 5: Check if cart has referBy (centralized from cartDetail)
+    const hasReferBy = cartData.items && cartData.items.length > 0 && cartData.items[0].referBy;
+    const creditedUsers = new Set();
 
-        // Single pass: group items and collect UIDs
-        for (const item of cartData.items) {
-            if (item.referBy) {
-                if (!referByGroups[item.referBy]) {
-                    referByGroups[item.referBy] = [];
-                    referByUids.add(item.referBy);
+    // Step 6: Process referBy commissions (if referBy exists, no coupon commission)
+    if (hasReferBy) {
+        try {
+            const referByUid = cartData.items[0].referBy; // All items have same referBy from cartDetail
+
+            // Fetch referrer user
+            const referrerUsers = await batchFetchUsers([referByUid]);
+            const referrerUser = referrerUsers[0];
+
+            if (referrerUser) {
+                // Calculate total commission for this referrer (10% of item amounts)
+                let totalCommission = 0;
+                for (const item of cartData.items) {
+                    const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
+                    totalCommission += itemAmount * 0.10;
                 }
-                referByGroups[item.referBy].push(item);
-            }
-        }
 
-        if (referByUids.size > 0) {
-            // Batch fetch all referrer users in one query
-            const referrerUsers = await batchFetchUsers(Array.from(referByUids));
-            const referrerMap = new Map(referrerUsers.map(user => [user.uid, user]));
+                if (totalCommission > 0) {
+                    totalCommission = Math.round(totalCommission * 100) / 100;
+                    creditedUsers.add(referrerUser.uid);
 
-            // Prepare batch operations
-            const pendingPaymentUpdates = [];
-            const affiliateTransactions = [];
-
-            // Process all referBy groups
-            for (const [referByUid, items] of Object.entries(referByGroups)) {
-                const referrerUser = referrerMap.get(referByUid);
-
-                if (referrerUser) {
-                    // Calculate total commission for this referrer (10% of item amounts)
-                    let totalCommission = 0;
-
-                    for (const item of items) {
-                        const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
-                        totalCommission += itemAmount * 0.10; // Calculate without parseFloat/toFixed for speed
-                    }
-
-                    if (totalCommission > 0) {
-                        // Round to 2 decimal places once
-                        totalCommission = Math.round(totalCommission * 100) / 100;
-
-                        // Prepare batch operations
-                        pendingPaymentUpdates.push({
-                            uid: referrerUser.uid,
-                            amount: totalCommission
-                        });
-
-                        affiliateTransactions.push({
+                    // Execute both operations in parallel
+                    await Promise.all([
+                        usersModel.incrementPendingPayment(referrerUser.uid, totalCommission),
+                        affiliateModel.createAffiliateTransaction({
                             txnID: randomUUID(),
                             uid: referrerUser.uid,
                             status: 'pending',
                             amount: totalCommission,
                             type: 'incoming'
-                        });
-                    }
+                        })
+                    ]);
                 }
             }
-
-            // Execute batch operations in parallel
-            if (pendingPaymentUpdates.length > 0) {
-                await Promise.all([
-                    batchIncrementPendingPayment(pendingPaymentUpdates),
-                    batchCreateAffiliateTransactions(affiliateTransactions)
-                ]);
-            }
+        } catch (referByError) {
+            console.error('ReferBy processing error:', referByError);
+            // Non-blocking
         }
-    } catch (referByError) {
-        console.error('ReferBy processing error:', referByError);
-        // Non-blocking
     }
 
-    // Step 6: Affiliate credit if coupon has assignedUser (email) - OPTIMIZED
-    try {
-        if (couponCode && couponDiscount >= 0) {
-            // Get coupon and user in parallel
-            const [couponResult, assignedUser] = await Promise.all([
-                db.query('SELECT assignedUser FROM coupons WHERE couponCode = ? LIMIT 1', [couponCode]),
-                // Pre-fetch user if we know the email (optimization for future)
-                Promise.resolve(null) // Placeholder for parallel structure
+    // Step 7: Coupon commission (only if NO referBy exists)
+    if (!hasReferBy && couponCode && couponDiscount >= 0) {
+        try {
+            const [couponResult] = await Promise.all([
+                db.query('SELECT assignedUser FROM coupons WHERE couponCode = ? LIMIT 1', [couponCode])
             ]);
 
             const assignedUserEmail = couponResult[0] && couponResult[0][0] ? couponResult[0][0].assignedUser : null;
 
             if (assignedUserEmail) {
-                // Find user by emailID from assignedUser
                 const assignedUser = await usersModel.findUserByEmail(assignedUserEmail);
 
-                if (assignedUser && assignedUser.uid) {
-                    // 20% of order total (after discount) - optimized calculation
+                if (assignedUser && assignedUser.uid && !creditedUsers.has(assignedUser.uid)) {
+                    // 20% of order total (after discount)
                     const orderTotal = Number(finalSummary.total) || 0;
-                    const commission = Math.round(orderTotal * 0.20 * 100) / 100; // Single calculation
+                    console.log('Order total:', orderTotal);
+
+                    const commission = Math.round(orderTotal * 0.20 * 100) / 100;
+                    console.log('Commission:', commission);
+
 
                     if (commission > 0) {
-                        // Execute both operations in parallel
+                        creditedUsers.add(assignedUser.uid);
+
                         await Promise.all([
                             usersModel.incrementPendingPayment(assignedUser.uid, commission),
                             affiliateModel.createAffiliateTransaction({
@@ -163,10 +137,10 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                     }
                 }
             }
+        } catch (affiliateError) {
+            console.error('Coupon commission error:', affiliateError);
+            // Non-blocking
         }
-    } catch (affiliateError) {
-        console.error('Affiliate credit error:', affiliateError);
-        // Non-blocking
     }
 
     return newOrder;
@@ -176,14 +150,32 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 // Coupon validation and discount calculation
 async function validateAndApplyCoupon(couponCode, cartData) {
     try {
+        console.log('=== ORDER COUPON VALIDATION ===');
+        console.log('Coupon code:', couponCode);
+        console.log('Coupon code type:', typeof couponCode);
+        console.log('Coupon code length:', couponCode ? couponCode.length : 'null');
+
         // Get coupon details by code
         const db = require('./../utils/dbconnect');
+
+        // First, let's check if the coupon exists at all
+        const [allCoupons] = await db.query(
+            'SELECT * FROM coupons WHERE couponCode = ?',
+            [couponCode]
+        );
+        console.log('All coupons with this code:', allCoupons);
+
+        // Then check with usage limit
         const [couponRows] = await db.query(
             'SELECT * FROM coupons WHERE couponCode = ? AND (usageLimit IS NULL OR couponUsage < usageLimit)',
             [couponCode]
         );
 
+        console.log('Coupon query result (with usage limit):', couponRows);
+        console.log('Number of rows found:', couponRows ? couponRows.length : 'null');
+
         if (!couponRows || couponRows.length === 0) {
+            console.log('Coupon validation failed - no rows found');
             return { success: false, message: 'Invalid or expired coupon code' };
         }
 
@@ -262,11 +254,490 @@ async function updateOrder(orderID, updateData) {
     return await orderModel.updateOrderByID(orderID, updateData);
 }
 
+// Get order details by order ID
+async function getOrderDetails(orderId, uid) {
+    try {
+        const order = await orderModel.getOrderByID(orderId);
+
+        if (!order) {
+            return null;
+        }
+
+        // Check if the order belongs to the user
+        if (order.uid !== uid) {
+            return null;
+        }
+
+        // Get order items from order_items table
+        const [items] = await db.query(
+            `SELECT oi.productID, oi.quantity, oi.variationID, oi.variationName,
+                    oi.overridePrice, oi.salePrice, oi.regularPrice,
+                    oi.unitPriceBefore, oi.unitPriceAfter,
+                    oi.lineTotalBefore, oi.lineTotalAfter,
+                    oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt
+             FROM order_items oi
+             WHERE oi.orderID = ? AND oi.uid = ?
+             ORDER BY oi.createdAt ASC`,
+            [orderId, uid]
+        );
+
+        // Parse featuredImage for each item if it's a JSON string
+        const processedItems = items.map(item => {
+            let parsedFeaturedImage = [];
+
+            if (item.featuredImage && typeof item.featuredImage === 'string') {
+                try {
+                    // Handle double-encoded JSON strings
+                    let jsonString = item.featuredImage;
+                    if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
+                        jsonString = JSON.parse(jsonString);
+                    }
+                    parsedFeaturedImage = JSON.parse(jsonString);
+                } catch (e) {
+                    console.error('Error parsing featuredImage:', e);
+                    parsedFeaturedImage = [];
+                }
+            } else if (Array.isArray(item.featuredImage)) {
+                parsedFeaturedImage = item.featuredImage;
+            }
+
+            // Convert string prices to numbers for consistency
+            const salePrice = parseFloat(item.salePrice) || 0;
+            const regularPrice = parseFloat(item.regularPrice) || 0;
+            const lineTotalAfter = parseFloat(item.lineTotalAfter) || 0;
+
+            // Clean up the response - only send necessary fields
+            return {
+                productID: item.productID,
+                quantity: item.quantity,
+                variationID: item.variationID,
+                variationName: item.variationName,
+                salePrice: salePrice,
+                regularPrice: regularPrice,
+                lineTotalAfter: lineTotalAfter,
+                name: item.name,
+                featuredImage: parsedFeaturedImage, // This will be a proper array
+                createdAt: item.createdAt
+            };
+        });
+
+        // Get address details
+        let deliveryAddress = null;
+        if (order.addressID) {
+            try {
+                const addressResult = await db.query(
+                    'SELECT * FROM address WHERE addressID = ? AND uid = ?',
+                    [order.addressID, uid]
+                );
+                if (addressResult[0] && addressResult[0].length > 0) {
+                    const addr = addressResult[0][0];
+                    // Clean up address response - only send necessary fields
+                    deliveryAddress = {
+                        emailID: addr.emailID,
+                        phoneNumber: addr.phoneNumber,
+                        line1: addr.line1,
+                        line2: addr.line2,
+                        city: addr.city,
+                        state: addr.state,
+                        pincode: addr.pincode,
+                        landmark: addr.landmark,
+                        type: addr.type
+                    };
+                }
+            } catch (e) {
+                console.error('Error fetching address:', e);
+            }
+        }
+
+        // Format the response
+        const orderDetails = {
+            orderID: order.orderID,
+            uid: order.uid,
+            paymentMode: order.paymentMode,
+            paymentStatus: order.paymentStatus || 'successful',
+            status: order.status || 'confirmed',
+            createdAt: order.createdAt,
+            items: processedItems,
+            subtotal: parseFloat(order.subtotal) || 0,
+            discount: parseFloat(order.totalDiscount) || 0,
+            shipping: 0, // Shipping is not stored separately in current schema
+            total: parseFloat(order.total) || 0,
+            deliveryAddress: deliveryAddress,
+            couponCode: order.couponCode,
+            couponDiscount: parseFloat(order.couponDiscount) || 0
+        };
+
+        return orderDetails;
+    } catch (error) {
+        console.error('Error in getOrderDetails service:', error);
+        throw error;
+    }
+}
+
+// Get all orders for admin with pagination and filters
+async function getAllOrders(filters = {}) {
+    try {
+        const { page = 1, limit = 10, offset = 0, status, paymentStatus, search } = filters;
+
+        let whereConditions = [];
+        let queryParams = [];
+
+        // Build WHERE clause based on filters
+        if (status) {
+            whereConditions.push('od.orderStatus = ?');
+            queryParams.push(status);
+        }
+
+        if (paymentStatus) {
+            whereConditions.push('od.paymentStatus = ?');
+            queryParams.push(paymentStatus);
+        }
+
+        if (search) {
+            whereConditions.push('(od.orderID LIKE ? OR u.username LIKE ? OR u.emailID LIKE ?)');
+            const searchTerm = `%${search}%`;
+            queryParams.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+        // Get total count
+        const countQuery = `
+            SELECT COUNT(DISTINCT od.orderID) as total
+            FROM orderDetail od
+            LEFT JOIN users u ON od.uid = u.uid
+            ${whereClause}
+        `;
+
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0]?.total || 0;
+
+        // Get orders with pagination
+        const ordersQuery = `
+            SELECT DISTINCT 
+                od.orderID,
+                od.uid,
+                od.paymentMode,
+                od.paymentStatus,
+                od.orderStatus,
+                od.subtotal,
+                od.totalDiscount,
+                od.total,
+                od.couponCode,
+                od.couponDiscount,
+                od.createdAt,
+                u.username,
+                u.emailID,
+                u.phonenumber,
+                COUNT(oi.orderID) as itemCount
+            FROM orderDetail od
+            LEFT JOIN users u ON od.uid = u.uid
+            LEFT JOIN order_items oi ON od.orderID = oi.orderID
+            ${whereClause}
+            GROUP BY od.orderID, od.uid, od.paymentMode, od.paymentStatus, od.orderStatus, 
+                     od.subtotal, od.totalDiscount, od.total, od.couponCode, od.couponDiscount, 
+                     od.createdAt, u.username, u.emailID, u.phonenumber
+            ORDER BY od.createdAt DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const [orders] = await db.query(ordersQuery, [...queryParams, parseInt(limit), parseInt(offset)]);
+
+        return {
+            orders: orders.map(order => ({
+                orderID: order.orderID,
+                uid: order.uid,
+                username: order.username,
+                emailID: order.emailID,
+                phonenumber: order.phonenumber,
+                paymentMode: order.paymentMode,
+                paymentStatus: order.paymentStatus,
+                orderStatus: order.orderStatus,
+                subtotal: parseFloat(order.subtotal) || 0,
+                totalDiscount: parseFloat(order.totalDiscount) || 0,
+                total: parseFloat(order.total) || 0,
+                couponCode: order.couponCode,
+                couponDiscount: parseFloat(order.couponDiscount) || 0,
+                itemCount: order.itemCount,
+                createdAt: order.createdAt
+            })),
+            total: parseInt(total)
+        };
+    } catch (error) {
+        console.error('Error in getAllOrders service:', error);
+        throw error;
+    }
+}
+
+// Update order status
+async function updateOrderStatus(orderId, orderStatus) {
+    try {
+        const result = await db.query(
+            'UPDATE orderDetail SET orderStatus = ? WHERE orderID = ?',
+            [orderStatus, orderId]
+        );
+
+        if (result[0].affectedRows === 0) {
+            return null;
+        }
+
+        // Return updated order
+        const [updatedOrder] = await db.query(
+            'SELECT * FROM orderDetail WHERE orderID = ?',
+            [orderId]
+        );
+
+        return updatedOrder[0];
+    } catch (error) {
+        console.error('Error updating order status:', error);
+        throw error;
+    }
+}
+
+// Update payment status
+async function updatePaymentStatus(orderId, paymentStatus) {
+    try {
+        const result = await db.query(
+            'UPDATE orderDetail SET paymentStatus = ? WHERE orderID = ?',
+            [paymentStatus, orderId]
+        );
+
+        if (result[0].affectedRows === 0) {
+            return null;
+        }
+
+        // Return updated order
+        const [updatedOrder] = await db.query(
+            'SELECT * FROM orderDetail WHERE orderID = ?',
+            [orderId]
+        );
+
+        return updatedOrder[0];
+    } catch (error) {
+        console.error('Error updating payment status:', error);
+        throw error;
+    }
+}
+
+// Generate invoice data
+async function generateInvoice(orderId) {
+    try {
+        // Get order details using admin function
+        const orderDetails = await getAdminOrderDetails(orderId);
+
+        if (!orderDetails) {
+            return null;
+        }
+
+        // Generate invoice data
+        const invoiceData = invoiceService.generateInvoiceData(orderDetails);
+
+        // Generate PDF buffer
+        const pdfBuffer = await invoiceService.generateInvoicePDF(invoiceData);
+
+        return {
+            success: true,
+            invoice: {
+                orderId: orderDetails.orderID,
+                invoiceNumber: invoiceData.invoiceNumber,
+                pdfBuffer: pdfBuffer,
+                fileName: `invoice_${orderDetails.orderID}.pdf`,
+                mimeType: 'application/pdf',
+                generatedAt: invoiceData.generatedAt
+            },
+            data: invoiceData
+        };
+    } catch (error) {
+        console.error('Error generating invoice:', error);
+        throw error;
+    }
+}
+
 module.exports.updateOrder = updateOrder;
+module.exports.getOrderDetails = getOrderDetails;
 
-// OPTIMIZATION HELPER FUNCTIONS
+// Get order details for admin (no uid required)
+async function getAdminOrderDetails(orderId) {
+    try {
+        const order = await orderModel.getOrderByID(orderId);
 
-// Batch fetch users by UIDs
+        if (!order) {
+            return null;
+        }
+
+        // Get order items from order_items table
+        const [items] = await db.query(
+            `SELECT oi.productID, oi.quantity, oi.variationID, oi.variationName,
+                    oi.overridePrice, oi.salePrice, oi.regularPrice,
+                    oi.unitPriceBefore, oi.unitPriceAfter,
+                    oi.lineTotalBefore, oi.lineTotalAfter,
+                    oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt
+             FROM order_items oi
+             WHERE oi.orderID = ?
+             ORDER BY oi.createdAt ASC`,
+            [orderId]
+        );
+
+        // Parse featuredImage for each item if it's a JSON string
+        const processedItems = items.map(item => {
+            let parsedFeaturedImage = [];
+
+            if (item.featuredImage && typeof item.featuredImage === 'string') {
+                try {
+                    // Handle double-encoded JSON strings
+                    let jsonString = item.featuredImage;
+                    if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
+                        jsonString = JSON.parse(jsonString);
+                    }
+                    parsedFeaturedImage = JSON.parse(jsonString);
+                } catch (e) {
+                    console.error('Error parsing featuredImage:', e);
+                    parsedFeaturedImage = [];
+                }
+            } else if (Array.isArray(item.featuredImage)) {
+                parsedFeaturedImage = item.featuredImage;
+            }
+
+            // Convert string prices to numbers for consistency
+            const salePrice = parseFloat(item.salePrice) || 0;
+            const regularPrice = parseFloat(item.regularPrice) || 0;
+            const lineTotalAfter = parseFloat(item.lineTotalAfter) || 0;
+
+            // Clean up the response - only send necessary fields
+            return {
+                productID: item.productID,
+                quantity: item.quantity,
+                variationID: item.variationID,
+                variationName: item.variationName,
+                salePrice: salePrice,
+                regularPrice: regularPrice,
+                lineTotalAfter: lineTotalAfter,
+                name: item.name,
+                featuredImage: parsedFeaturedImage, // This will be a proper array
+                createdAt: item.createdAt
+            };
+        });
+
+        // Get address details
+        let deliveryAddress = null;
+        if (order.addressID) {
+            try {
+                const addressResult = await db.query(
+                    'SELECT * FROM address WHERE addressID = ?',
+                    [order.addressID]
+                );
+                if (addressResult[0] && addressResult[0].length > 0) {
+                    const addr = addressResult[0][0];
+                    // Clean up address response - only send necessary fields
+                    deliveryAddress = {
+                        emailID: addr.emailID,
+                        phoneNumber: addr.phoneNumber,
+                        line1: addr.line1,
+                        line2: addr.line2,
+                        city: addr.city,
+                        state: addr.state,
+                        pincode: addr.pincode,
+                        landmark: addr.landmark,
+                        type: addr.type
+                    };
+                }
+            } catch (e) {
+                console.error('Error fetching address:', e);
+            }
+        }
+
+        // Format the response
+        const orderDetails = {
+            orderID: order.orderID,
+            uid: order.uid,
+            paymentMode: order.paymentMode,
+            paymentStatus: order.paymentStatus || 'successful',
+            orderStatus: order.orderStatus || 'Preparing', // Use orderStatus instead of status
+            createdAt: order.createdAt,
+            items: processedItems,
+            subtotal: parseFloat(order.subtotal) || 0,
+            discount: parseFloat(order.totalDiscount) || 0,
+            shipping: 0, // Shipping is not stored separately in current schema
+            total: parseFloat(order.total) || 0,
+            deliveryAddress: deliveryAddress,
+            couponCode: order.couponCode,
+            couponDiscount: parseFloat(order.couponDiscount) || 0
+        };
+
+        return orderDetails;
+    } catch (error) {
+        console.error('Error in getAdminOrderDetails service:', error);
+        throw error;
+    }
+}
+
+// Email invoice to customer
+async function emailInvoice(orderId) {
+    try {
+        // Get order details
+        const orderDetails = await getAdminOrderDetails(orderId);
+        if (!orderDetails) {
+            return { success: false, message: 'Order not found' };
+        }
+
+        // Check if order has delivery address with email
+        if (!orderDetails.deliveryAddress || !orderDetails.deliveryAddress.emailID) {
+            return { success: false, message: 'Customer email not found' };
+        }
+
+        // Generate invoice data and PDF
+        const invoiceData = invoiceService.generateInvoiceData(orderDetails);
+        const pdfBuffer = await invoiceService.generateInvoicePDF(invoiceData);
+
+        // Prepare email data for queue
+        const emailData = {
+            to: orderDetails.deliveryAddress.emailID,
+            templateName: 'invoice-email',
+            variables: {
+                customerName: orderDetails.deliveryAddress.emailID.split('@')[0], // Use email prefix as name
+                orderId: orderDetails.orderID,
+                invoiceNumber: invoiceData.invoiceNumber,
+                orderDate: new Date(orderDetails.createdAt).toLocaleDateString('en-IN'),
+                totalAmount: orderDetails.total.toFixed(2),
+                paymentMode: orderDetails.paymentMode,
+                orderStatus: orderDetails.orderStatus
+            },
+            subject: `Invoice for Order #${orderDetails.orderID} - Ithyaraa`,
+            attachments: [
+                {
+                    filename: `invoice_${orderDetails.orderID}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }
+            ]
+        };
+
+        // Add email job to queue
+        await addSendEmailJob(emailData);
+
+        return {
+            success: true,
+            message: 'Invoice email queued successfully',
+            email: orderDetails.deliveryAddress.emailID
+        };
+    } catch (error) {
+        console.error('Error sending invoice email:', error);
+        return { success: false, message: 'Failed to send invoice email' };
+    }
+}
+
+module.exports.getAdminOrderDetails = getAdminOrderDetails;
+module.exports.getAllOrders = getAllOrders;
+module.exports.updateOrderStatus = updateOrderStatus;
+module.exports.updatePaymentStatus = updatePaymentStatus;
+module.exports.generateInvoice = generateInvoice;
+module.exports.emailInvoice = emailInvoice;
+
+// HELPER FUNCTIONS
+
+// Fetch users by UIDs
 async function batchFetchUsers(uids) {
     if (uids.length === 0) return [];
 
@@ -276,42 +747,4 @@ async function batchFetchUsers(uids) {
         uids
     );
     return rows;
-}
-
-// Batch increment pending payment for multiple users
-async function batchIncrementPendingPayment(updates) {
-    if (updates.length === 0) return;
-
-    // Use CASE statement for batch update
-    const uidList = updates.map(u => u.uid);
-    const caseStatements = updates.map(u => `WHEN '${u.uid}' THEN COALESCE(pendingPayment, 0) + ${u.amount}`).join(' ');
-
-    await db.query(
-        `UPDATE users SET pendingPayment = CASE uid ${caseStatements} END WHERE uid IN (${uidList.map(() => '?').join(',')})`,
-        uidList
-    );
-}
-
-// Batch create affiliate transactions
-async function batchCreateAffiliateTransactions(transactions) {
-    if (transactions.length === 0) return;
-
-    // Ensure every transaction has a txnID
-    const sanitized = transactions.map(t => ({
-        txnID: t.txnID || randomUUID(),
-        uid: t.uid,
-        status: t.status || 'pending',
-        amount: t.amount,
-        type: t.type || 'incoming'
-    }));
-
-    // Build parameterized multi-row insert
-    const placeholders = sanitized.map(() => '(?, ?, ?, ?, ?)').join(',');
-    const params = sanitized.flatMap(t => [t.txnID, t.uid, t.status, t.amount, t.type]);
-
-    // Use the correct table name as per affiliateModel
-    await db.query(
-        `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type) VALUES ${placeholders}`,
-        params
-    );
 }

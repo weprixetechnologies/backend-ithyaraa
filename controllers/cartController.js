@@ -39,11 +39,20 @@ async function getCart(req, res) {
 }
 
 const removeFromCart = async (req, res) => {
-    const { productID } = req.body;
-    const { uid } = req.user;
+    try {
+        const { cartItemID } = req.body;
+        const { uid } = req.user;
 
-    const result = await cartService.removeCartItem(uid, productID);
-    return res.status(result.success ? 200 : 400).json(result);
+        if (!cartItemID) {
+            return res.status(400).json({ success: false, message: 'Cart item ID is required' });
+        }
+
+        const result = await cartService.removeCartItem(uid, cartItemID);
+        return res.status(result.success ? 200 : 400).json(result);
+    } catch (error) {
+        console.error('Error removing cart item:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
 };
 
 async function addCartCombo(req, res) {

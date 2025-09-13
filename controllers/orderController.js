@@ -60,14 +60,47 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             websiteUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
         };
 
+        // Generate invoice PDF for attachment
+        let attachments = [];
+        try {
+            const orderService = require('../services/orderService');
+            const invoiceResult = await orderService.generateInvoice(order.orderID);
+
+            if (invoiceResult && invoiceResult.success) {
+                const fs = require('fs');
+                const path = require('path');
+                const tempDir = path.join(__dirname, '..', 'temp');
+
+                // Create temp directory if it doesn't exist
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+
+                const tempFilePath = path.join(tempDir, `invoice_${order.orderID}.pdf`);
+                fs.writeFileSync(tempFilePath, invoiceResult.invoice.pdfBuffer);
+
+                attachments = [{
+                    filename: `invoice_${order.orderID}.pdf`,
+                    path: tempFilePath,
+                    contentType: 'application/pdf'
+                }];
+
+                console.log(`Invoice PDF generated for order confirmation: ${tempFilePath} (${invoiceResult.invoice.pdfBuffer.length} bytes)`);
+            }
+        } catch (invoiceError) {
+            console.error('Error generating invoice for order confirmation:', invoiceError);
+            // Continue without invoice attachment - don't break order confirmation
+        }
+
         await addSendEmailJob({
             to: user.emailID,
             templateName: 'order-confirmation',
             variables: emailVariables,
-            subject: `Order Confirmation #${order.orderID} - Ithyaraa`
+            subject: `Order Confirmation #${order.orderID} - Ithyaraa`,
+            attachments: attachments
         });
 
-        console.log(`Order confirmation email sent to ${user.emailID} for order ${order.orderID}`);
+        console.log(`Order confirmation email sent to ${user.emailID} for order ${order.orderID}${attachments.length > 0 ? ' with invoice attachment' : ''}`);
     } catch (error) {
         console.error('Error sending order confirmation email:', error);
         // Don't throw error - email failure shouldn't break order placement
@@ -215,4 +248,204 @@ const updateOrderController = async (req, res) => {
     }
 };
 
+// Get order details by order ID
+const getOrderDetailsController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        const orderDetails = await orderService.getOrderDetails(orderId, req.user.uid);
+        if (!orderDetails) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        return res.status(200).json({ success: true, data: orderDetails });
+    } catch (error) {
+        console.error('Get order details error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Get order details by order ID for admin
+const getAdminOrderDetailsController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        const orderDetails = await orderService.getAdminOrderDetails(orderId);
+        if (!orderDetails) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        return res.status(200).json({ success: true, data: orderDetails });
+    } catch (error) {
+        console.error('Get admin order details error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Get all orders for admin
+const getAllOrdersController = async (req, res) => {
+    try {
+        const { page = 1, limit = 10, status, paymentStatus, search } = req.query;
+        const offset = (page - 1) * limit;
+
+        const orders = await orderService.getAllOrders({
+            page: parseInt(page),
+            limit: parseInt(limit),
+            offset,
+            status,
+            paymentStatus,
+            search
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: orders.orders,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(orders.total / limit),
+                totalOrders: orders.total,
+                hasNext: page < Math.ceil(orders.total / limit),
+                hasPrev: page > 1
+            }
+        });
+    } catch (error) {
+        console.error('Get all orders error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Update order status
+const updateOrderStatusController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { orderStatus } = req.body;
+
+        if (!orderId || !orderStatus) {
+            return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' });
+        }
+
+        const validStatuses = ['Preparing', 'Shipped', 'Delivered', 'Cancelled'];
+        if (!validStatuses.includes(orderStatus)) {
+            return res.status(400).json({ success: false, message: 'Invalid order status' });
+        }
+
+        const updated = await orderService.updateOrderStatus(orderId, orderStatus);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        return res.status(200).json({ success: true, message: 'Order status updated successfully', order: updated });
+    } catch (error) {
+        console.error('Update order status error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Update payment status
+const updatePaymentStatusController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { paymentStatus } = req.body;
+
+        if (!orderId || !paymentStatus) {
+            return res.status(400).json({ success: false, message: 'orderId and paymentStatus are required' });
+        }
+
+        const validStatuses = ['pending', 'successful', 'failed', 'refunded'];
+        if (!validStatuses.includes(paymentStatus)) {
+            return res.status(400).json({ success: false, message: 'Invalid payment status' });
+        }
+
+        const updated = await orderService.updatePaymentStatus(orderId, paymentStatus);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        return res.status(200).json({ success: true, message: 'Payment status updated successfully', order: updated });
+    } catch (error) {
+        console.error('Update payment status error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Generate invoice
+const generateInvoiceController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { action = 'download' } = req.query; // 'download' or 'data'
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        const result = await orderService.generateInvoice(orderId);
+        if (!result || !result.success) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        if (action === 'download') {
+            // Set headers for PDF download
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${result.invoice.fileName}"`);
+            res.setHeader('Content-Length', result.invoice.pdfBuffer.length);
+
+            // Send PDF buffer
+            return res.send(result.invoice.pdfBuffer);
+        } else {
+            // Return invoice data for frontend
+            return res.status(200).json({
+                success: true,
+                data: result.data,
+                invoice: {
+                    orderId: result.invoice.orderId,
+                    invoiceNumber: result.invoice.invoiceNumber,
+                    fileName: result.invoice.fileName,
+                    generatedAt: result.invoice.generatedAt
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Generate invoice error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Email invoice to customer
+const emailInvoiceController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        const result = await orderService.emailInvoice(orderId);
+        if (!result || !result.success) {
+            return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: result.message,
+            email: result.email
+        });
+    } catch (error) {
+        console.error('Email invoice error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports.updateOrderController = updateOrderController;
+module.exports.getOrderDetailsController = getOrderDetailsController;
+module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
+module.exports.getAllOrdersController = getAllOrdersController;
+module.exports.updateOrderStatusController = updateOrderStatusController;
+module.exports.updatePaymentStatusController = updatePaymentStatusController;
+module.exports.generateInvoiceController = generateInvoiceController;
+module.exports.emailInvoiceController = emailInvoiceController;

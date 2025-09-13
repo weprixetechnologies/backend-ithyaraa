@@ -29,3 +29,16 @@ const getCountController = async (req, res) => {
 module.exports = {
     getCountController
 };
+
+// Filters controller: categories from categories table
+async function getFiltersController(req, res) {
+    try {
+        const result = await commonService.getFiltersService();
+        return res.status(result.success ? 200 : 500).json(result);
+    } catch (error) {
+        console.error('getFiltersController error:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+}
+
+module.exports.getFiltersController = getFiltersController;

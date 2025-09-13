@@ -29,4 +29,8 @@ userRouter.post('/send-verification-email', usersController.sendVerificationEmai
 userRouter.post('/send-otp', otpController.sendOtpController)
 userRouter.post('/verify-otp', otpController.verifyOtp)
 
+// Payout OTP routes (protected)
+userRouter.post('/send-payout-otp', authMiddleware.verifyAccessToken, otpController.sendPayoutOtpController)
+userRouter.post('/verify-payout-otp', authMiddleware.verifyAccessToken, otpController.verifyPayoutOtpController)
+
 module.exports = userRouter

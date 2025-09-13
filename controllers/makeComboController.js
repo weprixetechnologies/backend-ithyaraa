@@ -35,6 +35,42 @@ const getComboDetailsController = async (req, res) => {
         return res.status(500).json({ message: 'Internal Server Error' });
     }
 };
+
+const getComboDetailsForUserController = async (req, res) => {
+    try {
+        const { productID } = req.params;
+
+        // Validate productID
+        if (!productID || productID.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'productID parameter is required'
+            });
+        }
+
+        const combo = await makeComboService.getComboDetailsForUser(productID);
+
+        if (!combo) {
+            return res.status(404).json({
+                success: false,
+                message: 'Make-combo not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: combo
+        });
+
+    } catch (error) {
+        console.error('Error fetching make-combo details for user:', error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+        });
+    }
+};
 const editComboProduct = async (req, res) => {
     try {
         const { ...updateData } = req.body;
@@ -52,4 +88,4 @@ const editComboProduct = async (req, res) => {
     }
 };
 
-module.exports = { createComboProduct, getComboDetailsController, editComboProduct };
+module.exports = { createComboProduct, getComboDetailsController, getComboDetailsForUserController, editComboProduct };

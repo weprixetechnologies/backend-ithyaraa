@@ -7,4 +7,7 @@ makeComboRouter.post('/create-make-combo', authAdminMiddleware.verifyAccessToken
 makeComboRouter.get('/detail/:comboID', authAdminMiddleware.verifyAccessToken, makeComboController.getComboDetailsController);
 makeComboRouter.put('/edit/:comboID', authAdminMiddleware.verifyAccessToken, makeComboController.editComboProduct);
 
+// User-facing endpoint (no auth required)
+makeComboRouter.get('/detail-user/:productID', makeComboController.getComboDetailsForUserController);
+
 module.exports = makeComboRouter

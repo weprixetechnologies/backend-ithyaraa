@@ -8,9 +8,29 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
 
     // 2. Ensure user has a cart
     const cart = await cartModel.getOrCreateCart(uid);
+    // Only update referBy if explicitly provided and not empty
+    if (referBy && referBy.trim() !== '') {
+        try {
+            await cartModel.updateCartReferBy(uid, referBy);
+        } catch (e) {
+            console.error('Failed to update cart referBy:', e);
+        }
+    }
 
-    // 3. Calculate base price
-    const basePrice = product.salePrice ?? product.regularPrice;
+    // 3. Get variation prices if variationID is provided
+    let regularPrice = product.regularPrice;
+    let salePrice = product.salePrice;
+
+    if (variationID) {
+        const variation = await cartModel.getVariationByID(variationID);
+        if (variation) {
+            regularPrice = variation.variationPrice;
+            salePrice = variation.variationSalePrice || variation.variationPrice;
+        }
+    }
+
+    // 4. Calculate base price
+    const basePrice = salePrice ?? regularPrice;
     const lineTotalBefore = Number((basePrice * quantity).toFixed(2));
     const lineTotalAfter = lineTotalBefore; // initially same (no discount yet)
 
@@ -37,8 +57,8 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
             uid,
             productID,
             quantity,
-            regularPrice: product.regularPrice,
-            salePrice: product.salePrice,
+            regularPrice: regularPrice,
+            salePrice: salePrice,
             overridePrice: null,
             unitPriceBefore: basePrice,
             unitPriceAfter: basePrice,
@@ -48,8 +68,7 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
             name: product.name,
             featuredImage: product.featuredImage,
             variationID,
-            variationName,
-            referBy
+            variationName
         });
     }
 
@@ -150,8 +169,12 @@ async function getCart(uid) {
         }
 
         const summary = await cartModel.getCartSummaryFromDB(uid);
+        const cart = await cartModel.getOrCreateCart(uid);
+        if (cart && cart.referBy) {
+            items.forEach(i => { i.referBy = cart.referBy; });
+        }
         console.log('Fast path - returning cached cart');
-        return { items, summary };
+        return { items, summary, cartID: cart.cartID };
     }
 
     let items = await cartModel.getCartItems(uid);
@@ -230,7 +253,11 @@ async function getCart(uid) {
     await cartModel.updateCartItems(items);
     await cartModel.updateCartDetail(uid, summary);
 
-    return { items, summary };
+    const cart = await cartModel.getOrCreateCart(uid);
+    if (cart && cart.referBy) {
+        items.forEach(i => { i.referBy = cart.referBy; });
+    }
+    return { items, summary, cartID: cart.cartID };
 }
 
 // --- Offer helpers with fixed numeric handling ---
@@ -315,29 +342,36 @@ function applyBuyXAtXxx(affectedItems, offer) {
     }
 }
 
-const removeCartItem = async (uid, productID) => {
-    // 1. Get user's cart
-    const cart = await cartModel.getOrCreateCart(uid);
-    if (!cart) {
-        return { success: false, message: "Cart not found for this user" };
+const removeCartItem = async (uid, cartItemID) => {
+    try {
+        // 1. Get user's cart
+        const cart = await cartModel.getOrCreateCart(uid);
+        if (!cart) {
+            return { success: false, message: "Cart not found for this user" };
+        }
+
+        // 2. Check if item exists in cart
+        const existingItem = await cartModel.getCartItemByID(cartItemID);
+        if (!existingItem || existingItem.uid !== uid) {
+            return { success: false, message: "Item not found in cart" };
+        }
+
+        // 3. Remove the item
+        await cartModel.deleteCartItem(cartItemID);
+
+        // 4. Update cart totals after removal
+        const updatedCartDetail = await cartModel.updateCartTotals(cart.cartID);
+
+        // 5. Return success response with updated cart
+        return {
+            success: true,
+            message: "Item removed from cart",
+            cartDetail: updatedCartDetail
+        };
+    } catch (error) {
+        console.error('Error removing cart item:', error);
+        return { success: false, message: "Failed to remove item from cart" };
     }
-
-    // 2. Check if item exists in cart
-    const existingItem = await cartModel.getCartItem(cart.cartID, productID);
-    if (!existingItem) {
-        return { success: false, message: "Item not found in cart" };
-    }
-
-    // 3. Remove the item
-    await cartModel.deleteCartItem(existingItem.cartItemID);
-
-
-    // 5. Return success response
-    return {
-        success: true,
-        message: "Item removed from cart",
-
-    };
 };
 
 

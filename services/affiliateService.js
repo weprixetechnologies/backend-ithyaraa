@@ -41,4 +41,62 @@ const getAllAffiliateTransactions = async (uid, filters = {}) => {
     return await affiliateModel.getAffiliateTransactions(uid, filters);
 };
 
-module.exports = { applyAffiliateService, approveAffiliateService, getAllAffiliateTransactions }
+const getAffiliatedOrdersService = async (uid, filters = {}) => {
+    return await affiliateModel.getAffiliateOrdersByReferrer(uid, filters);
+};
+
+const getAffiliateAnalyticsService = async (uid) => {
+    return await affiliateModel.getAffiliateAnalytics(uid);
+};
+
+const getAffiliateDetailsService = async (uid) => {
+    return await affiliateModel.getAffiliateDetails(uid);
+};
+
+const createAffiliate = async (affiliateData) => {
+    return await affiliateModel.createAffiliateTransaction(affiliateData);
+};
+
+const getPayoutHistoryService = async (uid) => {
+    return await affiliateModel.getPayoutHistory(uid);
+};
+
+const getRequestedPayoutAmountService = async (uid) => {
+    return await affiliateModel.getRequestedPayoutAmount(uid);
+};
+
+const getPendingPayoutAvailableService = async (uid) => {
+    return await affiliateModel.getPendingPayoutAvailable(uid);
+};
+
+const getRequestablePayoutsService = async (uid) => {
+    return await affiliateModel.getRequestablePayouts(uid);
+};
+
+const getPayoutRequestsService = async (filters) => {
+    return await affiliateModel.getPayoutRequests(filters);
+};
+
+const approvePayoutService = async (txnID) => {
+    return await affiliateModel.approvePayout(txnID);
+};
+
+const rejectPayoutService = async (txnID) => {
+    return await affiliateModel.rejectPayout(txnID);
+};
+
+module.exports = {
+    applyAffiliateService,
+    approveAffiliateService,
+    getAllAffiliateTransactions,
+    getAffiliatedOrdersService,
+    getAffiliateAnalyticsService,
+    createAffiliate,
+    getPayoutHistoryService,
+    getRequestedPayoutAmountService,
+    getPendingPayoutAvailableService,
+    getRequestablePayoutsService,
+    getPayoutRequestsService,
+    approvePayoutService,
+    rejectPayoutService
+};

@@ -389,7 +389,7 @@ const fetchPaginatedProducts = async (query) => {
     console.log(query);
 
     let page = parseInt(query.page) || 1;
-    let limit = parseInt(query.limit) || 10;
+    let limit = parseInt(query.limit) || 2;
 
     if (page < 1) page = 1;
     if (limit < 1) limit = 10;
@@ -459,4 +459,137 @@ const getProductDetails = async (productID) => {
 
 
 
-module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap };
+// Public shop products with filters: multiple categories, price range, stock, pagination
+async function getShopProductsPublic(query) {
+    let page = Math.max(1, parseInt(query.page) || 1);
+    let limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
+    let type = query.type || 'variable';
+
+    const filters = [];
+    const values = [];
+
+    // Category filter: categoryID can be comma-separated IDs
+    if (query.categoryID) {
+        const ids = String(query.categoryID)
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(Number)
+            .filter(n => !Number.isNaN(n));
+        if (ids.length > 0) {
+            const orConds = ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+            filters.push(`(${orConds.join(' OR ')})`);
+            values.push(...ids);
+        }
+    }
+
+    // Type filter: default to 'variable' unless explicitly provided otherwise
+    if (type && String(type).toLowerCase() !== 'all') {
+        filters.push(`type = ?`);
+        values.push(type);
+    }
+
+    // Price range (single min/max) or multiple bands via priceBands param
+    const priceBands = typeof query.priceBands === 'string'
+        ? query.priceBands.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+    if (priceBands.length > 0) {
+        const bandConds = [];
+        for (const band of priceBands) {
+            if (band === 'u500') bandConds.push(`(salePrice >= 0 AND salePrice <= 499)`);
+            else if (band === '500-999') bandConds.push(`(salePrice >= 500 AND salePrice <= 999)`);
+            else if (band === '1000-1999') bandConds.push(`(salePrice >= 1000 AND salePrice <= 1999)`);
+            else if (band === '2000+') bandConds.push(`(salePrice >= 2000)`);
+        }
+        if (bandConds.length > 0) filters.push(`(${bandConds.join(' OR ')})`);
+    } else {
+        const minPrice = query.minPrice !== undefined && query.minPrice !== '' ? Number(query.minPrice) : null;
+        const maxPrice = query.maxPrice !== undefined && query.maxPrice !== '' ? Number(query.maxPrice) : null;
+        if (minPrice !== null && !Number.isNaN(minPrice)) { filters.push(`salePrice >= ?`); values.push(minPrice); }
+        if (maxPrice !== null && !Number.isNaN(maxPrice)) { filters.push(`salePrice <= ?`); values.push(maxPrice); }
+    }
+
+    // Stock filter (optional): stock=in|out maps to status field values
+    if (query.stock) {
+        const stock = String(query.stock).toLowerCase();
+        if (stock === 'in') {
+            // Treat NULL as In Stock as well
+            filters.push(`(status = ? OR status IS NULL)`);
+            values.push('In Stock');
+        } else if (stock === 'out') {
+            filters.push(`status = ?`);
+            values.push('Out of Stock');
+        }
+    }
+
+    // Optional search by name
+    if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
+
+    // Sorting
+    const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
+    const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
+    const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    // Base query
+    let baseQuery = `SELECT productID, name, description, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, createdAt FROM products`;
+    if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
+    baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
+
+    // Count query
+    let countQuery = `SELECT COUNT(*) AS total FROM products`;
+    if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
+
+    const offset = (page - 1) * limit;
+    const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+    const [countRows] = await db.query(countQuery, values);
+    const total = countRows?.[0]?.total || 0;
+
+    return {
+        success: true,
+        data: rows,
+        pagination: {
+            currentPage: page,
+            totalItems: total,
+            totalPages: Math.ceil(total / limit),
+            itemsPerPage: limit,
+            hasPrevPage: page > 1,
+            hasNextPage: page < Math.ceil(total / limit)
+        }
+    };
+}
+
+const deleteProduct = async (productID) => {
+    try {
+        if (!productID) {
+            return {
+                success: false,
+                message: 'Product ID is required'
+            };
+        }
+
+        const result = await model.deleteProduct(productID);
+
+        if (result.success) {
+            return {
+                success: true,
+                message: 'Product deleted successfully',
+                affectedRows: result.affectedRows
+            };
+        } else {
+            return {
+                success: false,
+                message: 'Failed to delete product',
+                error: result.error
+            };
+        }
+    } catch (error) {
+        return {
+            success: false,
+            message: 'Error deleting product',
+            error: error.message
+        };
+    }
+};
+
+module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap, getShopProductsPublic, deleteProduct };

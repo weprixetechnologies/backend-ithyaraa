@@ -225,7 +225,56 @@ const getProductDetails = async (req, res) => {
 };
 
 
-module.exports = { addProduct, getPaginatedProducts, getProductPageCount , getProductDetails,editProduct};
+const deleteProduct = async (req, res) => {
+    try {
+        const { productID } = req.params;
+        
+        if (!productID) {
+            return res.status(400).json({
+                success: false,
+                message: 'Product ID is required'
+            });
+        }
+
+        const result = await service.deleteProduct(productID);
+        
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: result.message,
+                affectedRows: result.affectedRows
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                message: result.message,
+                error: result.error
+            });
+        }
+    } catch (error) {
+        console.error('Error in deleteProduct:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+module.exports = { addProduct, getPaginatedProducts, getProductPageCount , getProductDetails, editProduct, deleteProduct };
+
+// Public shop products endpoint
+async function shopList(req, res) {
+    try {
+        const result = await service.getShopProductsPublic(req.query);
+        return res.status(200).json(result);
+    } catch (e) {
+        console.error('shopList error:', e);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+}
+
+module.exports.shopList = shopList;
 
 
 //payload

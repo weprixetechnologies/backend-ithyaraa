@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const cartController = require('../controllers/userCouponsController');
-
-router.post('/apply-coupon', cartController.applyCoupon);
+const authAdminMiddleware = require('../middleware/authAdminMiddleware');
+router.post('/apply-coupon', authAdminMiddleware.verifyAccessToken, cartController.applyCoupon);
 
 module.exports = router;

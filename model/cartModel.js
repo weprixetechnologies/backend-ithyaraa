@@ -40,6 +40,14 @@ async function getCartItem(cartID, productID) {
     return rows[0] || null;
 }
 
+async function getCartItemByID(cartItemID) {
+    const [rows] = await db.query(
+        `SELECT * FROM cart_items WHERE cartItemID = ? LIMIT 1`,
+        [cartItemID]
+    );
+    return rows[0] || null;
+}
+
 // Insert new cart item
 async function insertCartItem(data) {
     const {
@@ -47,7 +55,7 @@ async function insertCartItem(data) {
         regularPrice, salePrice, overridePrice,
         unitPriceBefore, unitPriceAfter,
         lineTotalBefore, lineTotalAfter,
-        offerID, name, featuredImage, variationID, variationName, referBy
+        offerID, name, featuredImage, variationID, variationName
     } = data;
 
     const [result] = await db.query(
@@ -57,14 +65,14 @@ async function insertCartItem(data) {
       unitPriceBefore, unitPriceAfter,
       lineTotalBefore, lineTotalAfter,
       offerID, offerApplied, offerStatus, appliedOfferID,
-      name, featuredImage, variationID, variationName, referBy
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?)`,
+      name, featuredImage, variationID, variationName
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?)`,
         [
             cartID, uid, productID, quantity,
             regularPrice, salePrice, overridePrice,
             unitPriceBefore, unitPriceAfter,
             lineTotalBefore, lineTotalAfter,
-            offerID, name, featuredImage, variationID, variationName, referBy || null
+            offerID, name, featuredImage, variationID, variationName
         ]
     );
     const [inserted] = await db.query(
@@ -204,6 +212,14 @@ async function updateCartDetail(uid, summary) {
     );
 }
 
+// Update referBy centrally on cartDetail
+async function updateCartReferBy(uid, referBy) {
+    await db.query(
+        `UPDATE cartDetail SET referBy = ?, updatedAt = NOW() WHERE uid = ?`,
+        [referBy || null, uid]
+    );
+}
+
 async function getCartSummaryFromDB(uid) {
     const [rows] = await db.query(
         `SELECT subtotal, total, totalDiscount, modified 
@@ -213,24 +229,10 @@ async function getCartSummaryFromDB(uid) {
     );
     return rows[0] || null;
 }
-// Fetch cart item
-async function getCartItem(cartID, productID) {
-    const [rows] = await db.query(
-        "SELECT * FROM cart_items WHERE cartID = ? AND productID = ?",
-        [cartID, productID]
-    );
-    return rows[0];
-}
 
 // Delete cart item
 async function deleteCartItem(cartItemID) {
     await db.query("DELETE FROM cart_items WHERE cartItemID = ?", [cartItemID]);
-}
-async function getOrCreateCart(uid) {
-    const [rows] = await db.query('SELECT * FROM cartDetail WHERE uid = ?', [uid]);
-    if (rows.length > 0) return rows[0];
-    const [result] = await db.query('INSERT INTO cartDetail (uid) VALUES (?)', [uid]);
-    return { cartID: result.insertId, uid };
 }
 
 async function getProductByIDCombo(productID) {
@@ -238,6 +240,14 @@ async function getProductByIDCombo(productID) {
         `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice 
          FROM products WHERE productID = ?`,
         [productID]
+    );
+    return rows[0] || null;
+}
+
+async function getVariationByID(variationID) {
+    const [rows] = await db.query(
+        `SELECT * FROM variations WHERE variationID = ?`,
+        [variationID]
     );
     return rows[0] || null;
 }
@@ -321,6 +331,7 @@ module.exports = {
     getProductByID,
     getOrCreateCart,
     getCartItem,
+    getCartItemByID,
     insertCartItem,
     updateCartItemQuantity, updateCartTotals, getCartModifiedFlag,
     getCartItems,
@@ -328,8 +339,9 @@ module.exports = {
     updateCartItems,
     updateCartDetail,
     getCartSummaryFromDB, deleteCartItem, getProductByIDCombo,
+    getVariationByID,
     getVariationByIDCombo,
     insertCartItemCombo,
-    insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation
+    insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy
 
 };

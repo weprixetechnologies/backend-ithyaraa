@@ -9,9 +9,13 @@ async function createOrder(orderData) {
 
         // 1. Insert into orderDetail
         const generatedTxnID = orderData.txnID || randomUUID();
+        const orderReferBy = orderData.items && orderData.items.length > 0 ? orderData.items[0].referBy : null;
+        // Determine payment status based on payment mode
+        const paymentStatus = (orderData.paymentMode || 'cod').toUpperCase() === 'PREPAID' ? 'pending' : 'successful';
+
         const [detailResult] = await connection.query(
-            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, trackingID, deliveryCompany, couponCode, couponDiscount) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderData.uid,
                 orderData.summary.subtotal,
@@ -21,10 +25,12 @@ async function createOrder(orderData) {
                 generatedTxnID,
                 orderData.addressID,
                 orderData.paymentMode || 'cod',
+                paymentStatus,
                 orderData.trackingID || null,
                 orderData.deliveryCompany || null,
                 orderData.couponCode || null,
-                orderData.couponDiscount || 0.00
+                orderData.couponDiscount || 0.00,
+                orderReferBy || null
             ]
         );
         const orderID = detailResult.insertId;
@@ -115,7 +121,8 @@ async function getOrderItemsByUid(uid) {
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
-                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt,
+                    od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt
              FROM order_items oi
              INNER JOIN orderDetail od ON oi.orderID = od.orderID
              WHERE od.uid = ?
@@ -163,7 +170,7 @@ async function updateOrderPaymentStatus(merchantTransactionId, status) {
     const connection = await db.getConnection();
     try {
         const [result] = await connection.query(
-            'UPDATE orderDetail SET paymentStatus = ?, updatedAt = NOW() WHERE merchantTransactionId = ?',
+            'UPDATE orderDetail SET paymentStatus = ? WHERE merchantTransactionId = ?',
             [status, merchantTransactionId]
         );
         return result.affectedRows > 0;
@@ -177,7 +184,7 @@ async function addMerchantTransactionId(orderID, merchantTransactionId) {
     const connection = await db.getConnection();
     try {
         const [result] = await connection.query(
-            'UPDATE orderDetail SET merchantTransactionId = ?, updatedAt = NOW() WHERE orderID = ?',
+            'UPDATE orderDetail SET merchantTransactionId = ? WHERE orderID = ?',
             [merchantTransactionId, orderID]
         );
         return result.affectedRows > 0;
@@ -227,7 +234,7 @@ async function updateOrderByID(orderID, updateData = {}) {
         values.push(orderID);
 
         const [result] = await connection.query(
-            `UPDATE orderDetail SET ${fields.join(', ')}, updatedAt = NOW() WHERE orderID = ?`,
+            `UPDATE orderDetail SET ${fields.join(', ')} WHERE orderID = ?`,
             values
         );
 

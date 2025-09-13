@@ -74,3 +74,13 @@ module.exports = {
     getFilteredCategories,
     updateCategoryByID
 };
+
+// Fetch all categories: categoryID and categoryName only
+async function getAllCategoryNamesIDs() {
+    const [rows] = await db.query(
+        `SELECT categoryID, categoryName FROM categories ORDER BY categoryName ASC`
+    );
+    return rows || [];
+}
+
+module.exports.getAllCategoryNamesIDs = getAllCategoryNamesIDs;
