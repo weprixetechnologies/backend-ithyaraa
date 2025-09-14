@@ -1,10 +1,9 @@
 const { Queue } = require('bullmq');
 const jwt = require('jsonwebtoken');
 
-const connection = {
-  host: '127.0.0.1',
-  port: 6379,
-};
+const connection = new Redis(process.env.REDIS_URL, {
+  tls: {} // Required for Upstash secure connection
+});
 
 const sendEmailsQueue = new Queue('sendEmails', { connection });
 
