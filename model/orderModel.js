@@ -73,23 +73,70 @@ async function createOrder(orderData) {
             );
 
             // Deduct stock
-            if (item.comboItems && Array.isArray(item.comboItems)) {
-                for (const combo of item.comboItems) {
-                    const deductQty = (item.quantity || 1) * (combo.quantity || 1);
-                    await connection.query(
-                        `UPDATE variations
-                         SET variationStock = variationStock - ?
-                         WHERE variationID = ?`,
-                        [deductQty, combo.variationID]
-                    );
+            console.log(`\n=== STOCK DEDUCTION DEBUG ===`);
+            console.log(`Processing item:`, {
+                productID: item.productID,
+                variationID: item.variationID,
+                quantity: item.quantity,
+                hasComboItems: !!(item.comboItems && Array.isArray(item.comboItems)),
+                comboItemsCount: item.comboItems ? item.comboItems.length : 0
+            });
+            console.log('ITEM', item);
+
+
+            if (item.comboID) {
+                // Handle combo items - fetch from order_combo_items table
+                console.log(`Processing combo items for comboID: ${item.comboID}`);
+
+                const [comboItems] = await connection.query(
+                    `SELECT productID, variationID, quantity 
+                     FROM order_combo_items 
+                     WHERE comboID = ?`,
+                    [item.comboID]
+                );
+
+                console.log(`Found ${comboItems.length} combo items:`, comboItems);
+
+                for (const combo of comboItems) {
+                    const deductQty = item.quantity || 1;
+                    console.log(`Deducting ${deductQty} from variation ${combo.variationID} for product ${combo.productID}`);
+
+                    if (combo.variationID) {
+                        const [result] = await connection.query(
+                            `UPDATE variations
+                             SET variationStock = variationStock - ?
+                             WHERE variationID = ?`,
+                            [deductQty, combo.variationID]
+                        );
+                        console.log(`Combo stock deduction result:`, result);
+                    } else {
+                        console.warn(`Combo item ${combo.productID} has no variationID - stock cannot be deducted`);
+                    }
                 }
-            } else {
-                await connection.query(
+            } else if (item.variationID) {
+                // Handle products with variations - deduct from variation stock
+                console.log(`Deducting ${item.quantity || 1} from variation ${item.variationID}`);
+
+                const [result] = await connection.query(
                     `UPDATE variations
                      SET variationStock = variationStock - ?
                      WHERE variationID = ?`,
                     [item.quantity || 1, item.variationID]
                 );
+                console.log(`Stock deduction result:`, result);
+
+                // Verify the deduction worked
+                const [verifyResult] = await connection.query(
+                    `SELECT variationStock FROM variations WHERE variationID = ?`,
+                    [item.variationID]
+                );
+                console.log(`Stock after deduction:`, verifyResult[0]);
+            } else {
+                // Handle products without variations - check if product has any variations
+                // If no variations exist, we can't deduct stock as there's no stock field in products table
+                // This is a limitation of the current schema design
+                console.warn(`Product ${item.productID} has no variationID - stock cannot be deducted automatically`);
+                console.warn(`Manual stock management required for products without variations`);
             }
         }
 
@@ -129,6 +176,39 @@ async function getOrderItemsByUid(uid) {
              ORDER BY oi.createdAt DESC, oi.orderID DESC`,
             [uid]
         );
+
+        // Utility: safe JSON parser (deep)
+        const safeParse = (value, fallback = null) => {
+            try {
+                let parsed = value;
+                // Keep parsing until it's not a string anymore
+                while (typeof parsed === "string") parsed = JSON.parse(parsed);
+                return parsed;
+            } catch {
+                return fallback;
+            }
+        };
+
+        // Load combo items for each order item (like cart does)
+        const cartModel = require('./cartModel');
+        for (const item of rows) {
+            if (item.comboID) {
+                const comboItems = await cartModel.getComboItems(item.comboID);
+                item.comboItems = comboItems;
+            }
+
+            // Deep parse featuredImage
+            item.featuredImage = safeParse(item.featuredImage, []);
+
+            // Deep parse combo items featuredImage
+            if (item.comboItems && Array.isArray(item.comboItems)) {
+                item.comboItems = item.comboItems.map(comboItem => ({
+                    ...comboItem,
+                    featuredImage: safeParse(comboItem.featuredImage, [])
+                }));
+            }
+        }
+
         return rows;
     } finally {
         connection.release();

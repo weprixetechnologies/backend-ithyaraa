@@ -47,7 +47,7 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 	// Add attachments if provided
 	if (attachments && attachments.length > 0) {
 		console.log(`Processing ${attachments.length} attachments...`);
-		
+
 		// Process attachments to ensure proper format
 		mailOptions.attachments = attachments.map((attachment, index) => {
 			console.log(`Processing attachment ${index + 1}:`);
@@ -55,7 +55,9 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 			console.log(`  Content type: ${attachment.contentType}`);
 			console.log(`  Content length: ${attachment.content ? attachment.content.length : 'undefined'}`);
 			console.log(`  Content is Buffer: ${Buffer.isBuffer(attachment.content)}`);
-			
+			console.log(`  Content type: ${typeof attachment.content}`);
+			console.log(`  Content constructor: ${attachment.content?.constructor?.name}`);
+
 			// Ensure content is a Buffer
 			if (attachment.content) {
 				if (Buffer.isBuffer(attachment.content)) {
@@ -83,9 +85,32 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 						content: buffer,
 						contentType: attachment.contentType
 					};
+				} else if (attachment.content && typeof attachment.content === 'object' && attachment.content.data && Array.isArray(attachment.content.data)) {
+					// Handle deserialized Buffer from BullMQ (has .data property with array)
+					console.log(`  ⚠️  Converting deserialized Buffer to Buffer...`);
+					const buffer = Buffer.from(attachment.content.data);
+					console.log(`  Converted to Buffer: ${buffer.length} bytes`);
+					return {
+						filename: attachment.filename,
+						content: buffer,
+						contentType: attachment.contentType
+					};
 				} else {
 					console.log(`  ⚠️  Converting other type to Buffer...`);
-					const buffer = Buffer.from(String(attachment.content));
+					// For binary content like PDFs, don't convert to string first
+					let buffer;
+					if (attachment.contentType === 'application/pdf' || attachment.contentType?.includes('pdf')) {
+						// For PDFs, try to preserve the original buffer
+						if (attachment.content instanceof ArrayBuffer) {
+							buffer = Buffer.from(attachment.content);
+						} else if (attachment.content && typeof attachment.content === 'object' && attachment.content.length !== undefined) {
+							buffer = Buffer.from(attachment.content);
+						} else {
+							buffer = Buffer.from(attachment.content);
+						}
+					} else {
+						buffer = Buffer.from(String(attachment.content));
+					}
 					console.log(`  Converted to Buffer: ${buffer.length} bytes`);
 					return {
 						filename: attachment.filename,
@@ -94,11 +119,11 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 					};
 				}
 			}
-			
+
 			console.log(`  ❌ No content found for attachment`);
 			return attachment;
 		});
-		
+
 		console.log(`Final attachments:`, mailOptions.attachments.map(att => ({
 			filename: att.filename,
 			contentLength: att.content ? att.content.length : 'undefined',

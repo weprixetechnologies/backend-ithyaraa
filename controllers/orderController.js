@@ -67,25 +67,13 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             const invoiceResult = await orderService.generateInvoice(order.orderID);
 
             if (invoiceResult && invoiceResult.success) {
-                const fs = require('fs');
-                const path = require('path');
-                const tempDir = path.join(__dirname, '..', 'temp');
-
-                // Create temp directory if it doesn't exist
-                if (!fs.existsSync(tempDir)) {
-                    fs.mkdirSync(tempDir, { recursive: true });
-                }
-
-                const tempFilePath = path.join(tempDir, `invoice_${order.orderID}.pdf`);
-                fs.writeFileSync(tempFilePath, invoiceResult.invoice.pdfBuffer);
-
                 attachments = [{
                     filename: `invoice_${order.orderID}.pdf`,
-                    path: tempFilePath,
+                    content: invoiceResult.invoice.pdfBuffer,
                     contentType: 'application/pdf'
                 }];
 
-                console.log(`Invoice PDF generated for order confirmation: ${tempFilePath} (${invoiceResult.invoice.pdfBuffer.length} bytes)`);
+                console.log(`Invoice PDF generated for order confirmation: ${invoiceResult.invoice.pdfBuffer.length} bytes`);
             }
         } catch (invoiceError) {
             console.error('Error generating invoice for order confirmation:', invoiceError);

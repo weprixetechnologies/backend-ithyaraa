@@ -7,6 +7,7 @@ const affiliateModel = require('./../model/affiliateModel');
 const invoiceService = require('./invoiceService');
 const { addSendEmailJob } = require('../queue/emailProducer');
 const { randomUUID } = require('crypto');
+const cartModel = require('./../model/cartModel');
 
 async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null) {
     // Step 1: Process cart (offers, totals, summary)
@@ -15,6 +16,19 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     if (!cartData.items || cartData.items.length === 0) {
         throw new Error('Cart is empty');
     }
+
+    // Debug: Log cart data structure
+    console.log('\n=== CART DATA DEBUG ===');
+    console.log('Cart items count:', cartData.items.length);
+    cartData.items.forEach((item, index) => {
+        console.log(`Item ${index + 1}:`, {
+            productID: item.productID,
+            variationID: item.variationID,
+            quantity: item.quantity,
+            hasComboItems: !!(item.comboItems && Array.isArray(item.comboItems)),
+            comboItemsCount: item.comboItems ? item.comboItems.length : 0
+        });
+    });
 
     // Step 2: Handle coupon validation and discount calculation
     let couponDiscount = 0;
@@ -282,45 +296,48 @@ async function getOrderDetails(orderId, uid) {
             [orderId, uid]
         );
 
-        // Parse featuredImage for each item if it's a JSON string
-        const processedItems = items.map(item => {
-            let parsedFeaturedImage = [];
+        // Utility: safe JSON parser (deep)
+        const safeParse = (value, fallback = null) => {
+            try {
+                let parsed = value;
+                // Keep parsing until it's not a string anymore
+                while (typeof parsed === "string") parsed = JSON.parse(parsed);
+                return parsed;
+            } catch {
+                return fallback;
+            }
+        };
 
-            if (item.featuredImage && typeof item.featuredImage === 'string') {
-                try {
-                    // Handle double-encoded JSON strings
-                    let jsonString = item.featuredImage;
-                    if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
-                        jsonString = JSON.parse(jsonString);
-                    }
-                    parsedFeaturedImage = JSON.parse(jsonString);
-                } catch (e) {
-                    console.error('Error parsing featuredImage:', e);
-                    parsedFeaturedImage = [];
-                }
-            } else if (Array.isArray(item.featuredImage)) {
-                parsedFeaturedImage = item.featuredImage;
+        const processedItems = [];
+        for (const item of items) {
+            // Load combo items if applicable
+            if (item.comboID) {
+                item.comboItems = await cartModel.getComboItems(item.comboID);
             }
 
-            // Convert string prices to numbers for consistency
-            const salePrice = parseFloat(item.salePrice) || 0;
-            const regularPrice = parseFloat(item.regularPrice) || 0;
-            const lineTotalAfter = parseFloat(item.lineTotalAfter) || 0;
+            // Deep parse featuredImage
+            const parsedFeaturedImage = safeParse(item.featuredImage, []);
 
-            // Clean up the response - only send necessary fields
-            return {
+            // Deep parse combo items featuredImage
+            const processedComboItems = (item.comboItems || []).map(comboItem => ({
+                ...comboItem,
+                featuredImage: safeParse(comboItem.featuredImage, [])
+            }));
+
+            processedItems.push({
                 productID: item.productID,
-                quantity: item.quantity,
+                quantity: Number(item.quantity) || 0,
                 variationID: item.variationID,
                 variationName: item.variationName,
-                salePrice: salePrice,
-                regularPrice: regularPrice,
-                lineTotalAfter: lineTotalAfter,
+                salePrice: Number(item.salePrice) || 0,
+                regularPrice: Number(item.regularPrice) || 0,
+                lineTotalAfter: Number(item.lineTotalAfter) || 0,
                 name: item.name,
-                featuredImage: parsedFeaturedImage, // This will be a proper array
-                createdAt: item.createdAt
-            };
-        });
+                featuredImage: Array.isArray(parsedFeaturedImage) ? parsedFeaturedImage : [],
+                createdAt: item.createdAt,
+                comboItems: processedComboItems
+            });
+        }
 
         // Get address details
         let deliveryAddress = null;
@@ -350,8 +367,8 @@ async function getOrderDetails(orderId, uid) {
             }
         }
 
-        // Format the response
-        const orderDetails = {
+        // Build final response
+        return {
             orderID: order.orderID,
             uid: order.uid,
             paymentMode: order.paymentMode,
@@ -359,16 +376,14 @@ async function getOrderDetails(orderId, uid) {
             status: order.status || 'confirmed',
             createdAt: order.createdAt,
             items: processedItems,
-            subtotal: parseFloat(order.subtotal) || 0,
-            discount: parseFloat(order.totalDiscount) || 0,
-            shipping: 0, // Shipping is not stored separately in current schema
-            total: parseFloat(order.total) || 0,
-            deliveryAddress: deliveryAddress,
+            subtotal: Number(order.subtotal) || 0,
+            discount: Number(order.totalDiscount) || 0,
+            shipping: 0,
+            total: Number(order.total) || 0,
+            deliveryAddress,
             couponCode: order.couponCode,
-            couponDiscount: parseFloat(order.couponDiscount) || 0
+            couponDiscount: Number(order.couponDiscount) || 0
         };
-
-        return orderDetails;
     } catch (error) {
         console.error('Error in getOrderDetails service:', error);
         throw error;

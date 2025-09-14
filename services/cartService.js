@@ -154,6 +154,7 @@ async function addCartCombo(uid, quantity, mainProductID, products) {
 }
 
 
+
 async function getCart(uid) {
     const modified = await cartModel.getCartModifiedFlag(uid);
 
@@ -164,7 +165,7 @@ async function getCart(uid) {
             console.log(item);
 
 
-            const comboItems = await cartModel.getComboItems(item.cartItemID);
+            const comboItems = await cartModel.getComboItems(item.comboID);
             item.comboItems = comboItems;
         }
 
@@ -259,6 +260,7 @@ async function getCart(uid) {
     }
     return { items, summary, cartID: cart.cartID };
 }
+
 
 // --- Offer helpers with fixed numeric handling ---
 function applyBuyXGetY(affectedItems, offer) {

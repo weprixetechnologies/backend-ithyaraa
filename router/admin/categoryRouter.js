@@ -3,6 +3,11 @@ const router = express.Router();
 const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 const categoryController = require('./../../controllers/categoryController');
 
+// Public routes (no auth required)
+router.get('/public', categoryController.getCategories);
+router.get('/public/:categoryID', categoryController.getCategoryByID);
+
+// Admin routes (auth required)
 router.post('/upload-category', authAdminMiddleware.verifyAccessToken, categoryController.postCategory);
 router.get('/all-category', authAdminMiddleware.verifyAccessToken, categoryController.getCategories); // GET with optional filters + pagination
 router.get('/detail/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.getCategoryByID);

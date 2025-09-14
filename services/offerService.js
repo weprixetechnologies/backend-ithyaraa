@@ -77,18 +77,9 @@ const fetchFilteredOffers = async (query) => {
         }
     }
 
-    // Basic pagination still applied
-    const page = parseInt(query.page) || 1;
-    const limit = parseInt(query.limit) || 10;
-    const offset = (page - 1) * limit;
+    const result = await offerModel.getFilteredOffers(filters, values);
 
-    const result = await offerModel.getFilteredOffers(filters, values, limit, offset);
-
-    return {
-        currentPage: page,
-        success: true,
-        data: result
-    };
+    return result;
 };
 
 const fetchOfferCount = async (query) => {

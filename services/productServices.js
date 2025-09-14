@@ -526,6 +526,12 @@ async function getShopProductsPublic(query) {
     // Optional search by name
     if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
 
+    // Offer filter
+    if (query.offerID) {
+        filters.push(`offerID = ?`);
+        values.push(query.offerID);
+    }
+
     // Sorting
     const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
     const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
