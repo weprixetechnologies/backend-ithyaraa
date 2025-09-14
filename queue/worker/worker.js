@@ -1,12 +1,9 @@
 // BullMQ Worker Example
 
-
 const { Worker } = require('bullmq');
+const { REDIS_CONFIG } = require('../../utils/config');
 
-const connection = {
-    host: '127.0.0.1',
-    port: 6379,
-};
+const connection = REDIS_CONFIG;
 
 const notificationWorker = new Worker('notificationQueue', async job => {
     if (job.name === 'sendEmail') {

@@ -1,12 +1,10 @@
 // BullMQ Producer Example
 
 const { Queue } = require('bullmq');
+const { REDIS_CONFIG } = require('../utils/config');
 
-// Redis connection config for Docker
-const connection = {
-    host: '127.0.0.1',
-    port: 6379,
-};
+// Redis connection config with TLS support
+const connection = REDIS_CONFIG;
 
 const notificationQueue = new Queue('notificationQueue', { connection });
 

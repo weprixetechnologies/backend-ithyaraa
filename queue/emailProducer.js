@@ -1,9 +1,8 @@
 const { Queue } = require('bullmq');
 const jwt = require('jsonwebtoken');
+const { REDIS_CONFIG } = require('../utils/config');
 
-const connection = new Redis(process.env.REDIS_URL, {
-  tls: {} // Required for Upstash secure connection
-});
+const connection = REDIS_CONFIG;
 
 const sendEmailsQueue = new Queue('sendEmails', { connection });
 
@@ -22,26 +21,26 @@ function addEmailJob({ to, templateName, variables, subject }) {
 
 
 async function addSendEmailJob(data) {
-    await sendEmailsQueue.add('sendEmail', data);
+  await sendEmailsQueue.add('sendEmail', data);
 }
 
 const sendVerifyEmail = async (user) => {
-    // Generate token
-    const payload = { uid: user.uid, email: user.emailID };
-    const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET || 'email_verify_secret', { expiresIn: '1d' });
-    // Construct verify link
-    const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
-    // Send email via queue
-    await addSendEmailJob({
-        to: user.emailID,
-        templateName: 'verifyemail',
-        variables: {
-            name: user.name || user.username,
-            verifyLink
-        },
-        subject: 'Verify Your Email'
-    });
-    return { success: true, message: 'Verification email sent', token };
+  // Generate token
+  const payload = { uid: user.uid, email: user.emailID };
+  const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET || 'email_verify_secret', { expiresIn: '1d' });
+  // Construct verify link
+  const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
+  // Send email via queue
+  await addSendEmailJob({
+    to: user.emailID,
+    templateName: 'verifyemail',
+    variables: {
+      name: user.name || user.username,
+      verifyLink
+    },
+    subject: 'Verify Your Email'
+  });
+  return { success: true, message: 'Verification email sent', token };
 };
 
 module.exports = {
