@@ -31,14 +31,16 @@ const insertUser = async (userData) => {
         balance,
         createdOn,
         name,
-        password, referCode
+        password,
+        referCode,
+        profilePhoto
     } = userData;
 
     await db.query(
         `INSERT INTO users 
-        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role, referCode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?)`,
-        [uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, 'user', referCode]
+        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role, referCode, profilePhoto)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, 'user', referCode, profilePhoto]
     );
 };
 
@@ -58,18 +60,43 @@ const findUserByUIDFull = async (uid) => {
 
     return rows[0]; // Return the first (and only) user
 };
-const updateUserByUID = async (uid, { name, profilePhoto }) => {
+const updateUserByUID = async (uid, updateData) => {
     // Build dynamic update query (only update provided fields)
     const fields = [];
     const values = [];
 
-    if (name) {
+    // Handle all possible update fields
+    if (updateData.name) {
         fields.push("name = ?");
-        values.push(name);
+        values.push(updateData.name);
     }
-    if (profilePhoto) {
+    if (updateData.profilePhoto) {
         fields.push("profilePhoto = ?");
-        values.push(profilePhoto);
+        values.push(updateData.profilePhoto);
+    }
+    if (updateData.emailID) {
+        fields.push("emailID = ?");
+        values.push(updateData.emailID);
+    }
+    if (updateData.phonenumber) {
+        fields.push("phonenumber = ?");
+        values.push(updateData.phonenumber);
+    }
+    if (updateData.balance !== undefined) {
+        fields.push("balance = ?");
+        values.push(updateData.balance);
+    }
+    if (updateData.password) {
+        fields.push("password = ?");
+        values.push(updateData.password);
+    }
+    if (updateData.verifiedEmail !== undefined) {
+        fields.push("verifiedEmail = ?");
+        values.push(updateData.verifiedEmail);
+    }
+    if (updateData.verifiedPhone !== undefined) {
+        fields.push("verifiedPhone = ?");
+        values.push(updateData.verifiedPhone);
     }
 
     if (fields.length === 0) return null;
@@ -82,6 +109,9 @@ const updateUserByUID = async (uid, { name, profilePhoto }) => {
     WHERE uid = ?
     LIMIT 1
   `;
+
+    console.log('Update query:', query);
+    console.log('Update values:', values);
 
     const [result] = await db.query(query, values);
 
@@ -127,9 +157,22 @@ const updatePassword = async (uid, hashedPassword) => {
     await db.query(`UPDATE users SET password = ? WHERE uid = ?`, [hashedPassword, uid]);
 };
 
+const deleteUserByUID = async (uid) => {
+    const [result] = await db.query(`DELETE FROM users WHERE uid = ?`, [uid]);
+    return result.affectedRows > 0;
+};
+
 const setEmailVerified = async (uid) => {
     const [result] = await db.query(
         'UPDATE users SET verifiedEmail = 1 WHERE uid = ?',
+        [uid]
+    );
+    return result.affectedRows > 0;
+};
+
+const setPhoneVerified = async (uid) => {
+    const [result] = await db.query(
+        'UPDATE users SET verifiedPhone = 1 WHERE uid = ?',
         [uid]
     );
     return result.affectedRows > 0;
@@ -205,6 +248,8 @@ module.exports = {
     findUserByUIDFull,
     findUserByUsername,
     setEmailVerified,
+    setPhoneVerified,
     findUserByEmail, findUserByPhone,
-    getOtpRecord, getUserByIdentifier, creditUserBalance, updateUserByUID, incrementPendingPayment
+    getOtpRecord, getUserByIdentifier, creditUserBalance, updateUserByUID, incrementPendingPayment,
+    deleteUserByUID
 };

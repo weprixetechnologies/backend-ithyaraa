@@ -7,6 +7,9 @@ const insertOffer = async (offerData) => {
         offerMobileBanner, offerBanner, products
     } = offerData;
 
+    // Handle buyAt based on offer type
+    const processedBuyAt = offerType === 'buy_x_get_y' ? null : (buyAt || null);
+
     const [result] = await db.query(
         `INSERT INTO offers (
             offerID, offerName, offerType,
@@ -15,7 +18,7 @@ const insertOffer = async (offerData) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             offerID, offerName, offerType,
-            buyAt, buyCount, getCount,
+            processedBuyAt, buyCount, getCount,
             offerMobileBanner, offerBanner, products
         ]
     );
@@ -79,6 +82,7 @@ const updateOfferByID = async (offerID, data) => {
         const {
             offerName,
             offerType,
+            buyAt,
             buyCount,
             getCount,
             offerBanner,
@@ -86,17 +90,21 @@ const updateOfferByID = async (offerID, data) => {
             products
         } = data;
 
+        // Handle buyAt based on offer type
+        const processedBuyAt = offerType === 'buy_x_get_y' ? null : (buyAt || null);
+
         const [result] = await db.query(
             `UPDATE offers 
              SET offerName = ?, 
                  offerType = ?, 
+                 buyAt = ?,
                  buyCount = ?, 
                  getCount = ?, 
                  offerBanner = ?, 
                  offerMobileBanner = ?,
                  products = ?
              WHERE offerID = ?`,
-            [offerName, offerType, buyCount, getCount, offerBanner, offerMobileBanner, products, offerID]
+            [offerName, offerType, processedBuyAt, buyCount, getCount, offerBanner, offerMobileBanner, products, offerID]
         );
 
         return {

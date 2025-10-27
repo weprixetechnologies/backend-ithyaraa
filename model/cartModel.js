@@ -3,7 +3,7 @@ const db = require('../utils/dbconnect'); // your DB connection
 // Fetch product by productID
 async function getProductByID(productID) {
     const [rows] = await db.query(
-        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice 
+        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice , brandID
      FROM products 
      WHERE productID = ?`,
         [productID]
@@ -55,7 +55,7 @@ async function insertCartItem(data) {
         regularPrice, salePrice, overridePrice,
         unitPriceBefore, unitPriceAfter,
         lineTotalBefore, lineTotalAfter,
-        offerID, name, featuredImage, variationID, variationName
+        offerID, name, featuredImage, variationID, variationName, brandID, customInputs
     } = data;
 
     const [result] = await db.query(
@@ -65,14 +65,15 @@ async function insertCartItem(data) {
       unitPriceBefore, unitPriceAfter,
       lineTotalBefore, lineTotalAfter,
       offerID, offerApplied, offerStatus, appliedOfferID,
-      name, featuredImage, variationID, variationName
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?)`,
+      name, featuredImage, variationID, variationName, brandID, custom_inputs
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?,?)`,
         [
             cartID, uid, productID, quantity,
             regularPrice, salePrice, overridePrice,
             unitPriceBefore, unitPriceAfter,
             lineTotalBefore, lineTotalAfter,
-            offerID, name, featuredImage, variationID, variationName
+            offerID, name, featuredImage, variationID, variationName, brandID,
+            customInputs ? JSON.stringify(customInputs) : null
         ]
     );
     const [inserted] = await db.query(
@@ -163,19 +164,22 @@ async function getCartItems(uid) {
         SELECT 
             ci.*,
             v.variationSlug AS variationName,
-            v.variationValues
+            v.variationValues,
+            p.type AS productType
         FROM cart_items ci
         LEFT JOIN variations v ON ci.variationID = v.variationID
+        LEFT JOIN products p ON ci.productID = p.productID
         WHERE ci.uid = ?
         ORDER BY ci.cartItemID ASC
     `;
 
     const [rows] = await db.query(query, [uid]);
 
-    // Parse variationValues if JSON
+    // Parse variationValues and custom_inputs if JSON
     return rows.map(item => ({
         ...item,
-        variationValues: item.variationValues ? JSON.parse(item.variationValues) : []
+        variationValues: item.variationValues ? JSON.parse(item.variationValues) : [],
+        custom_inputs: item.custom_inputs ? JSON.parse(item.custom_inputs) : null
     }));
 }
 

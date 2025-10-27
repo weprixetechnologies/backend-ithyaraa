@@ -3,9 +3,10 @@
 
 const { Worker } = require('bullmq');
 const { sendEmail } = require('../service/emailService');
-const { REDIS_CONFIG } = require('../../utils/config');
-
-const connection = REDIS_CONFIG;
+const connection = {
+  host: '127.0.0.1',
+  port: 6379,
+};
 
 
 // Create BullMQ worker for sendEmails queue

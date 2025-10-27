@@ -1,10 +1,10 @@
 // BullMQ Producer Example
 
 const { Queue } = require('bullmq');
-const { REDIS_CONFIG } = require('../utils/config');
+const { REDIS_CONNECTION } = require('../utils/config');
 
-// Redis connection config with TLS support
-const connection = REDIS_CONFIG;
+// Redis connection config (local or cloud)
+const connection = REDIS_CONNECTION;
 
 const notificationQueue = new Queue('notificationQueue', { connection });
 

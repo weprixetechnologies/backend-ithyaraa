@@ -2,6 +2,7 @@
 const crypto = require('crypto')
 const { saveOtp, deleteOtpByPhoneNumber, saveOtpWithPurpose, deleteOtpByUserAndPurpose, getOtpRecordByUserAndPurpose } = require('./../model/otpModel')
 const otpModel = require('./../model/otpModel')
+const { sendEmail } = require('./../queue/service/emailService')
 
 const { client, twilioNumber } = require('./../utils/message');
 
@@ -144,4 +145,62 @@ const verifyPayoutOtp = async (uid, otp, purpose = 'payout_verification') => {
     }
 };
 
-module.exports = { sendOtp, verifyOtp, sendPayoutOtp, verifyPayoutOtp }
+// Send email verification OTP
+const sendEmailVerificationOtp = async (email, name) => {
+    try {
+        const otp = generateOtp();
+        const otpHash = hashOtp(otp);
+        const sentOn = new Date();
+        const expiry = new Date(sentOn.getTime() + 10 * 60000); // 10 min validity
+
+        // Delete any existing OTP for this email
+        await deleteOtpByPhoneNumber(email);
+
+        // Send OTP email instantly (not queued)
+        await sendEmail({
+            to: email,
+            templateName: 'verify-email-otp',
+            variables: {
+                name: name || 'User',
+                otp: otp
+            },
+            subject: 'Verify Your Email - Ithyaraa'
+        });
+
+        // Save OTP in DB
+        await saveOtp({ otpHash, phoneNumber: email, sentOn, expiry });
+
+        return { success: true, message: "Verification OTP sent to your email" };
+    } catch (error) {
+        console.error('Error sending email verification OTP:', error);
+        return { success: false, message: 'Failed to send OTP: ' + error.message };
+    }
+};
+
+// Verify email OTP
+const verifyEmailOtp = async (email, otp) => {
+    try {
+        const hashedOtp = hashOtp(otp);
+
+        // Get OTP record
+        const otpRecord = await otpModel.getOtpRecord(email, hashedOtp);
+        if (!otpRecord) {
+            return { success: false, message: 'Invalid or expired OTP' };
+        }
+
+        // Check if OTP is expired
+        if (new Date() > new Date(otpRecord.expiry)) {
+            return { success: false, message: 'OTP has expired' };
+        }
+
+        // Delete OTP once used
+        await deleteOtpByPhoneNumber(email);
+
+        return { success: true, message: 'Email OTP verified successfully' };
+    } catch (error) {
+        console.error('Error verifying email OTP:', error);
+        return { success: false, message: 'Failed to verify OTP' };
+    }
+};
+
+module.exports = { sendOtp, verifyOtp, sendPayoutOtp, verifyPayoutOtp, sendEmailVerificationOtp, verifyEmailOtp }

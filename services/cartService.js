@@ -1,9 +1,11 @@
 const cartModel = require('../model/cartModel');
 const db = require('./../utils/dbconnect')
 
-async function addToCart(uid, productID, quantity, variationID, variationName, referBy) {
+async function addToCart(uid, productID, quantity, variationID, variationName, referBy, customInputs) {
     // 1. Fetch product
     const product = await cartModel.getProductByID(productID);
+    console.log(product);
+
     if (!product) throw new Error('Product not found');
 
     // 2. Ensure user has a cart
@@ -68,7 +70,9 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
             name: product.name,
             featuredImage: product.featuredImage,
             variationID,
-            variationName
+            variationName,
+            brandID: product.brandID,
+            customInputs: customInputs
         });
     }
 

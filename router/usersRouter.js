@@ -3,10 +3,17 @@ const express = require('express')
 const userRouter = express.Router()
 const usersController = require('./../controllers/usersController')
 const otpController = require('./../controllers/otpController')
-const authMiddleware = require('./../middleware/authAdminMiddleware')
+const verificationController = require('./../controllers/verificationController')
+const authMiddleware = require('./../middleware/authUserMiddleware')
 
 userRouter.post('/create-user', usersController.createUser);
 userRouter.post('/login', usersController.loginUser);
+
+// Test route to verify router is working
+userRouter.get('/test', (req, res) => {
+    console.log('✅ User router test route hit');
+    res.json({ success: true, message: 'User router is working' });
+});
 userRouter.get("/detail/:uid", authMiddleware.verifyAccessToken, usersController.getUserByUID);
 userRouter.get("/detail-by-user", authMiddleware.verifyAccessToken, usersController.getUserByUIDbyUser);
 userRouter.get('/all-users', usersController.getAllUsers);
@@ -32,5 +39,11 @@ userRouter.post('/verify-otp', otpController.verifyOtp)
 // Payout OTP routes (protected)
 userRouter.post('/send-payout-otp', authMiddleware.verifyAccessToken, otpController.sendPayoutOtpController)
 userRouter.post('/verify-payout-otp', authMiddleware.verifyAccessToken, otpController.verifyPayoutOtpController)
+
+// Verification routes (protected)
+userRouter.post('/send-email-verification-otp', authMiddleware.verifyAccessToken, verificationController.sendEmailVerificationOtp)
+userRouter.post('/verify-email-otp', authMiddleware.verifyAccessToken, verificationController.verifyEmailOtp)
+userRouter.post('/send-phone-verification-otp', authMiddleware.verifyAccessToken, verificationController.sendPhoneVerificationOtp)
+userRouter.post('/verify-phone-otp', authMiddleware.verifyAccessToken, verificationController.verifyPhoneOtp)
 
 module.exports = userRouter

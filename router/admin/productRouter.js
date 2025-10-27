@@ -4,6 +4,7 @@ const productController = require('./../../controllers/productController')
 const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 
 productRouter.post('/add-product', authAdminMiddleware.verifyAccessToken, productController.addProduct)
+productRouter.post('/add-custom-product', authAdminMiddleware.verifyAccessToken, productController.addCustomProduct)
 productRouter.post('/edit-product', authAdminMiddleware.verifyAccessToken, productController.editProduct)
 productRouter.delete('/delete/:productID', authAdminMiddleware.verifyAccessToken, productController.deleteProduct)
 productRouter.get('/all-products', productController.getPaginatedProducts)

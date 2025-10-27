@@ -45,8 +45,8 @@ async function createOrder(orderData) {
                     unitPriceBefore, unitPriceAfter,
                     lineTotalBefore, lineTotalAfter,
                     offerID, offerApplied, offerStatus, appliedOfferID,
-                    name, featuredImage, comboID, referBy, createdAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+                    name, featuredImage, comboID, brandID, referBy, custom_inputs, createdAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
                 [
                     orderID,
                     orderData.uid,
@@ -68,7 +68,9 @@ async function createOrder(orderData) {
                     item.name || null,
                     item.featuredImage ? JSON.stringify(item.featuredImage) : null,
                     item.comboID || null,
-                    (item.referBy !== undefined && item.referBy !== null) ? item.referBy : ''
+                    item.brandID,
+                    (item.referBy !== undefined && item.referBy !== null) ? item.referBy : '',
+                    item.custom_inputs ? JSON.stringify(item.custom_inputs) : null
                 ]
             );
 
@@ -168,10 +170,17 @@ async function getOrderItemsByUid(uid) {
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
-                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt,
-                    od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
+                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
+                    v.variationPrice, v.variationStock, v.variationSalePrice,
+                    od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt,
+                    od.addressID, u.username, u.emailID as email, u.phoneNumber as contactNumber
              FROM order_items oi
              INNER JOIN orderDetail od ON oi.orderID = od.orderID
+             LEFT JOIN products p ON oi.productID = p.productID
+             LEFT JOIN variations v ON oi.variationID = v.variationID
+             LEFT JOIN users u ON od.uid = u.uid
              WHERE od.uid = ?
              ORDER BY oi.createdAt DESC, oi.orderID DESC`,
             [uid]
@@ -200,12 +209,83 @@ async function getOrderItemsByUid(uid) {
             // Deep parse featuredImage
             item.featuredImage = safeParse(item.featuredImage, []);
 
+            // Deep parse custom_inputs
+            item.custom_inputs = safeParse(item.custom_inputs, null);
+
+            // Deep parse product custom inputs (field definitions)
+            item.productCustomInputs = safeParse(item.productCustomInputs, []);
+
+            // Parse variation values
+            const variationValues = safeParse(item.variationValues, []);
+
+            // Transform variationValues to {label, value} format if needed
+            let formattedVariationValues = variationValues;
+            if (Array.isArray(variationValues) && variationValues.length > 0) {
+                // Check if it's already in {label, value} format
+                const first = variationValues[0];
+                if (first && !first.label && !first.value) {
+                    // Transform from {Color: "Blue"} to {label: "Color", value: "Blue"}
+                    formattedVariationValues = variationValues.map(obj => {
+                        const entries = Object.entries(obj);
+                        if (entries.length > 0) {
+                            const [label, value] = entries[0];
+                            return { label, value };
+                        }
+                        return obj;
+                    });
+                }
+            }
+
+            // Debug log
+            if (item.variationID) {
+                console.log(`[Order Model] Processing variation for order item:`, {
+                    variationID: item.variationID,
+                    variationName: item.variationName,
+                    fullVariationName: item.fullVariationName,
+                    variationValues: item.variationValues,
+                    parsedVariationValues: variationValues,
+                    formattedVariationValues: formattedVariationValues
+                });
+            }
+
+            // Build full variation object
+            if (item.variationID) {
+                item.variation = {
+                    variationID: item.variationID,
+                    variationName: item.fullVariationName || item.variationName,
+                    variationSlug: item.variationSlug,
+                    variationValues: formattedVariationValues,
+                    variationPrice: item.variationPrice,
+                    variationSalePrice: item.variationSalePrice,
+                    variationStock: item.variationStock
+                };
+            }
+
             // Deep parse combo items featuredImage
             if (item.comboItems && Array.isArray(item.comboItems)) {
                 item.comboItems = item.comboItems.map(comboItem => ({
                     ...comboItem,
                     featuredImage: safeParse(comboItem.featuredImage, [])
                 }));
+            }
+
+            // Get address details if addressID exists
+            if (item.addressID) {
+                try {
+                    const addressModel = require('./addressModel');
+                    const address = await addressModel.getAddressByID(item.addressID);
+                    if (address) {
+                        const addressLine1 = address.line1 || address.addressLine1 || '';
+                        const addressLine2 = address.line2 || address.addressLine2 || '';
+                        const city = address.city || '';
+                        const state = address.state || '';
+                        const pincode = address.pincode || address.postalCode || '';
+                        item.shippingAddress = `${addressLine1}${addressLine2 ? ', ' + addressLine2 : ''}, ${city}, ${state}${pincode ? ' - ' + pincode : ''}`.replace(/,\s*,/g, ', ').replace(/^,\s+|\s+,$/g, '');
+                    }
+                } catch (error) {
+                    console.error('Error fetching address:', error);
+                    item.shippingAddress = null;
+                }
             }
         }
 
@@ -216,6 +296,191 @@ async function getOrderItemsByUid(uid) {
 }
 
 module.exports.getOrderItemsByUid = getOrderItemsByUid;
+
+// Get order summaries (lightweight) for listing with pagination
+async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null) {
+    const connection = await db.getConnection();
+    try {
+        const offset = (page - 1) * limit;
+        const params = [uid];
+        let whereClause = 'WHERE od.uid = ?';
+
+        // Add search filter if order ID is provided
+        if (searchOrderID) {
+            whereClause += ' AND od.orderID = ?';
+            params.push(searchOrderID);
+        }
+
+        // Get paginated results with total count
+        const [rows] = await connection.query(
+            `SELECT 
+                od.orderID,
+                od.total,
+                od.paymentMode,
+                od.paymentStatus,
+                od.orderStatus,
+                od.createdAt as orderCreatedAt,
+                COUNT(oi.orderID) as itemCount
+             FROM orderDetail od
+             LEFT JOIN order_items oi ON od.orderID = oi.orderID
+             ${whereClause}
+             GROUP BY od.orderID
+             ORDER BY od.createdAt DESC
+             LIMIT ? OFFSET ?`,
+            [...params, limit, offset]
+        );
+
+        // Get total count for pagination
+        const [countRows] = await connection.query(
+            `SELECT COUNT(DISTINCT od.orderID) as total
+             FROM orderDetail od
+             ${whereClause}`,
+            params
+        );
+
+        return {
+            data: rows,
+            page: page,
+            limit: limit,
+            total: countRows[0].total,
+            hasMore: offset + limit < countRows[0].total
+        };
+    } finally {
+        connection.release();
+    }
+}
+
+module.exports.getOrderSummaries = getOrderSummaries;
+
+// Get single order details by orderID
+async function getOrderDetailsByOrderID(orderID, uid) {
+    const connection = await db.getConnection();
+    try {
+        // Get order items for specific order
+        const [rows] = await connection.query(
+            `SELECT oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName AS storedVariationName,
+                    oi.overridePrice, oi.salePrice, oi.regularPrice,
+                    oi.unitPriceBefore, oi.unitPriceAfter,
+                    oi.lineTotalBefore, oi.lineTotalAfter,
+                    oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
+                    oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
+                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
+                    v.variationPrice, v.variationStock, v.variationSalePrice,
+                    od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt,
+                    od.addressID, od.total, u.username, u.emailID as email, u.phoneNumber as contactNumber
+             FROM order_items oi
+             INNER JOIN orderDetail od ON oi.orderID = od.orderID
+             LEFT JOIN products p ON oi.productID = p.productID
+             LEFT JOIN variations v ON oi.variationID = v.variationID
+             LEFT JOIN users u ON od.uid = u.uid
+             WHERE od.orderID = ? AND od.uid = ?
+             ORDER BY oi.createdAt ASC`,
+            [orderID, uid]
+        );
+
+        // Utility: safe JSON parser (deep)
+        const safeParse = (value, fallback = null) => {
+            try {
+                let parsed = value;
+                while (typeof parsed === "string") parsed = JSON.parse(parsed);
+                return parsed;
+            } catch {
+                return fallback;
+            }
+        };
+
+        for (const item of rows) {
+            if (item.comboID) {
+                const cartModel = require('./cartModel');
+                const comboItems = await cartModel.getComboItems(item.comboID);
+                item.comboItems = comboItems;
+            }
+
+            item.featuredImage = safeParse(item.featuredImage, []);
+            item.custom_inputs = safeParse(item.custom_inputs, null);
+            item.productCustomInputs = safeParse(item.productCustomInputs, []);
+
+            const variationValues = safeParse(item.variationValues, []);
+
+            // Transform variationValues to {label, value} format if needed
+            let formattedVariationValues = variationValues;
+            if (Array.isArray(variationValues) && variationValues.length > 0) {
+                // Check if it's already in {label, value} format
+                const first = variationValues[0];
+                if (first && !first.label && !first.value) {
+                    // Transform from {Color: "Blue"} to {label: "Color", value: "Blue"}
+                    formattedVariationValues = variationValues.map(obj => {
+                        const entries = Object.entries(obj);
+                        if (entries.length > 0) {
+                            const [label, value] = entries[0];
+                            return { label, value };
+                        }
+                        return obj;
+                    });
+                }
+            }
+
+            // Debug log
+            if (item.variationID) {
+                console.log(`[Order Model] getOrderDetailsByOrderID - Processing variation:`, {
+                    variationID: item.variationID,
+                    variationName: item.variationName,
+                    fullVariationName: item.fullVariationName,
+                    variationValues: item.variationValues,
+                    parsedVariationValues: variationValues,
+                    formattedVariationValues: formattedVariationValues
+                });
+            }
+
+            if (item.variationID) {
+                item.variation = {
+                    variationID: item.variationID,
+                    variationName: item.fullVariationName || item.variationName,
+                    variationSlug: item.variationSlug,
+                    variationValues: formattedVariationValues,
+                    variationPrice: item.variationPrice,
+                    variationSalePrice: item.variationSalePrice,
+                    variationStock: item.variationStock
+                };
+            }
+
+            if (item.comboItems && Array.isArray(item.comboItems)) {
+                item.comboItems = item.comboItems.map(comboItem => ({
+                    ...comboItem,
+                    featuredImage: safeParse(comboItem.featuredImage, [])
+                }));
+            }
+            console.log(item);
+
+            // Get address details if addressID exists
+            if (item.addressID) {
+                try {
+                    const addressModel = require('./addressModel');
+                    const address = await addressModel.getAddressByID(item.addressID);
+                    if (address) {
+                        const addressLine1 = address.line1 || address.addressLine1 || '';
+                        const addressLine2 = address.line2 || address.addressLine2 || '';
+                        const city = address.city || '';
+                        const state = address.state || '';
+                        const pincode = address.pincode || address.postalCode || '';
+                        item.shippingAddress = `${addressLine1}${addressLine2 ? ', ' + addressLine2 : ''}, ${city}, ${state}${pincode ? ' - ' + pincode : ''}`.replace(/,\s*,/g, ', ').replace(/^,\s+|\s+,$/g, '');
+                    }
+                } catch (error) {
+                    console.error('Error fetching address:', error);
+                    item.shippingAddress = null;
+                }
+            }
+        }
+
+        return rows;
+    } finally {
+        connection.release();
+    }
+}
+
+module.exports.getOrderDetailsByOrderID = getOrderDetailsByOrderID;
 
 // Get order by ID
 async function getOrderByID(orderID) {

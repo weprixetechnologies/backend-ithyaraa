@@ -114,6 +114,105 @@ const addProduct = async (req, res) => {
     }
 };
 
+const addCustomProduct = async (req, res) => {
+    try {
+        const payload = req.body;
+        console.log('Custom Product Payload:', payload);
+
+        if (!payload || typeof payload !== 'object') {
+            return res.status(400).json({ message: 'Invalid payload' });
+        }
+
+        // Validate custom inputs
+        if (!payload.custom_inputs || !Array.isArray(payload.custom_inputs) || payload.custom_inputs.length === 0) {
+            return res.status(400).json({ 
+                message: 'Custom inputs are required for custom products',
+                error: 'custom_inputs must be a non-empty array'
+            });
+        }
+
+        // Validate each custom input field
+        for (let i = 0; i < payload.custom_inputs.length; i++) {
+            const input = payload.custom_inputs[i];
+            console.log(`Validating custom input ${i}:`, input);
+            
+            if (!input.label || !input.type || input.required === undefined) {
+                console.log(`Validation failed for input ${i}:`, {
+                    hasLabel: !!input.label,
+                    hasType: !!input.type,
+                    hasRequired: input.required !== undefined
+                });
+                return res.status(400).json({
+                    message: `Invalid custom input at index ${i}`,
+                    error: 'Each custom input must have label, type, and required properties',
+                    details: {
+                        input: input,
+                        missing: {
+                            label: !input.label,
+                            type: !input.type,
+                            required: input.required === undefined
+                        }
+                    }
+                });
+            }
+        }
+
+        // Force type to 'customproduct' for custom products
+        payload.type = 'customproduct';
+
+        // 1. Generate Unique Product ID
+        const productID = await service.generateUniqueProductID();
+        if (!productID) {
+            return res.status(500).json({ message: 'Failed to generate product ID' });
+        }
+
+        // 2. Upload Product Core Data
+        const uploadProduct = await model.uploadProduct({ ...payload, productID });
+        if (!uploadProduct.success) {
+            return res.status(500).json({
+                message: 'Custom product upload failed',
+                error: uploadProduct.error
+            });
+        }
+
+        // 3. Upload Attributes (optional)
+        const attributes = payload.attributes;
+        if (attributes && Array.isArray(attributes) && attributes.length > 0) {
+            try {
+                const attributesResult = await service.uploadAttributeService(attributes);
+                if (!attributesResult.success) {
+                    console.error("Attribute upload failed:", attributesResult.data || attributesResult.message);
+                    return res.status(500).json({
+                        message: 'Attribute upload failed',
+                        error: attributesResult.data || attributesResult.message
+                    });
+                }
+            } catch (err) {
+                console.error("Error during attribute upload:", err);
+                return res.status(500).json({
+                    message: 'Attribute upload failed due to an exception',
+                    error: err.message
+                });
+            }
+        }
+
+        // ✅ Success Response
+        return res.status(201).json({
+            success: true,
+            message: 'Custom product uploaded successfully',
+            productID,
+            custom_inputs: payload.custom_inputs
+        });
+
+    } catch (err) {
+        console.error('Error in addCustomProduct:', err);
+        return res.status(500).json({
+            message: 'Internal server error',
+            error: err.message || 'Unknown server error'
+        });
+    }
+};
+
 const editProduct = async (req, res) => {
     console.log(req.body);
     
@@ -261,7 +360,7 @@ const deleteProduct = async (req, res) => {
     }
 };
 
-module.exports = { addProduct, getPaginatedProducts, getProductPageCount , getProductDetails, editProduct, deleteProduct };
+module.exports = { addProduct, addCustomProduct, getPaginatedProducts, getProductPageCount , getProductDetails, editProduct, deleteProduct };
 
 // Public shop products endpoint
 async function shopList(req, res) {

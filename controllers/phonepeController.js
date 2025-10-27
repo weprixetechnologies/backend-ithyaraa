@@ -238,7 +238,7 @@ async function sendPaymentConfirmationEmail(merchantTransactionId) {
                     hour: '2-digit',
                     minute: '2-digit'
                 }),
-                websiteUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+                websiteUrl: process.env.FRONTEND_URL || 'http://192.168.1.12:3000'
             },
             subject: `Payment Confirmation - Order #${order.orderID}`
         });

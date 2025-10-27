@@ -25,11 +25,15 @@ const uploadProduct = async ({
     featuredImage,
     attributes,
     categories,
-    brand,
-    galleryImage
+    brandName,
+    galleryImage,
+    brandID,
+    custom_inputs
 }) => {
-    const safeString = (str) =>
-        typeof str === 'string' ? str.replace(/'/g, "''") : str;
+    const safeString = (str) => {
+        if (str === null || str === undefined) return '';
+        return typeof str === 'string' ? str.replace(/'/g, "''") : String(str);
+    };
 
     const query = `
         INSERT INTO products (
@@ -50,7 +54,9 @@ const uploadProduct = async ({
             productAttributes,
             categories,
             brand,
-            galleryImage
+            galleryImage,
+            brandID,
+            custom_inputs
         ) VALUES (
             '${safeString(name)}',
             '${safeString(description)}',
@@ -60,16 +66,18 @@ const uploadProduct = async ({
             ${discountValue},
             '${safeString(type)}',
             '${safeString(status || 'In Stock')}',
-            '${safeString(offerId)}',
+            ${offerId === null || offerId === undefined ? 'NULL' : `'${safeString(offerId)}'`},
             ${overridePrice === null || overridePrice === undefined ? 'NULL' : `'${safeString(overridePrice)}'`},
             '${safeString(tab1)}',
             '${safeString(tab2)}',
             '${safeString(productID)}',
             '${safeString(JSON.stringify(featuredImage))}',
-            '${safeString(JSON.stringify(attributes))}',
+            ${attributes === null || attributes === undefined ? 'NULL' : `'${safeString(JSON.stringify(attributes))}'`},
             ${categories === null || categories === undefined ? 'NULL' : `'${safeString(JSON.stringify(categories))}'`},
-            '${safeString(brand)}',
-            '${safeString(JSON.stringify(galleryImage))}'
+            ${brandName === null || brandName === undefined ? 'NULL' : `'${safeString(brandName)}'`},
+            '${safeString(JSON.stringify(galleryImage))}',
+            ${brandID === null || brandID === undefined ? 'NULL' : `'${safeString(brandID)}'`},
+            ${custom_inputs === null || custom_inputs === undefined ? 'NULL' : `'${safeString(JSON.stringify(custom_inputs))}'`}
         );
     `;
 
@@ -98,7 +106,7 @@ const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes, categories, brand, galleryImage
+        productID, featuredImage, attributes, categories, brand, galleryImage, custom_inputs
     } = product;
     console.log(categories);
 
@@ -107,15 +115,20 @@ const editProductModel = async (product) => {
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?
+            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?
         WHERE productID = ?
     `;
 
     const values = [
         name, description, regularPrice, salePrice, discountType, discountValue,
         type,
-        status || 'In Stock', offerID, overridePrice || null, tab1, tab2,
-        JSON.stringify(featuredImage), JSON.stringify(attributes), JSON.stringify(categories), brand, JSON.stringify(galleryImage),
+        status || 'In Stock', offerID || null, overridePrice || null, tab1, tab2,
+        JSON.stringify(featuredImage),
+        attributes ? JSON.stringify(attributes) : null,
+        categories ? JSON.stringify(categories) : null,
+        brand || null,
+        JSON.stringify(galleryImage),
+        custom_inputs ? JSON.stringify(custom_inputs) : null,
         productID,
     ];
 
@@ -202,6 +215,17 @@ const getProductWithVariations = async (productID) => {
 
     return product;
 };
+
+const getProductByID = async (productID) => {
+    try {
+        const [rows] = await db.query(`SELECT * FROM products WHERE productID = ? LIMIT 1`, [productID]);
+        if (!rows || rows.length === 0) return null;
+        return rows[0];
+    } catch (error) {
+        console.error('Error fetching product by ID:', error);
+        throw error;
+    }
+};
 const deleteVariationsByProductID = async (productID) => {
     return db.query(`DELETE FROM variations WHERE productID = ?`, [productID]);
 };
@@ -259,4 +283,4 @@ const deleteProduct = async (productID) => {
 
 
 
-module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, editProductModel, deleteAttributesByProductID, deleteProduct }
+module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, getProductByID, editProductModel, deleteAttributesByProductID, deleteProduct }

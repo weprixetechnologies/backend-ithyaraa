@@ -3,7 +3,7 @@ const cartService = require('../services/userCouponsService');
 async function applyCoupon(req, res) {
     try {
         const { couponCode, cartID } = req.body;
-        const uid = req.user.uid; // Get UID from auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         if (!couponCode) {
             return res.status(400).json({ success: false, message: 'Coupon code is required' });

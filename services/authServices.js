@@ -124,7 +124,7 @@ const loginUser = async (email, password, deviceInfo) => {
     }
 
     // 3. Create JWT payload
-    const payload = { userID: user.uid, email: user.emailID, role: user.role };
+    const payload = { uid: user.uid, username: user.username, emailID: user.emailID, role: user.role };
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
     console.log(refreshToken);
@@ -199,7 +199,7 @@ const refreshTokens = async (refreshToken) => {
     const newAccessToken = jwt.sign(
         { ...payload },
         ACCESS_TOKEN_SECRET,
-        { expiresIn: '15m' }
+        { expiresIn: '2h' }  // Changed from 15m to 2h
     );
     console.log('New access token generated');
 

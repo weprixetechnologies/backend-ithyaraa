@@ -58,4 +58,11 @@ const deleteAddress = async (addressID) => {
     const [result] = await db.execute(sql, [addressID]);
     return result.affectedRows > 0; // true if deleted, false if not found
 };
-module.exports = { addAddress, checkAddressIDExists, checkUserExists, getAddresses, deleteAddress };
+
+const getAddressByID = async (addressID) => {
+    const sql = `SELECT * FROM address WHERE addressID = ?`;
+    const [rows] = await db.execute(sql, [addressID]);
+    return rows[0] || null;
+};
+
+module.exports = { addAddress, checkAddressIDExists, checkUserExists, getAddresses, deleteAddress, getAddressByID };

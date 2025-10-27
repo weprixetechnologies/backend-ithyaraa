@@ -56,8 +56,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'http://192.168.1.12:3000'
         };
 
         // Generate invoice PDF for attachment
@@ -97,7 +97,7 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
 
 const placeOrderController = async (req, res) => {
     try {
-        const uid = req.user.uid; // assuming middleware sets req.user
+        const uid = req.user.uid; // JWT payload uses uid
         const rawMode = (req.body && req.body.paymentMode) ? String(req.body.paymentMode) : 'COD';
         const paymentMode = rawMode.toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
 
@@ -140,8 +140,8 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-status?merchantTransactionId=${merchantOrderId}`;
-        const callbackUrl = `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/phonepe/webhook`;
+        const redirectUrl = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/payment-status?merchantTransactionId=${merchantOrderId}`;
+        const callbackUrl = `${process.env.BACKEND_URL || 'http://192.168.1.12:3000'}/api/phonepe/webhook`;
 
         const payload = {
             merchantId,
@@ -215,7 +215,39 @@ const getOrderItemsByUidController = async (req, res) => {
     }
 };
 
-module.exports = { placeOrderController, getOrderItemsByUidController };
+const getOrderSummariesController = async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const searchOrderID = req.query.orderID || null;
+
+        const result = await orderService.getOrderSummaries(uid, page, limit, searchOrderID);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error('Get order summaries error:', error);
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const getOrderDetailsByOrderIDController = async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const { orderID } = req.params;
+        const items = await orderService.getOrderDetailsByOrderID(orderID, uid);
+        return res.status(200).json({ success: true, items });
+    } catch (error) {
+        console.error('Get order details error:', error);
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = {
+    placeOrderController,
+    getOrderItemsByUidController,
+    getOrderSummariesController,
+    getOrderDetailsByOrderIDController
+};
 
 const updateOrderController = async (req, res) => {
     try {
@@ -429,6 +461,78 @@ const emailInvoiceController = async (req, res) => {
     }
 };
 
+// Update order items tracking (for admin)
+const updateOrderItemsTrackingController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { items } = req.body; // [{name, variationName, trackingCode, deliveryCompany, itemStatus}]
+        const db = require('../utils/dbconnect');
+
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, message: 'Items array is required' });
+        }
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        // Verify the order exists
+        const [verify] = await db.query(
+            `SELECT 1 FROM orderDetail WHERE orderID = ? LIMIT 1`,
+            [orderId]
+        );
+        if (verify.length === 0) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        // Update matching items by name and variationName
+        let updated = 0;
+        for (const it of items) {
+            if (!it) continue;
+            let setClause = 'trackingCode = ?, deliveryCompany = ?';
+            const params = [it.trackingCode || null, it.deliveryCompany || null];
+            if (it.itemStatus) {
+                setClause += ', itemStatus = ?';
+                params.push(String(it.itemStatus).toLowerCase());
+            } else if (it.trackingCode) {
+                setClause += ', itemStatus = ?';
+                params.push('shipped');
+            }
+            params.push(orderId);
+            let whereClause = 'name = ?';
+            const whereParams = [it.name];
+            if (it.variationName) {
+                whereClause += ' AND variationName = ?';
+                whereParams.push(it.variationName);
+            } else {
+                whereClause += ' AND (variationName IS NULL OR variationName = "")';
+            }
+
+            console.log('Updating tracking with query:', {
+                setClause,
+                params: [...params, ...whereParams],
+                whereClause
+            });
+
+            const [result] = await db.query(
+                `UPDATE order_items 
+                 SET ${setClause}
+                 WHERE orderID = ? AND ${whereClause}
+                 LIMIT 1`,
+                [...params, ...whereParams]
+            );
+
+            console.log('Update result:', result);
+            updated += result.affectedRows || 0;
+        }
+
+        return res.json({ success: true, message: 'Tracking info updated', updatedCount: updated });
+    } catch (error) {
+        console.error('Error updating item tracking info:', error);
+        return res.status(500).json({ success: false, message: 'Failed to update tracking info', error: error.message });
+    }
+};
+
 module.exports.updateOrderController = updateOrderController;
 module.exports.getOrderDetailsController = getOrderDetailsController;
 module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
@@ -437,3 +541,4 @@ module.exports.updateOrderStatusController = updateOrderStatusController;
 module.exports.updatePaymentStatusController = updatePaymentStatusController;
 module.exports.generateInvoiceController = generateInvoiceController;
 module.exports.emailInvoiceController = emailInvoiceController;
+module.exports.updateOrderItemsTrackingController = updateOrderItemsTrackingController;

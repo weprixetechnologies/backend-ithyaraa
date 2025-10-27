@@ -20,7 +20,7 @@ const sendVerificationEmail = async (user) => {
     const payload = { uid: user.uid, email: user.emailID };
     const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET, { expiresIn: '1d' });
     // Construct verify link
-    const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
+    const verifyLink = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/verify-email/${token}`;
     // Send email via queue
     await addSendEmailJob({
         to: user.emailID,
@@ -45,7 +45,7 @@ const sendResetPasswordEmail = async (email) => {
     const payload = { uid: user.uid, email: user.emailID };
     const token = jwt.sign(payload, RESET_TOKEN_SECRET, { expiresIn: RESET_TOKEN_EXPIRY });
     // Construct reset link
-    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+    const resetLink = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/reset-password?token=${token}`;
     // Send email via queue
     await addSendEmailJob({
         to: user.emailID,
@@ -112,6 +112,7 @@ const createUser = async (userData) => {
     const hashedPassword = await argon2.hash(userData.password);
 
     // 5. Prepare data for DB
+    // Note: verifiedPhone is only set to 1 when phoneVerified=true is passed (from OTP-verified signup)
     const newUser = {
         uid,
         username: finalUsername,
@@ -121,12 +122,13 @@ const createUser = async (userData) => {
         deviceInfo: userData.deviceInfo || '',
         joinedOn: new Date(),
         verifiedEmail: 0,
-        verifiedPhone: 0,
+        verifiedPhone: userData.phoneVerified === true ? 1 : 0,
         balance: userData.wallet,
         createdOn: new Date(),
         name: userData.name,
-        password: hashedPassword, 
-        referCode: userData.referCode
+        password: hashedPassword,
+        referCode: userData.referCode,
+        profilePhoto: userData.profilePhoto || ''
     };
 
     // 6. Insert into DB
@@ -208,20 +210,49 @@ const getUserByuid = async (uid) => {
     return user || null;
 };
 const updateUserByuid = async (uid, data) => {
+    // If password is being updated, hash it
+    if (data.password) {
+        const hashedPassword = await argon2.hash(data.password);
+        data.password = hashedPassword;
+    }
+
     const user = await usersModel.updateUserByUID(uid, data);
     return user; // Will contain updated user details
 };
 
+const deleteUserByUID = async (uid) => {
+    const result = await usersModel.deleteUserByUID(uid);
+    return result;
+};
+
 
 const getAllUsers = async (filters, limit = 10, page = 1) => {
-    const allowedColumns = ['uid', 'username', 'emailID', 'status', 'createdAt'];
+    const allowedColumns = ['uid', 'username', 'emailID', 'phonenumber', 'createdOn', 'verifiedEmail', 'verifiedPhone'];
 
     const whereClauses = [];
     const values = [];
 
+    // Handle search query (searches across multiple fields)
+    if (filters.search) {
+        whereClauses.push(`(username LIKE ? OR emailID LIKE ? OR phonenumber LIKE ? OR uid LIKE ?)`);
+        const searchTerm = `%${filters.search}%`;
+        values.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    // Handle individual field filters
     for (const [key, value] of Object.entries(filters)) {
-        if (allowedColumns.includes(key) && value) {
-            if (typeof value === 'string') {
+        if (allowedColumns.includes(key) && value && key !== 'search') {
+            if (key === 'createdOn') {
+                // Handle date range filtering
+                if (filters.dateFrom) {
+                    whereClauses.push(`createdOn >= ?`);
+                    values.push(filters.dateFrom);
+                }
+                if (filters.dateTo) {
+                    whereClauses.push(`createdOn <= ?`);
+                    values.push(filters.dateTo);
+                }
+            } else if (typeof value === 'string') {
                 whereClauses.push(`${key} LIKE ?`);
                 values.push(`%${value}%`);
             } else {
@@ -231,20 +262,48 @@ const getAllUsers = async (filters, limit = 10, page = 1) => {
         }
     }
 
-    let sql = `SELECT * FROM users`;
+    // Build the query
+    let sql = `SELECT uid, username, emailID, phonenumber, verifiedEmail, verifiedPhone, createdOn, lastLogin, balance FROM users`;
+    let countSql = `SELECT COUNT(*) as total FROM users`;
+
     if (whereClauses.length > 0) {
-        sql += ` WHERE ` + whereClauses.join(' AND ');
+        const whereClause = ` WHERE ` + whereClauses.join(' AND ');
+        sql += whereClause;
+        countSql += whereClause;
     }
 
-    sql += ` LIMIT ? OFFSET ?`;
+    // Get total count
+    const [countResult] = await db.query(countSql, values);
+    const total = countResult[0]?.total || 0;
+
+    // Add pagination
+    sql += ` ORDER BY createdOn DESC LIMIT ? OFFSET ?`;
     values.push(Number(limit), (Number(page) - 1) * Number(limit));
 
     const [rows] = await db.query(sql, values);
-    return rows;
+
+    return {
+        data: rows,
+        pagination: {
+            currentPage: Number(page),
+            totalPages: Math.ceil(total / limit),
+            totalUsers: total,
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1
+        }
+    };
 };
 
 const verifyEmail = async (uid) => {
     const updated = await usersModel.setEmailVerified(uid);
+    if (!updated) {
+        return { success: false, message: 'User not found or already verified' };
+    }
+    return { success: true };
+};
+
+const verifyPhone = async (uid) => {
+    const updated = await usersModel.setPhoneVerified(uid);
     if (!updated) {
         return { success: false, message: 'User not found or already verified' };
     }
@@ -360,9 +419,132 @@ const verifyOtpResetPasswordService = async (identifier, otp) => {
     return token;
 };
 
+// Get user orders by UID
+const getUserOrders = async (uid, filters = {}) => {
+    try {
+        console.log('=== getUserOrders Debug ===');
+        console.log('Requested UID:', uid);
+        console.log('UID type:', typeof uid);
+        console.log('Filters:', filters);
+
+        const { page = 1, limit = 10, status, paymentStatus, search } = filters;
+        const offset = (page - 1) * limit;
+
+        // First, let's check if the user exists and get their details
+        const [userCheck] = await db.query('SELECT uid, username, emailID FROM users WHERE uid = ?', [uid]);
+        console.log('User found in database:', userCheck[0]);
+
+        // Also check if there are any orders for this UID
+        const [orderCheck] = await db.query('SELECT COUNT(*) as count FROM orderDetail WHERE uid = ?', [uid]);
+        console.log('Orders count for this UID:', orderCheck[0]?.count);
+
+        // Let's also check if there are any users with the email ronitsarkar.dev@gmail.com
+        const [emailCheck] = await db.query('SELECT uid, username, emailID FROM users WHERE emailID = ?', ['ronitsarkar.dev@gmail.com']);
+        console.log('Users with email ronitsarkar.dev@gmail.com:', emailCheck);
+
+        // Check if there are any orders for users with this email
+        if (emailCheck.length > 0) {
+            const emailUID = emailCheck[0].uid;
+            const [emailOrderCheck] = await db.query('SELECT COUNT(*) as count FROM orderDetail WHERE uid = ?', [emailUID]);
+            console.log('Orders count for email UID:', emailUID, 'is:', emailOrderCheck[0]?.count);
+        }
+
+        let whereConditions = ['od.uid = ?'];
+        let queryParams = [uid];
+
+        // Build WHERE clause based on filters
+        if (status) {
+            whereConditions.push('od.orderStatus = ?');
+            queryParams.push(status);
+        }
+
+        if (paymentStatus) {
+            whereConditions.push('od.paymentStatus = ?');
+            queryParams.push(paymentStatus);
+        }
+
+        if (search) {
+            whereConditions.push('(od.orderID LIKE ? OR od.paymentMode LIKE ?)');
+            const searchTerm = `%${search}%`;
+            queryParams.push(searchTerm, searchTerm);
+        }
+
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+        // Get total count
+        const countQuery = `
+            SELECT COUNT(DISTINCT od.orderID) as total
+            FROM orderDetail od
+            ${whereClause}
+        `;
+
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0]?.total || 0;
+
+        // Get orders with pagination
+        const ordersQuery = `
+            SELECT DISTINCT 
+                od.orderID,
+                od.uid,
+                od.paymentMode,
+                od.paymentStatus,
+                od.orderStatus,
+                od.subtotal,
+                od.totalDiscount,
+                od.total,
+                od.couponCode,
+                od.couponDiscount,
+                od.createdAt,
+                u.username,
+                u.emailID,
+                u.phonenumber,
+                COUNT(oi.orderID) as itemCount
+            FROM orderDetail od
+            LEFT JOIN users u ON od.uid = u.uid
+            LEFT JOIN order_items oi ON od.orderID = oi.orderID
+            ${whereClause}
+            GROUP BY od.orderID, od.uid, od.paymentMode, od.paymentStatus, od.orderStatus, 
+                     od.subtotal, od.totalDiscount, od.total, od.couponCode, od.couponDiscount, 
+                     od.createdAt, u.username, u.emailID, u.phonenumber
+            ORDER BY od.createdAt DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const [orders] = await db.query(ordersQuery, [...queryParams, parseInt(limit), parseInt(offset)]);
+
+        console.log('Raw orders query result:', orders);
+        console.log('Total orders found:', total);
+
+        return {
+            orders: orders.map(order => ({
+                orderID: order.orderID,
+                uid: order.uid,
+                username: order.username,
+                emailID: order.emailID,
+                phonenumber: order.phonenumber,
+                paymentMode: order.paymentMode,
+                paymentStatus: order.paymentStatus,
+                orderStatus: order.orderStatus,
+                subtotal: parseFloat(order.subtotal) || 0,
+                totalDiscount: parseFloat(order.totalDiscount) || 0,
+                total: parseFloat(order.total) || 0,
+                couponCode: order.couponCode,
+                couponDiscount: parseFloat(order.couponDiscount) || 0,
+                itemCount: order.itemCount,
+                createdAt: order.createdAt
+            })),
+            total: parseInt(total)
+        };
+    } catch (error) {
+        console.error('Error in getUserOrders service:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     createUser, loginUser, getUserByuid, getAllUsers,
     sendResetPasswordEmail, resetPasswordWithToken,
-    verifyEmail,
-    sendVerificationEmail, handleForgotPassword, verifyOtpResetPasswordService, updateUserByuid
+    verifyEmail, verifyPhone,
+    sendVerificationEmail, handleForgotPassword, verifyOtpResetPasswordService, updateUserByuid,
+    getUserOrders
 };

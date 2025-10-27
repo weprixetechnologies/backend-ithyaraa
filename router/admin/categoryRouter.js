@@ -9,7 +9,7 @@ router.get('/public/:categoryID', categoryController.getCategoryByID);
 
 // Admin routes (auth required)
 router.post('/upload-category', authAdminMiddleware.verifyAccessToken, categoryController.postCategory);
-router.get('/all-category', authAdminMiddleware.verifyAccessToken, categoryController.getCategories); // GET with optional filters + pagination
+router.get('/all-category', categoryController.getCategories); // GET with optional filters + pagination
 router.get('/detail/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.getCategoryByID);
 // Edit category by ID
 router.put('/edit/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.editCategory);

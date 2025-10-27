@@ -4,7 +4,7 @@ const service = require('../services/wishlistService');
 const addToWishlist = async (req, res) => {
     try {
         const { productID } = req.body;
-        const uid = req.user.uid; // From auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         console.log('Add to wishlist request:', { uid, productID });
 
@@ -59,11 +59,20 @@ const addToWishlist = async (req, res) => {
 // Get user's wishlist
 const getWishlist = async (req, res) => {
     console.log('Get wishlist request');
+    console.log('req.user:', req.user);
 
     try {
-        const uid = req.user.uid; // From auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         console.log('Get wishlist request for user:', uid);
+
+        if (!uid) {
+            console.error('❌ UID is missing from req.user');
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is missing from token'
+            });
+        }
 
         const result = await service.getWishlistService(uid);
 
@@ -98,7 +107,7 @@ const getWishlist = async (req, res) => {
 const removeFromWishlist = async (req, res) => {
     try {
         const { wishlistItemID } = req.params;
-        const uid = req.user.uid; // From auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         console.log('Remove from wishlist request:', { uid, wishlistItemID });
 
@@ -138,7 +147,7 @@ const removeFromWishlist = async (req, res) => {
 const removeByProductID = async (req, res) => {
     try {
         const { productID } = req.params;
-        const uid = req.user.uid; // From auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         console.log('Remove by productID request:', { uid, productID });
 
@@ -181,7 +190,7 @@ const removeByProductID = async (req, res) => {
 const checkWishlist = async (req, res) => {
     try {
         const { productID } = req.params;
-        const uid = req.user.uid; // From auth middleware
+        const uid = req.user.uid; // JWT payload uses uid
 
         console.log('Check wishlist request:', { uid, productID });
 

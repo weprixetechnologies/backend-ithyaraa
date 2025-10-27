@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyAccessToken } = require('../middleware/authAdminMiddleware');
+const { verifyAccessToken } = require('../middleware/authUserMiddleware');
 const wishlistController = require('../controllers/wishlistController');
 
 // All wishlist routes require authentication

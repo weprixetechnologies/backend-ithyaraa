@@ -45,6 +45,7 @@ const login = async (req, res) => {
 
 const refreshToken = async (req, res) => {
     const { refreshToken } = req.body;
+    console.log(req.body);
 
     console.log('Received refresh token request:', refreshToken ? '[token present]' : '[no token]');
 

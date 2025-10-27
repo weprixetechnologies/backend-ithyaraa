@@ -12,6 +12,8 @@ const cartModel = require('./../model/cartModel');
 async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null) {
     // Step 1: Process cart (offers, totals, summary)
     const cartData = await getCart.getCart(uid);
+    console.log(cartData);
+
 
     if (!cartData.items || cartData.items.length === 0) {
         throw new Error('Cart is empty');
@@ -262,7 +264,17 @@ async function getOrderItemsByUid(uid) {
     return await orderModel.getOrderItemsByUid(uid);
 }
 
+async function getOrderSummaries(uid, page, limit, searchOrderID) {
+    return await orderModel.getOrderSummaries(uid, page, limit, searchOrderID);
+}
+
+async function getOrderDetailsByOrderID(orderID, uid) {
+    return await orderModel.getOrderDetailsByOrderID(orderID, uid);
+}
+
 module.exports.getOrderItemsByUid = getOrderItemsByUid;
+module.exports.getOrderSummaries = getOrderSummaries;
+module.exports.getOrderDetailsByOrderID = getOrderDetailsByOrderID;
 
 async function updateOrder(orderID, updateData) {
     return await orderModel.updateOrderByID(orderID, updateData);
@@ -289,8 +301,13 @@ async function getOrderDetails(orderId, uid) {
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
-                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
+                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
+                    v.variationPrice, v.variationStock, v.variationSalePrice
              FROM order_items oi
+             LEFT JOIN products p ON oi.productID = p.productID
+             LEFT JOIN variations v ON oi.variationID = v.variationID
              WHERE oi.orderID = ? AND oi.uid = ?
              ORDER BY oi.createdAt ASC`,
             [orderId, uid]
@@ -318,11 +335,31 @@ async function getOrderDetails(orderId, uid) {
             // Deep parse featuredImage
             const parsedFeaturedImage = safeParse(item.featuredImage, []);
 
+            // Deep parse custom_inputs
+            const parsedCustomInputs = safeParse(item.custom_inputs, null);
+
+            // Deep parse product custom inputs (field definitions)
+            const parsedProductCustomInputs = safeParse(item.productCustomInputs, []);
+
+            // Parse variation values
+            const variationValues = safeParse(item.variationValues, []);
+
             // Deep parse combo items featuredImage
             const processedComboItems = (item.comboItems || []).map(comboItem => ({
                 ...comboItem,
                 featuredImage: safeParse(comboItem.featuredImage, [])
             }));
+
+            // Build full variation object
+            const fullVariation = item.variationID ? {
+                variationID: item.variationID,
+                variationName: item.fullVariationName || item.variationName,
+                variationSlug: item.variationSlug,
+                variationValues: variationValues,
+                variationPrice: item.variationPrice,
+                variationSalePrice: item.variationSalePrice,
+                variationStock: item.variationStock
+            } : null;
 
             processedItems.push({
                 productID: item.productID,
@@ -334,8 +371,11 @@ async function getOrderDetails(orderId, uid) {
                 lineTotalAfter: Number(item.lineTotalAfter) || 0,
                 name: item.name,
                 featuredImage: Array.isArray(parsedFeaturedImage) ? parsedFeaturedImage : [],
+                custom_inputs: parsedCustomInputs,
+                productCustomInputs: parsedProductCustomInputs,
                 createdAt: item.createdAt,
-                comboItems: processedComboItems
+                comboItems: processedComboItems,
+                variation: fullVariation
             });
         }
 
@@ -588,32 +628,40 @@ async function getAdminOrderDetails(orderId) {
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
-                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.createdAt
+                    oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
+                    oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
+                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
+                    v.variationPrice, v.variationStock, v.variationSalePrice
              FROM order_items oi
+             LEFT JOIN products p ON oi.productID = p.productID
+             LEFT JOIN variations v ON oi.variationID = v.variationID
              WHERE oi.orderID = ?
              ORDER BY oi.createdAt ASC`,
             [orderId]
         );
 
-        // Parse featuredImage for each item if it's a JSON string
-        const processedItems = items.map(item => {
-            let parsedFeaturedImage = [];
-
-            if (item.featuredImage && typeof item.featuredImage === 'string') {
+        // Utility function to safely parse JSON
+        const safeParse = (value, fallback = null) => {
+            if (!value) return fallback;
+            if (typeof value === 'string') {
                 try {
-                    // Handle double-encoded JSON strings
-                    let jsonString = item.featuredImage;
-                    if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
-                        jsonString = JSON.parse(jsonString);
-                    }
-                    parsedFeaturedImage = JSON.parse(jsonString);
+                    let parsed = value;
+                    while (typeof parsed === "string") parsed = JSON.parse(parsed);
+                    return parsed;
                 } catch (e) {
-                    console.error('Error parsing featuredImage:', e);
-                    parsedFeaturedImage = [];
+                    return fallback;
                 }
-            } else if (Array.isArray(item.featuredImage)) {
-                parsedFeaturedImage = item.featuredImage;
             }
+            return value;
+        };
+
+        // Parse featuredImage and custom_inputs for each item if it's a JSON string
+        const processedItems = items.map(item => {
+            let parsedFeaturedImage = safeParse(item.featuredImage, []);
+            let parsedCustomInputs = safeParse(item.custom_inputs, null);
+            let productCustomInputs = safeParse(item.productCustomInputs, []);
+            let variationValues = safeParse(item.variationValues, []);
 
             // Convert string prices to numbers for consistency
             const salePrice = parseFloat(item.salePrice) || 0;
@@ -631,7 +679,22 @@ async function getAdminOrderDetails(orderId) {
                 lineTotalAfter: lineTotalAfter,
                 name: item.name,
                 featuredImage: parsedFeaturedImage, // This will be a proper array
-                createdAt: item.createdAt
+                custom_inputs: parsedCustomInputs,
+                productCustomInputs: productCustomInputs, // Field definitions with labels
+                createdAt: item.createdAt,
+                trackingCode: item.trackingCode || null,
+                deliveryCompany: item.deliveryCompany || null,
+                itemStatus: item.itemStatus || 'pending',
+                // Full variation details
+                variation: item.variationID ? {
+                    variationID: item.variationID,
+                    variationName: item.fullVariationName || item.variationName,
+                    variationSlug: item.variationSlug,
+                    variationValues: variationValues,
+                    variationPrice: item.variationPrice,
+                    variationSalePrice: item.variationSalePrice,
+                    variationStock: item.variationStock
+                } : null
             };
         });
 

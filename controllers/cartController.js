@@ -2,8 +2,12 @@ const cartService = require('../services/cartService');
 
 async function addCartItem(req, res) {
     try {
-        const { uid } = req.user; // assuming auth middleware sets req.user
-        const { productID, quantity, variationID, variationName, referBy } = req.body;
+        console.log('🔍 Cart Controller - Request received');
+        console.log('🔍 req.user:', req.user);
+        console.log('🔍 req.body:', req.body);
+
+        const { uid } = req.user; // JWT payload uses uid
+        const { productID, quantity, variationID, variationName, referBy, customInputs } = req.body;
 
         console.log('Cart Controller - Received data:', {
             uid,
@@ -11,29 +15,44 @@ async function addCartItem(req, res) {
             quantity,
             variationID,
             variationName,
-            referBy
+            referBy,
+            customInputs
         });
 
         if (!uid || !productID || (typeof quantity === 'undefined')) {
             return res.status(400).json({ message: 'uid, productID, and quantity are required' });
         }
 
-        const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy);
+        const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy, customInputs);
         res.status(200).json({ success: true, cartItem: result.cartItem, cartDetail: result.cartDetail });
 
     } catch (error) {
-        console.error(error);
+        console.error('❌ Cart Controller Error:', error);
+        console.error('❌ Error stack:', error.stack);
         res.status(500).json({ success: false, message: error.message });
     }
 }
 async function getCart(req, res) {
+    console.log('🔍 getCart called');
+    console.log('req.user:', req.user);
 
     try {
-        const { uid } = req.user;
+        const { uid } = req.user; // JWT payload uses uid
+        console.log('Extracted uid:', uid);
+
+        if (!uid) {
+            console.error('❌ UID is null or undefined in getCart');
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is missing from token',
+                debug: { reqUser: req.user }
+            });
+        }
+
         const data = await cartService.getCart(uid);
         res.json({ success: true, ...data });
     } catch (err) {
-        console.error(err);
+        console.error('❌ Error in getCart:', err);
         res.status(500).json({ success: false, message: 'Server error' });
     }
 }
@@ -41,7 +60,7 @@ async function getCart(req, res) {
 const removeFromCart = async (req, res) => {
     try {
         const { cartItemID } = req.body;
-        const { uid } = req.user;
+        const { uid } = req.user; // JWT payload uses uid
 
         if (!cartItemID) {
             return res.status(400).json({ success: false, message: 'Cart item ID is required' });
@@ -57,7 +76,7 @@ const removeFromCart = async (req, res) => {
 
 async function addCartCombo(req, res) {
     try {
-        const { uid } = req.user; // assuming auth middleware sets req.user
+        const { uid } = req.user; // JWT payload uses uid
         const { quantity, mainProductID, products } = req.body;
         console.log(req.body);
 

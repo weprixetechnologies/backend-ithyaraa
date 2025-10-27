@@ -1,8 +1,8 @@
 const { Queue } = require('bullmq');
 const jwt = require('jsonwebtoken');
-const { REDIS_CONFIG } = require('../utils/config');
+const { REDIS_CONNECTION } = require('../utils/config');
 
-const connection = REDIS_CONFIG;
+const connection = REDIS_CONNECTION;
 
 const sendEmailsQueue = new Queue('sendEmails', { connection });
 
@@ -29,7 +29,7 @@ const sendVerifyEmail = async (user) => {
   const payload = { uid: user.uid, email: user.emailID };
   const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET || 'email_verify_secret', { expiresIn: '1d' });
   // Construct verify link
-  const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
+  const verifyLink = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/verify-email/${token}`;
   // Send email via queue
   await addSendEmailJob({
     to: user.emailID,

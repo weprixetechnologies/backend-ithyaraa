@@ -22,7 +22,7 @@ const sendVerificationEmail = async (req, res) => {
 
 const createUser = async (req, res) => {
     try {
-        const { email, phonenumber, name, password, wallet, referCode } = req.body;
+        const { email, phonenumber, name, password, wallet, referCode, profilePhoto, phoneVerified } = req.body;
         console.log(req.body);
 
 
@@ -36,8 +36,10 @@ const createUser = async (req, res) => {
             name,
             password,
             wallet: wallet || 0,
-            referCode : referCode || 'ITHY-ADMIN',
-            deviceInfo: req.headers['user-agent'] || 'unknown' // ✅ simple user-agent capture
+            referCode: referCode || 'ITHY-ADMIN',
+            profilePhoto: profilePhoto || '',
+            deviceInfo: req.headers['user-agent'] || 'unknown', // ✅ simple user-agent capture
+            phoneVerified: phoneVerified === true // Only true if explicitly passed and is true
         });
 
         if (!result.success) {
@@ -85,22 +87,39 @@ const loginUser = async (req, res) => {
 const getUserByUID = async (req, res) => {
     try {
         const { uid } = req.params;
+        console.log('getUserByUID called with UID:', uid);
 
         const user = await usersService.getUserByuid(uid);
+        console.log('User found:', user);
 
         if (!user) {
-            return res.status(404).json({ message: "No such user" });
+            console.log('No user found for UID:', uid);
+            return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        res.status(200).json(user);
+        console.log('Returning user data:', user);
+        res.status(200).json({ success: true, data: user });
     } catch (error) {
         console.error("Error fetching user:", error);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
     }
 };
 const getUserByUIDbyUser = async (req, res) => {
+    console.log('🔍 getUserByUIDbyUser called');
+    console.log('req.user:', req.user);
+
     try {
-        const { uid } = req.user;
+        const { uid } = req.user; // JWT payload uses uid
+        console.log('Extracted uid:', uid);
+
+        if (!uid) {
+            console.error('❌ UID is null or undefined in getUserByUIDbyUser');
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is missing from token',
+                debug: { reqUser: req.user }
+            });
+        }
 
         const user = await usersService.getUserByuid(uid);
 
@@ -141,19 +160,18 @@ const updateUserByUIDbyUser = async (req, res) => {
 
 const getAllUsers = async (req, res, next) => {
     try {
-        const { limit, page, ...filters } = req.query;
-        console.log(req.query);
+        const { limit = 10, page = 1, ...filters } = req.query;
+        console.log('User list query:', req.query);
 
-
-        const users = await usersService.getAllUsers(filters, limit, page);
+        const result = await usersService.getAllUsers(filters, limit, page);
         res.status(200).json({
-            page: Number(page),
-            limit: Number(limit),
-            count: users.length,
-            data: users
+            success: true,
+            data: result.data,
+            pagination: result.pagination
         });
     } catch (err) {
-        next(err);
+        console.error('Error fetching users:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch users', error: err.message });
     }
 };
 
@@ -263,10 +281,185 @@ const verifyOtpResetPassword = async (req, res) => {
 };
 
 
+// Update user by UID (Admin)
+const updateUserByUID = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const updateData = req.body;
+
+        if (!uid) {
+            return res.status(400).json({ success: false, message: 'User ID is required' });
+        }
+
+        const result = await usersService.updateUserByuid(uid, updateData);
+        if (!result) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'User updated successfully',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error updating user:', error);
+        res.status(500).json({ success: false, message: 'Failed to update user', error: error.message });
+    }
+};
+
+// Delete user by UID (Admin)
+const deleteUserByUID = async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        if (!uid) {
+            return res.status(400).json({ success: false, message: 'User ID is required' });
+        }
+
+        const result = await usersService.deleteUserByUID(uid);
+        if (!result) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'User deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete user', error: error.message });
+    }
+};
+
+// Get user orders by UID (Admin)
+const getUserOrders = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { page = 1, limit = 10, status, paymentStatus, search } = req.query;
+        console.log('=== getUserOrders Controller Debug ===');
+        console.log('getUserOrders called with UID:', uid);
+        console.log('UID type:', typeof uid);
+        console.log('Query params:', req.query);
+
+        const orders = await usersService.getUserOrders(uid, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            status,
+            paymentStatus,
+            search
+        });
+
+        res.status(200).json({
+            success: true,
+            data: orders.orders,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(orders.total / limit),
+                totalOrders: orders.total,
+                hasNext: page < Math.ceil(orders.total / limit),
+                hasPrev: page > 1
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching user orders:", error);
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+};
+
+// Admin verification management functions
+const removePhoneVerification = async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        if (!uid) {
+            return res.status(400).json({ success: false, message: 'User ID is required' });
+        }
+
+        const result = await usersService.updateUserByuid(uid, { verifiedPhone: 0 });
+        if (!result) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Phone verification removed successfully'
+        });
+    } catch (error) {
+        console.error('Error removing phone verification:', error);
+        res.status(500).json({ success: false, message: 'Failed to remove phone verification' });
+    }
+};
+
+const removeEmailVerification = async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        if (!uid) {
+            return res.status(400).json({ success: false, message: 'User ID is required' });
+        }
+
+        const result = await usersService.updateUserByuid(uid, { verifiedEmail: 0 });
+        if (!result) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Email verification removed successfully'
+        });
+    } catch (error) {
+        console.error('Error removing email verification:', error);
+        res.status(500).json({ success: false, message: 'Failed to remove email verification' });
+    }
+};
+
+const sendAdminVerificationEmail = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const user = await usersService.getUserByuid(uid);
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        const result = await usersService.sendVerificationEmail(user);
+        res.json(result);
+    } catch (error) {
+        console.error('Error sending verification email:', error);
+        res.status(500).json({ success: false, message: 'Failed to send verification email' });
+    }
+};
+
+const sendAdminPhoneVerificationOtp = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const user = await usersService.getUserByuid(uid);
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        // Import otpService
+        const otpService = require('../services/otpService');
+        const result = await otpService.sendOtp(`+91${user.phonenumber}`);
+
+        if (result.success) {
+            return res.status(200).json(result);
+        } else {
+            return res.status(400).json(result);
+        }
+    } catch (error) {
+        console.error('Error sending phone verification OTP:', error);
+        return res.status(500).json({ success: false, message: 'Failed to send OTP' });
+    }
+};
+
 module.exports = {
     verifyOtpResetPassword,
     createUser, getUserByUID,
     loginUser, forgotPasswordTokenised, resetPasswordTokenised, getAllUsers,
     verifyEmail,
-    sendVerificationEmail, forgotPasswordController, getUserByUIDbyUser, updateUserByUIDbyUser
+    sendVerificationEmail, forgotPasswordController, getUserByUIDbyUser, updateUserByUIDbyUser,
+    updateUserByUID, deleteUserByUID, getUserOrders,
+    removePhoneVerification, removeEmailVerification, sendAdminVerificationEmail, sendAdminPhoneVerificationOtp
 };

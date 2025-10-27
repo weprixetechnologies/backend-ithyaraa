@@ -8,7 +8,7 @@ const verifyAccessToken = (req, res, next) => {
 
         console.log('Access Token 1', token);
         console.log(req.params);
-        
+
 
         if (!token) {
             return res.status(401).json({ message: "Access token missing. Please login." });
@@ -16,6 +16,8 @@ const verifyAccessToken = (req, res, next) => {
 
         // 2️⃣ Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        console.log(decoded);
+
 
         // 3️⃣ Check expiry manually (optional, jwt.verify already does it)
         if (decoded.exp && decoded.exp * 1000 < Date.now()) {
