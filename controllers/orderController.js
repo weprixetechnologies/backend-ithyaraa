@@ -71,7 +71,7 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
                 // Convert Buffer to base64 for queue serialization
                 const pdfBuffer = invoiceResult.invoice.pdfBuffer;
                 const base64Content = pdfBuffer.toString('base64');
-                
+
                 attachments = [{
                     filename: `invoice_${order.orderID}.pdf`,
                     content: base64Content, // Store as base64 string for queue
