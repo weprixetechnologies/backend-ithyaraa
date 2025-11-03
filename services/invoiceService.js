@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
@@ -15,51 +15,193 @@ class InvoiceService {
         };
     }
 
-    // Generate PDF invoice buffer using Puppeteer
+    // Generate PDF invoice buffer using PDFKit
     async generateInvoicePDF(orderData) {
-        try {
-            const browser = await puppeteer.launch({
-                headless: 'new',
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--no-first-run',
-                    '--disable-default-apps',
-                    '--disable-extensions'
-                ]
-            });
+        return new Promise((resolve, reject) => {
+            try {
+                const doc = new PDFDocument({ 
+                    size: 'A4',
+                    margins: { top: 40, bottom: 40, left: 40, right: 40 }
+                });
 
-            const page = await browser.newPage();
+                const buffers = [];
+                doc.on('data', buffers.push.bind(buffers));
+                doc.on('end', () => {
+                    const pdfBuffer = Buffer.concat(buffers);
+                    resolve(pdfBuffer);
+                });
+                doc.on('error', reject);
 
-            // Generate HTML content
-            const htmlContent = this.generateInvoiceHTML(orderData);
+                const invoiceNumber = `INV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(orderData.orderID).padStart(3, '0')}`;
+                
+                // Load logo if available
+                const logoPath = path.join(__dirname, '..', 'asset', 'ithyaraa-logo.png');
+                let hasLogo = false;
+                if (fs.existsSync(logoPath)) {
+                    try {
+                        doc.image(logoPath, 40, 40, { width: 100, height: 100 });
+                        hasLogo = true;
+                    } catch (err) {
+                        console.log('Could not load logo image');
+                    }
+                }
 
-            // Set content and generate PDF
-            await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
+                // Company info (right side)
+                doc.fontSize(14).font('Helvetica-Bold')
+                    .text(this.companyInfo.name, 450, 40, { align: 'right', width: 300 });
+                doc.fontSize(10).font('Helvetica')
+                    .text(this.companyInfo.address.line1, 450, 60, { align: 'right', width: 300 });
+                doc.text(this.companyInfo.address.line2, 450, 75, { align: 'right', width: 300 });
+                doc.text(this.companyInfo.address.line3, 450, 90, { align: 'right', width: 300 });
+                doc.text(this.companyInfo.gstin, 450, 105, { align: 'right', width: 300 });
 
-            const pdfBuffer = await page.pdf({
-                format: 'A4',
-                margin: {
-                    top: '15mm',
-                    right: '15mm',
-                    bottom: '15mm',
-                    left: '15mm'
-                },
-                printBackground: false,
-                preferCSSPageSize: true,
-                displayHeaderFooter: false
-            });
+                // Invoice title
+                let yPos = hasLogo ? 160 : 40;
+                doc.fontSize(24).font('Helvetica-Bold')
+                    .text('Invoice', 40, yPos);
+                
+                // Line divider
+                yPos += 30;
+                doc.moveTo(40, yPos).lineTo(555, yPos).stroke();
 
-            await browser.close();
+                // Invoice details section
+                yPos += 20;
+                doc.fontSize(12).font('Helvetica-Bold')
+                    .text('Invoice Details', 40, yPos);
+                
+                yPos += 20;
+                doc.fontSize(10).font('Helvetica')
+                    .text('Invoice Number:', 40, yPos)
+                    .font('Helvetica-Bold')
+                    .text(invoiceNumber, 180, yPos);
+                
+                yPos += 15;
+                doc.font('Helvetica')
+                    .text('Invoice Date:', 40, yPos)
+                    .text(new Date(orderData.createdAt).toLocaleDateString('en-IN'), 180, yPos);
+                
+                yPos += 15;
+                doc.text('Order ID:', 40, yPos)
+                    .font('Helvetica-Bold')
+                    .text(`#${orderData.orderID}`, 180, yPos);
+                
+                yPos += 15;
+                doc.font('Helvetica')
+                    .text('Payment Mode:', 40, yPos)
+                    .text(orderData.paymentMode, 180, yPos);
+                
+                yPos += 15;
+                doc.text('Total Amount:', 40, yPos)
+                    .font('Helvetica-Bold')
+                    .text(`₹${orderData.total.toFixed(2)}`, 180, yPos);
 
-            // Convert Uint8Array to proper Node.js Buffer
-            return Buffer.from(pdfBuffer);
+                // Customer details (right side)
+                let customerY = hasLogo ? 160 : 40;
+                doc.fontSize(12).font('Helvetica-Bold')
+                    .text('Bill To / Ship To', 300, customerY);
+                
+                customerY += 20;
+                if (orderData.deliveryAddress) {
+                    doc.fontSize(10).font('Helvetica')
+                        .text(`Email: ${orderData.deliveryAddress.emailID}`, 300, customerY);
+                    customerY += 15;
+                    doc.text(`Phone: ${orderData.deliveryAddress.phoneNumber}`, 300, customerY);
+                    customerY += 15;
+                    doc.text(`Address: ${orderData.deliveryAddress.line1}`, 300, customerY, { width: 255 });
+                    customerY += 15;
+                    if (orderData.deliveryAddress.line2) {
+                        doc.text(orderData.deliveryAddress.line2, 300, customerY, { width: 255 });
+                        customerY += 15;
+                    }
+                    doc.text(`${orderData.deliveryAddress.city}, ${orderData.deliveryAddress.state} - ${orderData.deliveryAddress.pincode}`, 300, customerY);
+                }
 
-        } catch (error) {
-            throw new Error(`PDF generation failed: ${error.message}`);
-        }
+                // Items table
+                yPos = Math.max(yPos, customerY) + 30;
+                const tableTop = yPos;
+                const itemHeight = 20;
+                
+                // Table headers
+                doc.fontSize(9).font('Helvetica-Bold');
+                doc.text('SR', 40, yPos);
+                doc.text('Item & Description', 70, yPos, { width: 150 });
+                doc.text('Qty', 250, yPos, { width: 40, align: 'right' });
+                doc.text('Rate', 300, yPos, { width: 50, align: 'right' });
+                doc.text('Taxable', 360, yPos, { width: 50, align: 'right' });
+                doc.text('CGST', 420, yPos, { width: 40, align: 'right' });
+                doc.text('SGST', 470, yPos, { width: 40, align: 'right' });
+                doc.text('Total', 520, yPos, { width: 35, align: 'right' });
+                
+                // Header line
+                yPos += 15;
+                doc.moveTo(40, yPos).lineTo(555, yPos).stroke();
+                
+                // Table rows
+                doc.fontSize(9).font('Helvetica');
+                orderData.items.forEach((item, index) => {
+                    yPos += itemHeight;
+                    
+                    const totalAmount = item.lineTotalAfter;
+                    const taxRate = 5; // 5% total GST
+                    const taxableAmount = totalAmount / (1 + taxRate / 100);
+                    const unitPrice = taxableAmount / item.quantity;
+                    const cgstRate = 2.5;
+                    const sgstRate = 2.5;
+                    const cgstAmount = (taxableAmount * cgstRate) / 100;
+                    const sgstAmount = (taxableAmount * sgstRate) / 100;
+
+                    doc.text(String(index + 1), 40, yPos);
+                    doc.text(item.name, 70, yPos, { width: 150 });
+                    doc.text(String(item.quantity), 250, yPos, { width: 40, align: 'right' });
+                    doc.text(`₹${unitPrice.toFixed(2)}`, 300, yPos, { width: 50, align: 'right' });
+                    doc.text(`₹${taxableAmount.toFixed(2)}`, 360, yPos, { width: 50, align: 'right' });
+                    doc.text(`${cgstRate}%`, 420, yPos, { width: 40, align: 'right' });
+                    doc.text(`${sgstRate}%`, 470, yPos, { width: 40, align: 'right' });
+                    doc.text(`₹${totalAmount.toFixed(2)}`, 520, yPos, { width: 35, align: 'right' });
+                });
+
+                // Summary section
+                yPos += 30;
+                const itemTotal = orderData.items.reduce((sum, item) => sum + item.lineTotalAfter, 0);
+                const shipping = orderData.shipping || 0;
+                const balanceDue = itemTotal + shipping;
+
+                const summaryX = 300;
+                doc.fontSize(10).font('Helvetica');
+                doc.text('Item Total', summaryX, yPos);
+                doc.text(`₹${itemTotal.toFixed(2)}`, 480, yPos, { width: 75, align: 'right' });
+                
+                yPos += 18;
+                doc.text('Shipping Charge (Inclusive of Taxes)', summaryX, yPos);
+                doc.text(`₹${shipping.toFixed(2)}`, 480, yPos, { width: 75, align: 'right' });
+                
+                yPos += 20;
+                doc.moveTo(summaryX, yPos).lineTo(555, yPos).stroke();
+                yPos += 5;
+                doc.fontSize(12).font('Helvetica-Bold');
+                doc.text('Invoice Value', summaryX, yPos);
+                doc.text(`₹${balanceDue.toFixed(2)}`, 480, yPos, { width: 75, align: 'right' });
+                yPos += 5;
+                doc.moveTo(summaryX, yPos).lineTo(555, yPos).stroke();
+
+                // Signature section (left side)
+                yPos += 30;
+                doc.fontSize(10).font('Helvetica-Bold');
+                doc.text('Digitally Signed by:', 40, yPos);
+                yPos += 15;
+                doc.text('Ithyaraa Fashions Pvt Ltd', 40, yPos);
+                yPos += 15;
+                doc.text('Location: Telangana', 40, yPos);
+
+                // Footer
+                doc.fontSize(9).font('Helvetica')
+                    .text('Payment is due within 15 days. Thank you for your business.', 40, 750, { align: 'center', width: 515 });
+
+                doc.end();
+            } catch (error) {
+                reject(new Error(`PDF generation failed: ${error.message}`));
+            }
+        });
     }
 
     // Generate HTML template for invoice
