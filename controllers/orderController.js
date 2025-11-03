@@ -67,13 +67,18 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             const invoiceResult = await orderService.generateInvoice(order.orderID);
 
             if (invoiceResult && invoiceResult.success) {
+                // Convert Buffer to base64 for queue serialization
+                const pdfBuffer = invoiceResult.invoice.pdfBuffer;
+                const base64Content = pdfBuffer.toString('base64');
+
                 attachments = [{
                     filename: `invoice_${order.orderID}.pdf`,
-                    content: invoiceResult.invoice.pdfBuffer,
-                    contentType: 'application/pdf'
+                    content: base64Content, // Store as base64 string for queue
+                    contentType: 'application/pdf',
+                    encoding: 'base64' // Flag to indicate this needs decoding
                 }];
 
-                console.log(`Invoice PDF generated for order confirmation: ${invoiceResult.invoice.pdfBuffer.length} bytes`);
+                console.log(`Invoice PDF generated for order confirmation: ${pdfBuffer.length} bytes (base64: ${base64Content.length} chars)`);
             }
         } catch (invoiceError) {
             console.error('Error generating invoice for order confirmation:', invoiceError);

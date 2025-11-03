@@ -53,14 +53,24 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 			console.log(`Processing attachment ${index + 1}:`);
 			console.log(`  Filename: ${attachment.filename}`);
 			console.log(`  Content type: ${attachment.contentType}`);
-			console.log(`  Content length: ${attachment.content ? attachment.content.length : 'undefined'}`);
+			console.log(`  Encoding: ${attachment.encoding || 'none'}`);
+			console.log(`  Content length: ${attachment.content ? (typeof attachment.content === 'string' ? attachment.content.length : attachment.content.length) : 'undefined'}`);
 			console.log(`  Content is Buffer: ${Buffer.isBuffer(attachment.content)}`);
 			console.log(`  Content type: ${typeof attachment.content}`);
-			console.log(`  Content constructor: ${attachment.content?.constructor?.name}`);
 
 			// Ensure content is a Buffer
 			if (attachment.content) {
-				if (Buffer.isBuffer(attachment.content)) {
+				// First priority: Check if it's a base64-encoded string (from queue)
+				if (attachment.encoding === 'base64' && typeof attachment.content === 'string') {
+					console.log(`  ✅ Decoding base64 string to Buffer...`);
+					const buffer = Buffer.from(attachment.content, 'base64');
+					console.log(`  Decoded to Buffer: ${buffer.length} bytes`);
+					return {
+						filename: attachment.filename,
+						content: buffer,
+						contentType: attachment.contentType
+					};
+				} else if (Buffer.isBuffer(attachment.content)) {
 					console.log(`  ✅ Content is already a Buffer (${attachment.content.length} bytes)`);
 					return {
 						filename: attachment.filename,
@@ -68,6 +78,18 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 						contentType: attachment.contentType
 					};
 				} else if (typeof attachment.content === 'string') {
+					// Try to detect if it's base64 (common pattern: base64 strings are longer and contain base64 chars)
+					// If it looks like base64 and is for PDF, decode it
+					if (attachment.contentType === 'application/pdf' && attachment.content.length > 100 && /^[A-Za-z0-9+/=]+$/.test(attachment.content)) {
+						console.log(`  ⚠️  Detected base64 string, decoding to Buffer...`);
+						const buffer = Buffer.from(attachment.content, 'base64');
+						console.log(`  Decoded to Buffer: ${buffer.length} bytes`);
+						return {
+							filename: attachment.filename,
+							content: buffer,
+							contentType: attachment.contentType
+						};
+					}
 					console.log(`  ⚠️  Converting string to Buffer...`);
 					const buffer = Buffer.from(attachment.content);
 					console.log(`  Converted to Buffer: ${buffer.length} bytes`);

@@ -865,6 +865,9 @@ async function emailInvoice(orderId) {
         const invoiceData = invoiceService.generateInvoiceData(orderDetails);
         const pdfBuffer = await invoiceService.generateInvoicePDF(invoiceData);
 
+        // Convert Buffer to base64 for queue serialization
+        const base64Content = pdfBuffer.toString('base64');
+
         // Prepare email data for queue
         const emailData = {
             to: orderDetails.deliveryAddress.emailID,
@@ -882,8 +885,9 @@ async function emailInvoice(orderId) {
             attachments: [
                 {
                     filename: `invoice_${orderDetails.orderID}.pdf`,
-                    content: pdfBuffer,
-                    contentType: 'application/pdf'
+                    content: base64Content, // Store as base64 string for queue
+                    contentType: 'application/pdf',
+                    encoding: 'base64' // Flag to indicate this needs decoding
                 }
             ]
         };
