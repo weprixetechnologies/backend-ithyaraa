@@ -85,6 +85,18 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             // Continue without invoice attachment - don't break order confirmation
         }
 
+        // Log before sending to queue
+        console.log(`Adding email job to queue - attachments count: ${attachments.length}`);
+        if (attachments.length > 0) {
+            console.log(`Attachment details:`, {
+                filename: attachments[0].filename,
+                contentType: attachments[0].contentType,
+                encoding: attachments[0].encoding,
+                contentLength: attachments[0].content?.length || 0,
+                contentTypeOf: typeof attachments[0].content
+            });
+        }
+
         await addSendEmailJob({
             to: user.emailID,
             templateName: 'order-confirmation',
@@ -93,7 +105,7 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             attachments: attachments
         });
 
-        console.log(`Order confirmation email sent to ${user.emailID} for order ${order.orderID}${attachments.length > 0 ? ' with invoice attachment' : ''}`);
+        console.log(`Order confirmation email queued for ${user.emailID} for order ${order.orderID}${attachments.length > 0 ? ' with invoice attachment' : ''}`);
     } catch (error) {
         console.error('Error sending order confirmation email:', error);
         // Don't throw error - email failure shouldn't break order placement

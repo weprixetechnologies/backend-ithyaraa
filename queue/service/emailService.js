@@ -44,6 +44,20 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 		html
 	};
 
+	// Log received data for debugging
+	console.log(`Email job received - attachments:`, {
+		attachmentsExists: !!attachments,
+		attachmentsType: typeof attachments,
+		attachmentsIsArray: Array.isArray(attachments),
+		attachmentsLength: attachments?.length || 0,
+		attachmentsContent: attachments && attachments.length > 0 ? attachments.map(a => ({
+			filename: a?.filename,
+			hasContent: !!a?.content,
+			contentType: a?.contentType,
+			encoding: a?.encoding
+		})) : 'none'
+	});
+
 	// Add attachments if provided
 	if (attachments && attachments.length > 0) {
 		console.log(`Processing ${attachments.length} attachments...`);
@@ -149,9 +163,20 @@ async function sendEmail({ to, templateName, variables, subject, attachments = [
 		console.log(`Final attachments:`, mailOptions.attachments.map(att => ({
 			filename: att.filename,
 			contentLength: att.content ? att.content.length : 'undefined',
-			contentType: att.contentType
+			contentType: att.contentType,
+			isBuffer: Buffer.isBuffer(att.content)
 		})));
+	} else {
+		console.log(`No attachments provided or empty array`);
 	}
+
+	// Log final mailOptions before sending (excluding full content for brevity)
+	console.log(`Sending email with mailOptions:`, {
+		to: mailOptions.to,
+		subject: mailOptions.subject,
+		hasAttachments: !!mailOptions.attachments,
+		attachmentsCount: mailOptions.attachments?.length || 0
+	});
 
 	await transporter.sendMail(mailOptions);
 
