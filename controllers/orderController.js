@@ -100,6 +100,7 @@ const placeOrderController = async (req, res) => {
         const uid = req.user.uid; // JWT payload uses uid
         const rawMode = (req.body && req.body.paymentMode) ? String(req.body.paymentMode) : 'COD';
         const paymentMode = rawMode.toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
+        const walletApplied = Math.max(0, Number(req.body?.walletApplied || 0));
 
         // Extract addressID and couponCode from req.body
         const { addressID, couponCode } = req.body;
@@ -116,7 +117,7 @@ const placeOrderController = async (req, res) => {
         }
 
         if (paymentMode === 'COD') {
-            const order = await orderService.placeOrder(uid, addressID, paymentMode, couponCode);
+            const order = await orderService.placeOrder(uid, addressID, paymentMode, couponCode, walletApplied);
 
             // Send confirmation email for COD
             await sendOrderConfirmationEmail(user, order, 'COD');
@@ -130,7 +131,7 @@ const placeOrderController = async (req, res) => {
         }
 
         // Default to PREPAID using PhonePe flow
-        const order = await orderService.placeOrder(uid, addressID, paymentMode, couponCode);
+        const order = await orderService.placeOrder(uid, addressID, paymentMode, couponCode, walletApplied);
         // Ensure amount is an integer in paise for PhonePe
         const amountRupees = Number(order.orderData.summary.total);
         const amountPaise = Math.round((isNaN(amountRupees) ? 0 : amountRupees) * 100);
@@ -234,8 +235,8 @@ const getOrderDetailsByOrderIDController = async (req, res) => {
     try {
         const uid = req.user.uid;
         const { orderID } = req.params;
-        const items = await orderService.getOrderDetailsByOrderID(orderID, uid);
-        return res.status(200).json({ success: true, items });
+        const { items, orderDetail } = await orderService.getOrderDetailsByOrderID(orderID, uid);
+        return res.status(200).json({ success: true, items, orderDetail });
     } catch (error) {
         console.error('Get order details error:', error);
         return res.status(400).json({ success: false, message: error.message });

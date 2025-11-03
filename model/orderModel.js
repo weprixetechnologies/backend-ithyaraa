@@ -11,11 +11,12 @@ async function createOrder(orderData) {
         const generatedTxnID = orderData.txnID || randomUUID();
         const orderReferBy = orderData.items && orderData.items.length > 0 ? orderData.items[0].referBy : null;
         // Determine payment status based on payment mode
-        const paymentStatus = (orderData.paymentMode || 'cod').toUpperCase() === 'PREPAID' ? 'pending' : 'successful';
+        const pm = (orderData.paymentMode || 'cod').toUpperCase();
+        const paymentStatus = (pm === 'PREPAID') ? 'pending' : 'successful'; // FULL_COIN and COD = successful
 
         const [detailResult] = await connection.query(
-            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy, isWalletUsed, paidWallet) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderData.uid,
                 orderData.summary.subtotal,
@@ -30,7 +31,9 @@ async function createOrder(orderData) {
                 orderData.deliveryCompany || null,
                 orderData.couponCode || null,
                 orderData.couponDiscount || 0.00,
-                orderReferBy || null
+                orderReferBy || null,
+                orderData.isWalletUsed || 0,
+                orderData.paidWallet || 0.00
             ]
         );
         const orderID = detailResult.insertId;

@@ -8,8 +8,9 @@ const invoiceService = require('./invoiceService');
 const { addSendEmailJob } = require('../queue/emailProducer');
 const { randomUUID } = require('crypto');
 const cartModel = require('./../model/cartModel');
+const coinModel = require('../model/coinModel');
 
-async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null) {
+async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null, walletApplied = 0) {
     // Step 1: Process cart (offers, totals, summary)
     const cartData = await getCart.getCart(uid);
     console.log(cartData);
@@ -51,7 +52,43 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         }
     }
 
-    // Step 3: Store order using processed cart data with new fields
+    // Step 3: Normalize total and apply wallet balance (split pay)
+    // Total should be: subtotal - totalDiscount + shipping (keep original, don't modify)
+    const baseSubtotal = Math.max(0, Number(finalSummary.subtotal) || 0);
+    const baseDiscount = Math.max(0, Number(finalSummary.totalDiscount) || 0);
+    const baseShipping = Math.max(0, Number(finalSummary.shipping) || 0);
+    const originalTotal = Math.max(0, baseSubtotal - baseDiscount + baseShipping);
+    // Ensure summary reflects normalized total (original, not reduced by wallet)
+    finalSummary.total = originalTotal;
+    
+    let paidWallet = 0;
+    let isWalletUsed = false;
+    try {
+        const requested = Math.max(0, Number(walletApplied) || 0);
+        if (requested > 0) {
+            const user = await usersModel.findByuid(uid);
+            const available = Math.max(0, Number(user?.balance || 0));
+            const payableBeforeWallet = originalTotal;
+            paidWallet = Math.min(requested, available, payableBeforeWallet);
+            if (paidWallet > 0) {
+                isWalletUsed = true;
+                // Deduct wallet from user balance (don't modify finalSummary.total)
+                await db.query('UPDATE users SET balance = balance - ? WHERE uid = ?', [paidWallet, uid]);
+                // Calculate remaining payable (for payment mode decision only)
+                const remainingPayable = Math.max(0, payableBeforeWallet - paidWallet);
+                // If fully paid via wallet, set paymentMode to FULL_COIN
+                if (remainingPayable <= 0) {
+                    paymentMode = 'FULL_COIN';
+                }
+                // Note: finalSummary.total remains as originalTotal (not reduced)
+            }
+        }
+    } catch (walletErr) {
+        console.error('Wallet apply error:', walletErr);
+        // continue without wallet deduction
+    }
+
+    // Step 4: Store order using processed cart data with new fields
     const newOrder = await orderModel.createOrder({
         uid,
         addressID,
@@ -59,10 +96,12 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         couponCode,
         couponDiscount,
         items: cartData.items,
-        summary: finalSummary
+        summary: finalSummary,
+        isWalletUsed: isWalletUsed ? 1 : 0,
+        paidWallet: paidWallet
     });
 
-    // Step 4: Increment coupon usage if coupon was applied
+    // Step 5: Increment coupon usage if coupon was applied
     if (couponCode && couponDiscount > 0) {
         try {
             await couponsModel.incrementCouponUsage(couponCode);
@@ -72,11 +111,11 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         }
     }
 
-    // Step 5: Check if cart has referBy (centralized from cartDetail)
+    // Step 6: Check if cart has referBy (centralized from cartDetail)
     const hasReferBy = cartData.items && cartData.items.length > 0 && cartData.items[0].referBy;
     const creditedUsers = new Set();
 
-    // Step 6: Process referBy commissions (if referBy exists, no coupon commission)
+    // Step 7: Process referBy commissions (if referBy exists, no coupon commission)
     if (hasReferBy) {
         try {
             const referByUid = cartData.items[0].referBy; // All items have same referBy from cartDetail
@@ -116,7 +155,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         }
     }
 
-    // Step 7: Coupon commission (only if NO referBy exists)
+    // Step 8: Coupon commission (only if NO referBy exists)
     if (!hasReferBy && couponCode && couponDiscount >= 0) {
         try {
             const [couponResult] = await Promise.all([
@@ -157,6 +196,20 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
             console.error('Coupon commission error:', affiliateError);
             // Non-blocking
         }
+    }
+
+    // Step 9: Create pending coins (1 coin per ₹100 of total) - will be completed on delivery
+    try {
+        const totalRupees = Number(finalSummary.total) || 0;
+        const coins = Math.floor(totalRupees / 100);
+        if (coins > 0) {
+            await coinModel.createPendingCoins(uid, newOrder.orderID, coins);
+            // Persist on orderDetail.coinsEarned (for display purposes, even though pending)
+            await db.query(`UPDATE orderDetail SET coinsEarned = ? WHERE orderID = ?`, [coins, newOrder.orderID]);
+        }
+    } catch (coinErr) {
+        console.error('Failed to create pending coins:', coinErr);
+        // Non-blocking
     }
 
     return newOrder;
@@ -269,7 +322,16 @@ async function getOrderSummaries(uid, page, limit, searchOrderID) {
 }
 
 async function getOrderDetailsByOrderID(orderID, uid) {
-    return await orderModel.getOrderDetailsByOrderID(orderID, uid);
+    // Fetch items for this order and the corresponding orderDetail row
+    const items = await orderModel.getOrderDetailsByOrderID(orderID, uid);
+    const orderDetail = await orderModel.getOrderByID(orderID);
+
+    // Ensure the order belongs to the requesting user
+    if (orderDetail && orderDetail.uid !== uid) {
+        return { items: [], orderDetail: null };
+    }
+
+    return { items, orderDetail };
 }
 
 module.exports.getOrderItemsByUid = getOrderItemsByUid;
@@ -528,6 +590,22 @@ async function getAllOrders(filters = {}) {
 // Update order status
 async function updateOrderStatus(orderId, orderStatus) {
     try {
+        // Get order details before updating to check for pending coins
+        const [orderBefore] = await db.query(
+            'SELECT uid, orderStatus, coinsEarned FROM orderDetail WHERE orderID = ?',
+            [orderId]
+        );
+
+        if (!orderBefore || orderBefore.length === 0) {
+            return null;
+        }
+
+        const order = orderBefore[0];
+        const oldStatus = order.orderStatus;
+        const uid = order.uid;
+        const hasPendingCoins = order.coinsEarned > 0;
+
+        // Update order status
         const result = await db.query(
             'UPDATE orderDetail SET orderStatus = ? WHERE orderID = ?',
             [orderStatus, orderId]
@@ -535,6 +613,24 @@ async function updateOrderStatus(orderId, orderStatus) {
 
         if (result[0].affectedRows === 0) {
             return null;
+        }
+
+        // Handle coin state transitions based on status change
+        if (hasPendingCoins) {
+            try {
+                if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
+                    // Complete pending coins (award them)
+                    await coinModel.completePendingCoins(uid, orderId);
+                    console.log(`[Coins] Completed pending coins for order ${orderId}`);
+                } else if (orderStatus === 'Cancelled' && oldStatus !== 'Cancelled') {
+                    // Reverse pending coins
+                    await coinModel.reversePendingCoins(uid, orderId);
+                    console.log(`[Coins] Reversed pending coins for order ${orderId}`);
+                }
+            } catch (coinErr) {
+                console.error('[Coins] Error processing coin state change:', coinErr);
+                // Don't fail the order status update if coin processing fails
+            }
         }
 
         // Return updated order

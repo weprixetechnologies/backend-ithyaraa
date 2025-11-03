@@ -28,6 +28,8 @@ const userCouponsRouter = require('./router/userCouponRouter')
 const orderRouter = require('./router/orderRouter')
 const phonepeRouter = require('./router/phonepeRouter')
 const reviewRouter = require('./router/reviewRouter')
+const coinRouter = require('./router/coinRouter')
+const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
 const adminDashboardRouter = require('./router/adminDashboardRouter')
 const brandAdminRouter = require('./router/admin/brandAdminRouter')
 const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
@@ -35,11 +37,9 @@ const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: false }));
-// app.use('/', (req, res, next) => {
-//     res.send('API is running')
-// })
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
 app.use('/api/', commonRouter)
 app.use('/api/user', userRouter); //user apis
 app.use('/api/admin', userAdminRouter); //admin user management apis
@@ -59,11 +59,13 @@ app.use('/api/user-coupon', userCouponsRouter)
 app.use('/api/order', orderRouter)
 app.use('/api/phonepe', phonepeRouter)
 app.use('/api/reviews', reviewRouter)
+app.use('/api/coins', coinRouter)
 
 // ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
 app.use('/api/admin', adminDashboardRouter);
 app.use('/api/admin', brandAdminRouter);
 app.use('/api/admin', brandBankDetailsAdminRouter);
+app.use('/api/admin/coins', coinsAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 
 // BRAND AUTH ROUTE

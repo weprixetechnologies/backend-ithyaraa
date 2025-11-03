@@ -2,6 +2,8 @@ const { sendOtp, sendPayoutOtp, verifyPayoutOtp } = require('./../services/otpSe
 const otpService = require('./../services/otpService')
 
 const sendOtpController = async (req, res) => {
+    console.log('sendOtpController - req.body:', req.body);
+
     try {
         const { phoneNumber } = req.body;
         if (!phoneNumber) return res.status(400).json({ error: "Phone number required" });
