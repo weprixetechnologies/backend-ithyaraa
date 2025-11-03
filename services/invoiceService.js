@@ -21,6 +21,7 @@ class InvoiceService {
         try {
             // Build HTML
             const htmlContent = this.generateInvoiceHTML(orderData);
+            console.log('Generated HTML content for invoice, length:', htmlContent.length);
 
             // Launch Puppeteer (allow overriding executable path in prod)
             const launchOptions = {
@@ -32,16 +33,24 @@ class InvoiceService {
                     '--disable-gpu',
                     '--no-first-run',
                     '--disable-default-apps',
-                    '--disable-extensions'
+                    '--disable-extensions',
+                    '--disable-software-rasterizer'
                 ]
             };
+
             if (process.env.PUPPETEER_EXECUTABLE_PATH) {
                 launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+                console.log('Using custom Puppeteer executable path');
             }
 
+            console.log('Launching Puppeteer browser...');
             const browser = await puppeteer.launch(launchOptions);
+            console.log('Browser launched successfully');
+
             const page = await browser.newPage();
+            console.log('Setting HTML content...');
             await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
+            console.log('Generating PDF...');
 
             const pdfBuffer = await page.pdf({
                 format: 'A4',
@@ -51,55 +60,68 @@ class InvoiceService {
                 displayHeaderFooter: false
             });
 
+            console.log('PDF generated, size:', pdfBuffer.length, 'bytes');
             await browser.close();
 
-            // Try to compress using Ghostscript if available
-            const compressed = await this.compressPdfIfPossible(Buffer.from(pdfBuffer));
-            return compressed || Buffer.from(pdfBuffer);
+            let pdfBufferResult = Buffer.from(pdfBuffer);
+
+            // Try to compress using Ghostscript if available (non-blocking, fails gracefully)
+            try {
+                const compressed = await this.compressPdfIfPossible(pdfBufferResult);
+                if (compressed && compressed.length > 0) {
+                    console.log(`PDF compressed: ${pdfBufferResult.length} -> ${compressed.length} bytes`);
+                    return compressed;
+                }
+            } catch (compressError) {
+                console.log('PDF compression skipped:', compressError.message);
+                // Continue with uncompressed PDF
+            }
+
+            return pdfBufferResult;
         } catch (error) {
+            console.error('PDF generation error:', error);
             throw new Error(`PDF generation failed: ${error.message}`);
         }
     }
 
     async compressPdfIfPossible(inputBuffer) {
-        return new Promise((resolve) => {
-            try {
-                // Quick check if gs exists
-                const gs = spawn('gs', ['-v']);
-                gs.on('error', () => resolve(null));
-                gs.on('exit', () => {
-                    // Run Ghostscript compression
-                    const args = [
-                        '-sDEVICE=pdfwrite',
-                        '-dCompatibilityLevel=1.4',
-                        '-dPDFSETTINGS=/ebook',
-                        '-dNOPAUSE',
-                        '-dQUIET',
-                        '-dBATCH',
-                        '-sOutputFile=-',
-                        '-' // read from stdin
-                    ];
-                    const proc = spawn('gs', args);
-                    const chunks = [];
-                    let errorOccurred = false;
+        return new Promise((resolve, reject) => {
+            // Try to run Ghostscript compression
+            const args = [
+                '-sDEVICE=pdfwrite',
+                '-dCompatibilityLevel=1.4',
+                '-dPDFSETTINGS=/ebook',
+                '-dNOPAUSE',
+                '-dQUIET',
+                '-dBATCH',
+                '-sOutputFile=-',
+                '-' // read from stdin
+            ];
 
-                    proc.stdout.on('data', (d) => chunks.push(d));
-                    proc.stderr.on('data', () => {});
-                    proc.on('error', () => resolve(null));
-                    proc.on('close', (code) => {
-                        if (code === 0) {
-                            resolve(Buffer.concat(chunks));
-                        } else {
-                            resolve(null);
-                        }
-                    });
+            const proc = spawn('gs', args);
+            const chunks = [];
+            const timeout = setTimeout(() => {
+                proc.kill();
+                reject(new Error('Compression timeout'));
+            }, 10000); // 10 second timeout
 
-                    proc.stdin.write(inputBuffer);
-                    proc.stdin.end();
-                });
-            } catch (_) {
-                resolve(null);
-            }
+            proc.stdout.on('data', (d) => chunks.push(d));
+            proc.stderr.on('data', () => { }); // Ignore stderr
+            proc.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(new Error(`Ghostscript not available: ${err.message}`));
+            });
+            proc.on('close', (code) => {
+                clearTimeout(timeout);
+                if (code === 0 && chunks.length > 0) {
+                    resolve(Buffer.concat(chunks));
+                } else {
+                    reject(new Error(`Compression failed with code ${code}`));
+                }
+            });
+
+            proc.stdin.write(inputBuffer);
+            proc.stdin.end();
         });
     }
 
