@@ -1,5 +1,19 @@
 const db = require('../utils/dbconnect'); // your DB connection
 
+let hasIsFlashSaleColumn = null;
+async function ensureCartItemsSchema() {
+    if (hasIsFlashSaleColumn !== null) return hasIsFlashSaleColumn;
+    try {
+        const [cols] = await db.query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cart_items' AND COLUMN_NAME = 'isFlashSale'`
+        );
+        hasIsFlashSaleColumn = (cols && cols.length > 0);
+    } catch (_) {
+        hasIsFlashSaleColumn = false;
+    }
+    return hasIsFlashSaleColumn;
+}
+
 // Fetch product by productID
 async function getProductByID(productID) {
     const [rows] = await db.query(
@@ -55,27 +69,51 @@ async function insertCartItem(data) {
         regularPrice, salePrice, overridePrice,
         unitPriceBefore, unitPriceAfter,
         lineTotalBefore, lineTotalAfter,
-        offerID, name, featuredImage, variationID, variationName, brandID, customInputs
+        offerID, name, featuredImage, variationID, variationName, brandID, customInputs, isFlashSale
     } = data;
 
-    const [result] = await db.query(
-        `INSERT INTO cart_items (
-      cartID, uid, productID, quantity,
-      regularPrice, salePrice, overridePrice,
-      unitPriceBefore, unitPriceAfter,
-      lineTotalBefore, lineTotalAfter,
-      offerID, offerApplied, offerStatus, appliedOfferID,
-      name, featuredImage, variationID, variationName, brandID, custom_inputs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?,?)`,
-        [
-            cartID, uid, productID, quantity,
-            regularPrice, salePrice, overridePrice,
-            unitPriceBefore, unitPriceAfter,
-            lineTotalBefore, lineTotalAfter,
-            offerID, name, featuredImage, variationID, variationName, brandID,
-            customInputs ? JSON.stringify(customInputs) : null
-        ]
-    );
+    const hasFlash = await ensureCartItemsSchema();
+    let result;
+    if (hasFlash) {
+        [result] = await db.query(
+            `INSERT INTO cart_items (
+          cartID, uid, productID, quantity,
+          regularPrice, salePrice, overridePrice,
+          unitPriceBefore, unitPriceAfter,
+          lineTotalBefore, lineTotalAfter,
+          offerID, offerApplied, offerStatus, appliedOfferID,
+          name, featuredImage, variationID, variationName, brandID, custom_inputs, isFlashSale
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?,?, ?)`,
+            [
+                cartID, uid, productID, quantity,
+                regularPrice, salePrice, overridePrice,
+                unitPriceBefore, unitPriceAfter,
+                lineTotalBefore, lineTotalAfter,
+                offerID, name, featuredImage, variationID, variationName, brandID,
+                customInputs ? JSON.stringify(customInputs) : null,
+                isFlashSale ? 1 : 0
+            ]
+        );
+    } else {
+        [result] = await db.query(
+            `INSERT INTO cart_items (
+          cartID, uid, productID, quantity,
+          regularPrice, salePrice, overridePrice,
+          unitPriceBefore, unitPriceAfter,
+          lineTotalBefore, lineTotalAfter,
+          offerID, offerApplied, offerStatus, appliedOfferID,
+          name, featuredImage, variationID, variationName, brandID, custom_inputs
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?, ?)`,
+            [
+                cartID, uid, productID, quantity,
+                regularPrice, salePrice, overridePrice,
+                unitPriceBefore, unitPriceAfter,
+                lineTotalBefore, lineTotalAfter,
+                offerID, name, featuredImage, variationID, variationName, brandID,
+                customInputs ? JSON.stringify(customInputs) : null
+            ]
+        );
+    }
     const [inserted] = await db.query(
         `SELECT * FROM cart_items WHERE cartItemID = ?`,
         [result.insertId]
@@ -192,16 +230,73 @@ async function getOfferByID(offerID) {
     return rows[0] || null;
 }
 
+// Prefer this for offer validation: checks active status and date window when such columns exist
+async function getActiveOfferByID(offerID) {
+    // Try common column names for status and date ranges; fallback to simple fetch
+    const attempts = [
+        // status + startDate/endDate
+        `SELECT * FROM offers WHERE offerID = ? AND (status = 'active' OR status IS NULL) AND NOW() BETWEEN startDate AND endDate LIMIT 1`,
+        // status + startAt/endAt
+        `SELECT * FROM offers WHERE offerID = ? AND (status = 'active' OR status IS NULL) AND NOW() BETWEEN startAt AND endAt LIMIT 1`,
+        // only startDate/endDate
+        `SELECT * FROM offers WHERE offerID = ? AND NOW() BETWEEN startDate AND endDate LIMIT 1`,
+        // only startAt/endAt
+        `SELECT * FROM offers WHERE offerID = ? AND NOW() BETWEEN startAt AND endAt LIMIT 1`,
+    ];
+    for (const sql of attempts) {
+        try {
+            const [rows] = await db.query(sql, [offerID]);
+            if (rows && rows.length > 0) return rows[0];
+        } catch (_) {
+            // ignore and try next shape
+        }
+    }
+    // Fallback to base fetch; treat as active if present
+    return await getOfferByID(offerID);
+}
+
 async function updateCartItems(items) {
     const queries = items.map(item =>
         db.query(
             `UPDATE cart_items 
-       SET unitPriceAfter=?, lineTotalAfter=?, offerApplied=?, offerStatus=? 
+      SET unitPriceAfter=?, lineTotalAfter=?, offerApplied=?, offerStatus=? 
        WHERE cartItemID=?`,
             [item.unitPriceAfter, item.lineTotalAfter, item.offerApplied ? 1 : 0, item.offerStatus, item.cartItemID]
         )
     );
     await Promise.all(queries);
+}
+
+async function resetFlashForCartItem(cartItemID, baseUnitPrice, quantity) {
+    const unit = Number(baseUnitPrice);
+    const line = Number((unit * quantity).toFixed(2));
+    const hasFlash = await ensureCartItemsSchema();
+    if (hasFlash) {
+        await db.query(
+            `UPDATE cart_items SET 
+                isFlashSale = 0,
+                salePrice = NULL,
+                unitPriceBefore = ?,
+                unitPriceAfter = ?,
+                lineTotalBefore = ?,
+                lineTotalAfter = ?,
+                updatedAt = NOW()
+             WHERE cartItemID = ?`,
+            [unit, unit, line, line, cartItemID]
+        );
+    } else {
+        await db.query(
+            `UPDATE cart_items SET 
+                salePrice = NULL,
+                unitPriceBefore = ?,
+                unitPriceAfter = ?,
+                lineTotalBefore = ?,
+                lineTotalAfter = ?,
+                updatedAt = NOW()
+             WHERE cartItemID = ?`,
+            [unit, unit, line, line, cartItemID]
+        );
+    }
 }
 
 async function updateCartDetail(uid, summary) {
@@ -213,6 +308,13 @@ async function updateCartDetail(uid, summary) {
      SET subtotal=?, total=?, totalDiscount=?, modified=1 
      WHERE uid=?`,
         [subtotal, total, totalDiscount, String(uid)]
+    );
+}
+
+async function setCartModified(cartID, modified) {
+    await db.query(
+        `UPDATE cartDetail SET modified = ?, updatedAt = NOW() WHERE cartID = ?`,
+        [modified ? 1 : 0, cartID]
     );
 }
 
@@ -339,13 +441,13 @@ module.exports = {
     insertCartItem,
     updateCartItemQuantity, updateCartTotals, getCartModifiedFlag,
     getCartItems,
-    getOfferByID,
+    getOfferByID, getActiveOfferByID,
     updateCartItems,
     updateCartDetail,
     getCartSummaryFromDB, deleteCartItem, getProductByIDCombo,
     getVariationByID,
     getVariationByIDCombo,
     insertCartItemCombo,
-    insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy
-
+    insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy,
+    resetFlashForCartItem, setCartModified
 };

@@ -453,8 +453,63 @@ const fetchPaginatedProducts = async (query) => {
 };
 
 
+const { detectFlashSaleSchema } = require('../utils/flashSaleSchema');
+
 const getProductDetails = async (productID) => {
-    return await model.getProductWithVariations(productID);
+    const product = await model.getProductWithVariations(productID);
+    if (!product) return null;
+
+    let flash = null;
+    try {
+        const schema = await detectFlashSaleSchema();
+        const d = schema.details;
+        const i = schema.items;
+        const timeFilter = (d.startTime && d.endTime) ? `AND NOW() BETWEEN d.${d.startTime} AND d.${d.endTime}` : '';
+        const statusFilter = d.status ? `AND d.${d.status} = 'active'` : '';
+        const selectEnd = d.endTime ? `, d.${d.endTime} AS flashSaleEndTime` : '';
+        const [rows] = await db.query(
+            `SELECT d.${d.saleID} AS saleID, i.${i.discountType} AS discountType, i.${i.discountValue} AS discountValue${selectEnd}
+             FROM ${schema.tables.items} i
+             INNER JOIN ${schema.tables.details} d ON d.${d.saleID} = i.${i.saleID}
+             WHERE i.${i.productID} = ? ${statusFilter} ${timeFilter}
+             ORDER BY ${d.startTime ? `d.${d.startTime} DESC` : 'd.createdAt DESC'}
+             LIMIT 1`,
+            [productID]
+        );
+        if (rows && rows.length > 0) flash = rows[0];
+    } catch (_) {
+        flash = null;
+    }
+
+    product.isFlashSale = Boolean(flash);
+    if (flash && Object.prototype.hasOwnProperty.call(flash, 'flashSaleEndTime')) {
+        product.flashSaleEndTime = flash.flashSaleEndTime;
+    }
+
+    if (flash && Array.isArray(product.variations)) {
+        const discountType = String(flash.discountType || '').toLowerCase();
+        const discountValue = Number(flash.discountValue || 0);
+
+        product.variations = product.variations.map(v => {
+            const basePrice = Number(v.variationPrice);
+            let salePrice = Number(v.variationSalePrice ?? v.variationPrice);
+
+            if (!Number.isNaN(basePrice)) {
+                if (discountType === 'percentage') {
+                    salePrice = Math.max(0, +(basePrice * (1 - discountValue / 100)).toFixed(2));
+                } else if (discountType === 'fixed' || discountType === 'flat') {
+                    salePrice = Math.max(0, +(basePrice - discountValue).toFixed(2));
+                }
+            }
+
+            return {
+                ...v,
+                variationSalePrice: String(salePrice.toFixed ? salePrice.toFixed(2) : salePrice)
+            };
+        });
+    }
+
+    return product;
 };
 
 

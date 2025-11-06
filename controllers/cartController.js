@@ -75,6 +75,8 @@ const removeFromCart = async (req, res) => {
 };
 
 async function addCartCombo(req, res) {
+    console.log(res.body);
+
     try {
         const { uid } = req.user; // JWT payload uses uid
         const { quantity, mainProductID, products } = req.body;

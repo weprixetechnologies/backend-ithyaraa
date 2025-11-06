@@ -30,6 +30,7 @@
 // const reviewRouter = require('./router/reviewRouter')
 // const coinRouter = require('./router/coinRouter')
 // const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
+// const flashSaleAdminRouter = require('./router/admin/flashSaleRouter')
 // const adminDashboardRouter = require('./router/adminDashboardRouter')
 // const brandAdminRouter = require('./router/admin/brandAdminRouter')
 // const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
@@ -65,6 +66,7 @@
 // app.use('/api/admin', adminDashboardRouter);
 // app.use('/api/admin', brandAdminRouter);
 // app.use('/api/admin', brandBankDetailsAdminRouter);
+// app.use('/api/admin/flash-sales', flashSaleAdminRouter);
 // app.use('/api/admin/coins', coinsAdminRouter);
 // app.use('/api/admin', adminAuthRouter);
 
@@ -75,7 +77,7 @@
 // app.use('/api/brand', brandBankDetailsRouter)
 
 // app.listen(process.env.PORT, () => {
-//     console.log('Server Started');
+//   console.log('Server Started');
 // });
 
 
