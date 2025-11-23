@@ -82,8 +82,8 @@ async function insertCartItem(data) {
           unitPriceBefore, unitPriceAfter,
           lineTotalBefore, lineTotalAfter,
           offerID, offerApplied, offerStatus, appliedOfferID,
-          name, featuredImage, variationID, variationName, brandID, custom_inputs, isFlashSale
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?,?, ?)`,
+          name, featuredImage, variationID, variationName, brandID, custom_inputs, isFlashSale, selected
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?,?, ?, TRUE)`,
             [
                 cartID, uid, productID, quantity,
                 regularPrice, salePrice, overridePrice,
@@ -102,8 +102,8 @@ async function insertCartItem(data) {
           unitPriceBefore, unitPriceAfter,
           lineTotalBefore, lineTotalAfter,
           offerID, offerApplied, offerStatus, appliedOfferID,
-          name, featuredImage, variationID, variationName, brandID, custom_inputs
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?, ?)`,
+          name, featuredImage, variationID, variationName, brandID, custom_inputs, selected
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'none', NULL, ?, ?,?,?,?, ?, TRUE)`,
             [
                 cartID, uid, productID, quantity,
                 regularPrice, salePrice, overridePrice,
@@ -149,13 +149,13 @@ async function getCartItemWithVariation(cartID, productID, variationID) {
     return rows[0] || null;
 }
 async function updateCartTotals(cartID) {
-    // 1) sum of before/after
+    // 1) sum of before/after - only include selected items
     const [sumRows] = await db.query(
         `SELECT
        COALESCE(ROUND(SUM(lineTotalBefore), 2), 0.00) AS subtotal,
        COALESCE(ROUND(SUM(lineTotalAfter), 2), 0.00) AS total
      FROM cart_items
-     WHERE cartID = ?`,
+     WHERE cartID = ? AND (selected = TRUE OR selected IS NULL)`,
         [cartID]
     );
 
@@ -163,11 +163,12 @@ async function updateCartTotals(cartID) {
     const total = Number(sumRows[0].total) || 0;
     const totalDiscount = Number((subtotal - total).toFixed(2));
 
-    // 2) anyModifications: any item where unitPriceBefore != unitPriceAfter (null-safe)
+    // 2) anyModifications: any item where unitPriceBefore != unitPriceAfter (null-safe) - only selected items
     const [modRows] = await db.query(
         `SELECT COUNT(*) AS cnt
      FROM cart_items
      WHERE cartID = ?
+       AND (selected = TRUE OR selected IS NULL)
        AND NOT (unitPriceBefore <=> unitPriceAfter)`,
         [cartID]
     );
@@ -370,8 +371,8 @@ async function insertCartItemCombo(item) {
     const [result] = await db.query(
         `INSERT INTO cart_items 
          (cartID, uid, productID, quantity, regularPrice, salePrice, overridePrice,
-          unitPriceBefore, unitPriceAfter, lineTotalBefore, lineTotalAfter, offerID, name, featuredImage, comboID)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          unitPriceBefore, unitPriceAfter, lineTotalBefore, lineTotalAfter, offerID, name, featuredImage, comboID, selected)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, TRUE)`,
         [
             item.cartID, item.uid, item.productID, item.quantity,
             item.regularPrice, item.salePrice, item.overridePrice,
@@ -416,6 +417,8 @@ async function getComboItems(comboID) {
             oci.variationID, 
             p.name, 
             p.featuredImage, 
+            p.brandID,
+            p.brand,
             v.variationSlug AS variationName,
             v.variationValues
         FROM order_combo_items oci
@@ -431,6 +434,31 @@ async function getComboItems(comboID) {
         ...item,
         variationValues: item.variationValues ? JSON.parse(item.variationValues) : []
     }));
+}
+
+// Update selected status for cart items
+async function updateCartItemsSelected(uid, selectedItems) {
+    try {
+        // First, set all items to unselected
+        await db.query(
+            `UPDATE cart_items SET selected = FALSE WHERE uid = ?`,
+            [uid]
+        );
+        
+        // Then, set specified items to selected
+        if (selectedItems && selectedItems.length > 0) {
+            const placeholders = selectedItems.map(() => '?').join(',');
+            await db.query(
+                `UPDATE cart_items SET selected = TRUE WHERE uid = ? AND cartItemID IN (${placeholders})`,
+                [uid, ...selectedItems]
+            );
+        }
+        
+        return { success: true };
+    } catch (error) {
+        console.error('Error updating cart items selected status:', error);
+        return { success: false, error: error.message };
+    }
 }
 
 module.exports = {
@@ -449,5 +477,6 @@ module.exports = {
     getVariationByIDCombo,
     insertCartItemCombo,
     insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy,
-    resetFlashForCartItem, setCartModified
+    resetFlashForCartItem, setCartModified,
+    updateCartItemsSelected
 };

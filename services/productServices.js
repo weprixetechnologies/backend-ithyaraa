@@ -1,5 +1,6 @@
 const model = require('./../model/productModel');
 const attributeModel = require('./../model/attributesModel');
+const crossSellModel = require('./../model/crossSellModel');
 const db = require('./../utils/dbconnect');
 const { get } = require('../router/admin/productRouter');
 
@@ -509,6 +510,48 @@ const getProductDetails = async (productID) => {
         });
     }
 
+    // Fetch cross-sell products
+    try {
+        const crossSellProducts = await crossSellModel.getCrossSellProducts(productID);
+        // Extract only the first image URL for cross-sell products
+        product.crossSellProducts = crossSellProducts.map(p => {
+            const parsed = { ...p };
+            
+            // Extract first image URL from featuredImage
+            let imageUrl = null;
+            try {
+                let featuredImage = parsed.featuredImage;
+                // Parse if it's a string
+                if (typeof featuredImage === 'string') {
+                    featuredImage = JSON.parse(featuredImage);
+                }
+                // Extract first image URL
+                if (Array.isArray(featuredImage) && featuredImage.length > 0) {
+                    const firstImage = featuredImage[0];
+                    if (firstImage && firstImage.imgUrl) {
+                        imageUrl = firstImage.imgUrl;
+                    }
+                }
+            } catch (error) {
+                // If parsing fails, imageUrl remains null
+                console.error('Error parsing featuredImage for cross-sell product:', error);
+            }
+            
+            // Return only essential fields with imageUrl and type
+            return {
+                productID: parsed.productID,
+                name: parsed.name,
+                regularPrice: parsed.regularPrice,
+                salePrice: parsed.salePrice,
+                type: parsed.type || 'variable',
+                imageUrl: imageUrl || null
+            };
+        });
+    } catch (error) {
+        console.error('Error fetching cross-sell products:', error);
+        product.crossSellProducts = [];
+    }
+
     return product;
 };
 
@@ -653,4 +696,100 @@ const deleteProduct = async (productID) => {
     }
 };
 
-module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap, getShopProductsPublic, deleteProduct };
+/**
+ * Handle cross-sell mappings for a product
+ * @param {string} productID - The product ID
+ * @param {number[]} crossSellProductIDs - Array of cross-sell product IDs
+ * @returns {Promise<{success: boolean, message: string}>}
+ */
+const handleCrossSells = async (productID, crossSellProductIDs) => {
+    if (!productID) {
+        return { success: false, message: 'Product ID is required' };
+    }
+
+    try {
+        // Delete existing cross-sells
+        await crossSellModel.deleteCrossSells(productID);
+
+        // Insert new cross-sells if provided
+        if (Array.isArray(crossSellProductIDs) && crossSellProductIDs.length > 0) {
+            const result = await crossSellModel.insertCrossSells(productID, crossSellProductIDs);
+            return result;
+        }
+
+        return { success: true, message: 'Cross-sells updated successfully' };
+    } catch (error) {
+        console.error('Error handling cross-sells:', error);
+        return { success: false, message: 'Failed to handle cross-sells', error: error.message };
+    }
+};
+
+// Search products by query string
+async function searchProducts(query) {
+    try {
+        if (!query || typeof query !== 'string' || query.trim().length === 0) {
+            return {
+                success: true,
+                data: [],
+                total: 0
+            };
+        }
+
+        const trimmedQuery = query.trim();
+        const searchTerm = `%${trimmedQuery}%`;
+        const startMatch = `${trimmedQuery}%`;
+        
+        // Search in both name and description
+        const searchQuery = `
+            SELECT 
+                productID, 
+                name, 
+                description, 
+                regularPrice, 
+                salePrice, 
+                discountType, 
+                discountValue, 
+                type, 
+                status, 
+                brand, 
+                featuredImage, 
+                categories, 
+                createdAt 
+            FROM products 
+            WHERE (name LIKE ? OR description LIKE ?)
+            AND status = 'In Stock'
+            ORDER BY 
+                CASE 
+                    WHEN name LIKE ? THEN 1
+                    WHEN name LIKE ? THEN 2
+                    ELSE 3
+                END,
+                createdAt DESC
+            LIMIT 20
+        `;
+        
+        const [rows] = await db.query(searchQuery, [
+            searchTerm,
+            searchTerm,
+            startMatch, // Exact start match gets highest priority
+            searchTerm
+        ]);
+
+        return {
+            success: true,
+            data: rows,
+            total: rows.length
+        };
+    } catch (error) {
+        console.error('Error searching products:', error);
+        return {
+            success: false,
+            message: 'Error searching products',
+            error: error.message,
+            data: [],
+            total: 0
+        };
+    }
+}
+
+module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap, getShopProductsPublic, deleteProduct, handleCrossSells, searchProducts };

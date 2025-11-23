@@ -1,6 +1,7 @@
 const comboModel = require('../model/comboModel');
 const crypto = require('crypto');
 const productModel = require('../model/productModel');
+const crossSellModel = require('../model/crossSellModel');
 const { deepParse } = require('../utils/responseUtils');
 
 const createComboProduct = async (payload) => {
@@ -30,6 +31,18 @@ const createComboProduct = async (payload) => {
                     featuredImage: productData.featuredImage || null
                 });
             }
+        }
+    }
+
+    // Handle Cross-Sells (optional)
+    const crossSells = payload.crossSells;
+    if (Array.isArray(crossSells) && crossSells.length > 0) {
+        try {
+            await crossSellModel.deleteCrossSells(comboID);
+            await crossSellModel.insertCrossSells(comboID, crossSells);
+        } catch (err) {
+            console.error('Error handling cross-sells for combo:', err);
+            // Don't fail the entire request, just log the error
         }
     }
 
@@ -106,6 +119,20 @@ async function editComboProduct(productID, updateData, productIDs) {
                     featuredImage: productData.featuredImage || null
                 });
             }
+        }
+    }
+
+    // 4. Handle Cross-Sells (optional)
+    if (updateData.hasOwnProperty('crossSells')) {
+        const crossSells = updateData.crossSells;
+        try {
+            await crossSellModel.deleteCrossSells(productID);
+            if (Array.isArray(crossSells) && crossSells.length > 0) {
+                await crossSellModel.insertCrossSells(productID, crossSells);
+            }
+        } catch (err) {
+            console.error('Error handling cross-sells for combo:', err);
+            // Don't fail the entire request, just log the error
         }
     }
 

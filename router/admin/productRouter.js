@@ -12,5 +12,7 @@ productRouter.get('/count-product', authAdminMiddleware.verifyAccessToken, produ
 productRouter.get('/details/:productID', productController.getProductDetails);
 // Public shop list
 productRouter.get('/shop', productController.shopList);
+// Public search endpoint
+productRouter.get('/search', productController.searchProducts);
 
 module.exports = productRouter

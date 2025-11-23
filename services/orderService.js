@@ -20,16 +20,33 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         throw new Error('Cart is empty');
     }
 
+    // Filter to only include selected items for checkout
+    const selectedItems = cartData.items.filter(item => 
+        item.selected === true || item.selected === 1 || item.selected === null
+    );
+
+    if (!selectedItems || selectedItems.length === 0) {
+        throw new Error('No selected items in cart. Please select items to checkout.');
+    }
+
+    // Recalculate summary for selected items only
+    const subtotal = selectedItems.reduce((sum, i) => sum + (i.lineTotalBefore || 0), 0);
+    const total = selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0);
+    const totalDiscount = subtotal - total;
+    cartData.summary = { ...cartData.summary, subtotal, total, totalDiscount };
+    cartData.items = selectedItems;
+
     // Debug: Log cart data structure
-    console.log('\n=== CART DATA DEBUG ===');
-    console.log('Cart items count:', cartData.items.length);
-    cartData.items.forEach((item, index) => {
+    console.log('\n=== CART DATA DEBUG (SELECTED ITEMS ONLY) ===');
+    console.log('Selected items count:', selectedItems.length);
+    selectedItems.forEach((item, index) => {
         console.log(`Item ${index + 1}:`, {
             productID: item.productID,
             variationID: item.variationID,
             quantity: item.quantity,
             hasComboItems: !!(item.comboItems && Array.isArray(item.comboItems)),
-            comboItemsCount: item.comboItems ? item.comboItems.length : 0
+            comboItemsCount: item.comboItems ? item.comboItems.length : 0,
+            selected: item.selected
         });
     });
 
@@ -364,12 +381,14 @@ async function getOrderDetails(orderId, uid) {
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
-                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
-                    v.variationPrice, v.variationStock, v.variationSalePrice
+                    v.variationPrice, v.variationStock, v.variationSalePrice,
+                    u.username AS brandName
              FROM order_items oi
              LEFT JOIN products p ON oi.productID = p.productID
              LEFT JOIN variations v ON oi.variationID = v.variationID
+             LEFT JOIN users u ON oi.brandID = u.uid AND u.role = 'brand'
              WHERE oi.orderID = ? AND oi.uid = ?
              ORDER BY oi.createdAt ASC`,
             [orderId, uid]
@@ -406,10 +425,34 @@ async function getOrderDetails(orderId, uid) {
             // Parse variation values
             const variationValues = safeParse(item.variationValues, []);
 
-            // Deep parse combo items featuredImage
-            const processedComboItems = (item.comboItems || []).map(comboItem => ({
-                ...comboItem,
-                featuredImage: safeParse(comboItem.featuredImage, [])
+            // Deep parse combo items featuredImage and add brand info
+            const processedComboItems = await Promise.all((item.comboItems || []).map(async (comboItem) => {
+                // Get brand info for combo item
+                let comboBrandName = 'Inhouse';
+                if (comboItem.brandID) {
+                    try {
+                        const [brandRows] = await db.query(
+                            `SELECT username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+                            [comboItem.brandID]
+                        );
+                        if (brandRows && brandRows.length > 0) {
+                            comboBrandName = brandRows[0].username;
+                        } else if (comboItem.brand) {
+                            comboBrandName = comboItem.brand;
+                        }
+                    } catch (e) {
+                        console.error('Error fetching brand for combo item:', e);
+                        if (comboItem.brand) comboBrandName = comboItem.brand;
+                    }
+                } else if (comboItem.brand) {
+                    comboBrandName = comboItem.brand;
+                }
+                
+                return {
+                    ...comboItem,
+                    featuredImage: safeParse(comboItem.featuredImage, []),
+                    brandName: comboBrandName
+                };
             }));
 
             // Build full variation object
@@ -422,6 +465,11 @@ async function getOrderDetails(orderId, uid) {
                 variationSalePrice: item.variationSalePrice,
                 variationStock: item.variationStock
             } : null;
+
+            // Determine brand name: use brandName from users table, fallback to productBrand, or "Inhouse" if brandID is null
+            const brandName = item.brandID 
+                ? (item.brandName || item.productBrand || 'Unknown Brand')
+                : 'Inhouse';
 
             processedItems.push({
                 productID: item.productID,
@@ -437,7 +485,9 @@ async function getOrderDetails(orderId, uid) {
                 productCustomInputs: parsedProductCustomInputs,
                 createdAt: item.createdAt,
                 comboItems: processedComboItems,
-                variation: fullVariation
+                variation: fullVariation,
+                brandID: item.brandID,
+                brandName: brandName
             });
         }
 
@@ -726,12 +776,14 @@ async function getAdminOrderDetails(orderId) {
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
-                    p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
-                    v.variationPrice, v.variationStock, v.variationSalePrice
+                    v.variationPrice, v.variationStock, v.variationSalePrice,
+                    u.username AS brandName
              FROM order_items oi
              LEFT JOIN products p ON oi.productID = p.productID
              LEFT JOIN variations v ON oi.variationID = v.variationID
+             LEFT JOIN users u ON oi.brandID = u.uid AND u.role = 'brand'
              WHERE oi.orderID = ?
              ORDER BY oi.createdAt ASC`,
             [orderId]
@@ -753,19 +805,61 @@ async function getAdminOrderDetails(orderId) {
         };
 
         // Parse featuredImage and custom_inputs for each item if it's a JSON string
-        const processedItems = items.map(item => {
+        const processedItems = [];
+        for (const item of items) {
+            // Load combo items if applicable
+            let comboItems = [];
+            if (item.comboID) {
+                comboItems = await cartModel.getComboItems(item.comboID);
+            }
+
             let parsedFeaturedImage = safeParse(item.featuredImage, []);
             let parsedCustomInputs = safeParse(item.custom_inputs, null);
             let productCustomInputs = safeParse(item.productCustomInputs, []);
             let variationValues = safeParse(item.variationValues, []);
+
+            // Deep parse combo items featuredImage and add brand info
+            const processedComboItems = await Promise.all((comboItems || []).map(async (comboItem) => {
+                // Get brand info for combo item
+                let comboBrandName = 'Inhouse';
+                if (comboItem.brandID) {
+                    try {
+                        const [brandRows] = await db.query(
+                            `SELECT username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+                            [comboItem.brandID]
+                        );
+                        if (brandRows && brandRows.length > 0) {
+                            comboBrandName = brandRows[0].username;
+                        } else if (comboItem.brand) {
+                            comboBrandName = comboItem.brand;
+                        }
+                    } catch (e) {
+                        console.error('Error fetching brand for combo item:', e);
+                        if (comboItem.brand) comboBrandName = comboItem.brand;
+                    }
+                } else if (comboItem.brand) {
+                    comboBrandName = comboItem.brand;
+                }
+                
+                return {
+                    ...comboItem,
+                    featuredImage: safeParse(comboItem.featuredImage, []),
+                    brandName: comboBrandName
+                };
+            }));
 
             // Convert string prices to numbers for consistency
             const salePrice = parseFloat(item.salePrice) || 0;
             const regularPrice = parseFloat(item.regularPrice) || 0;
             const lineTotalAfter = parseFloat(item.lineTotalAfter) || 0;
 
+            // Determine brand name: use brandName from users table, fallback to productBrand, or "Inhouse" if brandID is null
+            const brandName = item.brandID 
+                ? (item.brandName || item.productBrand || 'Unknown Brand')
+                : 'Inhouse';
+
             // Clean up the response - only send necessary fields
-            return {
+            processedItems.push({
                 productID: item.productID,
                 quantity: item.quantity,
                 variationID: item.variationID,
@@ -781,6 +875,9 @@ async function getAdminOrderDetails(orderId) {
                 trackingCode: item.trackingCode || null,
                 deliveryCompany: item.deliveryCompany || null,
                 itemStatus: item.itemStatus || 'pending',
+                comboItems: processedComboItems,
+                brandID: item.brandID,
+                brandName: brandName,
                 // Full variation details
                 variation: item.variationID ? {
                     variationID: item.variationID,
@@ -791,8 +888,8 @@ async function getAdminOrderDetails(orderId) {
                     variationSalePrice: item.variationSalePrice,
                     variationStock: item.variationStock
                 } : null
-            };
-        });
+            });
+        }
 
         // Get address details
         let deliveryAddress = null;

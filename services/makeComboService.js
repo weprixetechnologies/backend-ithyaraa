@@ -1,4 +1,5 @@
 const makeComboModel = require('./../model/makeCombo')
+const crossSellModel = require('../model/crossSellModel');
 const crypto = require('crypto');
 
 const generateUniqueComboID = async () => {
@@ -49,6 +50,18 @@ const createCombo = async (data) => {
         };
 
         await makeComboModel.insertComboItem(comboItemData);
+    }
+
+    // 4. Handle Cross-Sells (optional)
+    const crossSells = data.crossSells;
+    if (Array.isArray(crossSells) && crossSells.length > 0) {
+        try {
+            await crossSellModel.deleteCrossSells(comboID);
+            await crossSellModel.insertCrossSells(comboID, crossSells);
+        } catch (err) {
+            console.error('Error handling cross-sells for make-combo:', err);
+            // Don't fail the entire request, just log the error
+        }
     }
 
     return { comboID };
@@ -111,6 +124,20 @@ const updateComboProduct = async (productID, updateData) => {
                 };
                 await makeComboModel.insertComboItem(item);
             }
+        }
+    }
+
+    // 4. Handle Cross-Sells (optional)
+    if (updateData.hasOwnProperty('crossSells')) {
+        const crossSells = updateData.crossSells;
+        try {
+            await crossSellModel.deleteCrossSells(productID);
+            if (Array.isArray(crossSells) && crossSells.length > 0) {
+                await crossSellModel.insertCrossSells(productID, crossSells);
+            }
+        } catch (err) {
+            console.error('Error handling cross-sells for make-combo:', err);
+            // Don't fail the entire request, just log the error
         }
     }
 };

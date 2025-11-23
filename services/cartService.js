@@ -1,6 +1,7 @@
 const cartModel = require('../model/cartModel');
 const db = require('./../utils/dbconnect');
 const flashSaleModel = require('../model/flashSaleModel');
+const crossSellModel = require('../model/crossSellModel');
 
 async function addToCart(uid, productID, quantity, variationID, variationName, referBy, customInputs) {
     // 1. Fetch product
@@ -96,7 +97,44 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
     // 7. Update cart totals
     const updatedCartDetail = await cartModel.updateCartTotals(cart.cartID);
 
-    return { cartItem, cartDetail: updatedCartDetail };
+    // 8. Fetch cross-sell products for the added product (non-blocking, won't fail cart addition)
+    let crossSellProducts = [];
+    try {
+        const crossSells = await crossSellModel.getCrossSellProducts(productID);
+        // Extract only the first image URL for cross-sell products
+        crossSellProducts = crossSells.map(p => {
+            const parsed = { ...p };
+            let imageUrl = null;
+            try {
+                let featuredImage = parsed.featuredImage;
+                if (typeof featuredImage === 'string') {
+                    featuredImage = JSON.parse(featuredImage);
+                }
+                if (Array.isArray(featuredImage) && featuredImage.length > 0) {
+                    const firstImage = featuredImage[0];
+                    if (firstImage && firstImage.imgUrl) {
+                        imageUrl = firstImage.imgUrl;
+                    }
+                }
+            } catch (error) {
+                console.error('Error parsing featuredImage for cross-sell product:', error);
+            }
+            return {
+                productID: parsed.productID,
+                name: parsed.name,
+                regularPrice: parsed.regularPrice,
+                salePrice: parsed.salePrice,
+                type: parsed.type || 'variable',
+                imageUrl: imageUrl || null
+            };
+        });
+    } catch (error) {
+        // Silently fail - don't let cross-sell fetch errors affect cart addition
+        console.error('Error fetching cross-sell products (non-critical):', error);
+        crossSellProducts = [];
+    }
+
+    return { cartItem, cartDetail: updatedCartDetail, crossSellProducts };
 }
 async function generateUniqueComboID() {
     let uniqueID;
@@ -243,6 +281,14 @@ async function getCart(uid) {
             await cartModel.setCartModified(cart.cartID, false);
             summary = await cartModel.getCartSummaryFromDB(uid);
         }
+        
+        // Recalculate summary based on selected items only
+        const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
+        const subtotal = selectedItems.reduce((sum, i) => sum + (i.lineTotalBefore || 0), 0);
+        const total = selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0);
+        const totalDiscount = subtotal - total;
+        summary = { ...summary, subtotal, total, totalDiscount };
+        
         if (cart && cart.referBy) items.forEach(i => { i.referBy = cart.referBy; });
         console.log('Fast path - returning cached cart');
         return { items, summary, cartID: cart.cartID };
@@ -336,7 +382,7 @@ async function getCart(uid) {
         }
     }
 
-    // Offer processing
+    // Offer processing - only process selected items
     for (const item of items) {
         const comboItems = await cartModel.getComboItems(item.comboID);
         item.comboItems = comboItems;
@@ -344,7 +390,12 @@ async function getCart(uid) {
         if (!item.offerID || processedOfferIDs.has(item.offerID)) continue;
 
         const offer = await cartModel.getActiveOfferByID(item.offerID);
-        const affectedItems = items.filter(i => i.offerID === item.offerID && i.productType !== 'combo');
+        // Only include selected items for offer processing
+        const affectedItems = items.filter(i => 
+            i.offerID === item.offerID && 
+            i.productType !== 'combo' &&
+            (i.selected === true || i.selected === 1 || i.selected === null)
+        );
 
         if (!offer) {
             affectedItems.forEach(i => i.offerStatus = 'expired');
@@ -394,8 +445,10 @@ async function getCart(uid) {
     });
 
 
-    const subtotal = items.reduce((sum, i) => sum + i.lineTotalBefore, 0);
-    const total = items.reduce((sum, i) => sum + i.lineTotalAfter, 0);
+    // Calculate totals only for selected items (selected = TRUE or NULL for backward compatibility)
+    const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
+    const subtotal = selectedItems.reduce((sum, i) => sum + i.lineTotalBefore, 0);
+    const total = selectedItems.reduce((sum, i) => sum + i.lineTotalAfter, 0);
     const totalDiscount = subtotal - total;
 
     const summary = { subtotal, total, totalDiscount, anyModifications };
@@ -497,6 +550,19 @@ function applyBuyXAtXxx(affectedItems, offer) {
     }
 }
 
+const updateCartItemsSelected = async (uid, selectedItems) => {
+    const cartModel = require('../model/cartModel');
+    const result = await cartModel.updateCartItemsSelected(uid, selectedItems);
+    
+    if (result.success) {
+        // Recalculate cart totals
+        const cart = await cartModel.getOrCreateCart(uid);
+        await cartModel.updateCartTotals(cart.cartID);
+    }
+    
+    return result;
+};
+
 const removeCartItem = async (uid, cartItemID) => {
     try {
         // 1. Get user's cart
@@ -530,4 +596,4 @@ const removeCartItem = async (uid, cartItemID) => {
 };
 
 
-module.exports = { addToCart, getCart, removeCartItem, addCartCombo };
+module.exports = { addToCart, getCart, removeCartItem, addCartCombo, updateCartItemsSelected };

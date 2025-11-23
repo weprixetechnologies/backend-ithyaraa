@@ -148,9 +148,51 @@ async function createOrder(orderData) {
         // 3. Commit the order transaction
         await connection.commit();
 
-        // 4. Clear the cart for this user (AFTER successful commit)
-        await connection.query(`DELETE FROM cart_items WHERE uid = ?`, [orderData.uid]);
-        await connection.query(`DELETE FROM cartDetail WHERE uid = ?`, [orderData.uid]);
+        // 4. Clear only the selected items from the cart (AFTER successful commit)
+        // Get cartItemIDs of items that were included in the order
+        const cartItemIDs = orderData.items.map(item => item.cartItemID).filter(id => id != null);
+        
+        console.log('\n=== CART CLEANUP DEBUG ===');
+        console.log('Total items in order:', orderData.items.length);
+        console.log('CartItemIDs to delete:', cartItemIDs);
+        console.log('UID:', orderData.uid);
+        
+        if (cartItemIDs.length > 0) {
+            const placeholders = cartItemIDs.map(() => '?').join(',');
+            // Use a new connection for cart cleanup (after transaction commit)
+            const cleanupConnection = await db.getConnection();
+            try {
+                // First, verify which items will be deleted (for debugging)
+                const [itemsToDelete] = await cleanupConnection.query(
+                    `SELECT cartItemID, productID, selected FROM cart_items WHERE uid = ? AND cartItemID IN (${placeholders}) AND (selected = TRUE OR selected = 1)`,
+                    [orderData.uid, ...cartItemIDs]
+                );
+                console.log('Items that will be deleted (selected = TRUE):', itemsToDelete);
+                
+                // Explicitly check selected = TRUE to ensure only selected items are deleted
+                const [deleteResult] = await cleanupConnection.query(
+                    `DELETE FROM cart_items WHERE uid = ? AND cartItemID IN (${placeholders}) AND (selected = TRUE OR selected = 1)`,
+                    [orderData.uid, ...cartItemIDs]
+                );
+                console.log('Deleted rows:', deleteResult.affectedRows);
+
+                // Check if cart is now empty, and if so, clear cartDetail
+                const [remainingItems] = await cleanupConnection.query(
+                    `SELECT COUNT(*) as count FROM cart_items WHERE uid = ?`,
+                    [orderData.uid]
+                );
+                console.log('Remaining items in cart:', remainingItems[0].count);
+                
+                if (remainingItems[0].count === 0) {
+                    await cleanupConnection.query(`DELETE FROM cartDetail WHERE uid = ?`, [orderData.uid]);
+                    console.log('CartDetail cleared (cart is empty)');
+                }
+            } finally {
+                cleanupConnection.release();
+            }
+        } else {
+            console.log('WARNING: No cartItemIDs found in order items. Cart will not be cleared.');
+        }
 
         return { orderID, orderData };
     } catch (err) {

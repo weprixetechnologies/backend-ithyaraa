@@ -96,9 +96,23 @@ const addProduct = async (req, res) => {
         } else {
             console.log('Step: No variations provided in payload');
         }
-        
 
-        // ✅ 7. Success Response
+        // 7. Handle Cross-Sells (optional)
+        const crossSells = payload.crossSells;
+        if (Array.isArray(crossSells) && crossSells.length > 0) {
+            try {
+                const crossSellResult = await service.handleCrossSells(productID, crossSells);
+                if (!crossSellResult.success) {
+                    console.error('Cross-sell upload failed:', crossSellResult.error);
+                    // Don't fail the entire request, just log the error
+                }
+            } catch (err) {
+                console.error('Error handling cross-sells:', err);
+                // Don't fail the entire request, just log the error
+            }
+        }
+
+        // ✅ 8. Success Response
         return res.status(201).json({
             success: true,
             message: 'Product uploaded successfully',
@@ -196,6 +210,21 @@ const addCustomProduct = async (req, res) => {
             }
         }
 
+        // 4. Handle Cross-Sells (optional)
+        const crossSells = payload.crossSells;
+        if (Array.isArray(crossSells) && crossSells.length > 0) {
+            try {
+                const crossSellResult = await service.handleCrossSells(productID, crossSells);
+                if (!crossSellResult.success) {
+                    console.error('Cross-sell upload failed:', crossSellResult.error);
+                    // Don't fail the entire request, just log the error
+                }
+            } catch (err) {
+                console.error('Error handling cross-sells:', err);
+                // Don't fail the entire request, just log the error
+            }
+        }
+
         // ✅ Success Response
         return res.status(201).json({
             success: true,
@@ -259,7 +288,22 @@ const editProduct = async (req, res) => {
             }
         }
 
-        // ✅ 6. Final Success Response
+        // 6. Handle Cross-Sells (optional)
+        if (payload.hasOwnProperty('crossSells')) {
+            const crossSells = payload.crossSells;
+            try {
+                const crossSellResult = await service.handleCrossSells(productID, Array.isArray(crossSells) ? crossSells : []);
+                if (!crossSellResult.success) {
+                    console.error('Cross-sell update failed:', crossSellResult.error);
+                    // Don't fail the entire request, just log the error
+                }
+            } catch (err) {
+                console.error('Error handling cross-sells:', err);
+                // Don't fail the entire request, just log the error
+            }
+        }
+
+        // ✅ 7. Final Success Response
        return res.status(200).json({
     success: true,
     message: 'Product updated successfully',
@@ -374,6 +418,35 @@ async function shopList(req, res) {
 }
 
 module.exports.shopList = shopList;
+
+// Search products endpoint
+async function searchProducts(req, res) {
+    try {
+        const { q } = req.query;
+        
+        if (!q || typeof q !== 'string' || q.trim().length === 0) {
+            return res.status(200).json({
+                success: true,
+                data: [],
+                total: 0,
+                message: 'Please provide a search query'
+            });
+        }
+
+        const result = await service.searchProducts(q);
+        return res.status(200).json(result);
+    } catch (e) {
+        console.error('searchProducts error:', e);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Server error',
+            data: [],
+            total: 0
+        });
+    }
+}
+
+module.exports.searchProducts = searchProducts;
 
 
 //payload

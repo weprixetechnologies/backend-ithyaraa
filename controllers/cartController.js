@@ -24,7 +24,12 @@ async function addCartItem(req, res) {
         }
 
         const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy, customInputs);
-        res.status(200).json({ success: true, cartItem: result.cartItem, cartDetail: result.cartDetail });
+        res.status(200).json({ 
+            success: true, 
+            cartItem: result.cartItem, 
+            cartDetail: result.cartDetail,
+            crossSellProducts: result.crossSellProducts || []
+        });
 
     } catch (error) {
         console.error('❌ Cart Controller Error:', error);
@@ -94,7 +99,32 @@ async function addCartCombo(req, res) {
     }
 }
 
+async function updateCartItemsSelected(req, res) {
+    try {
+        const { uid } = req.user;
+        const { selectedItems } = req.body; // Array of cartItemIDs
 
+        if (!Array.isArray(selectedItems)) {
+            return res.status(400).json({ success: false, message: 'selectedItems must be an array' });
+        }
 
+        const result = await cartService.updateCartItemsSelected(uid, selectedItems);
+        
+        if (result.success) {
+            // Recalculate cart totals after updating selection
+            const cart = await cartService.getCart(uid);
+            return res.status(200).json({ 
+                success: true, 
+                message: 'Cart items selection updated',
+                cart: cart
+            });
+        } else {
+            return res.status(500).json({ success: false, message: result.error || 'Failed to update selection' });
+        }
+    } catch (error) {
+        console.error('Error updating cart items selection:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+}
 
-module.exports = { addCartItem, getCart, removeFromCart, addCartCombo };
+module.exports = { addCartItem, getCart, removeFromCart, addCartCombo, updateCartItemsSelected };

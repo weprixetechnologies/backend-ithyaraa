@@ -4,6 +4,7 @@ const cartController = require('../controllers/cartController');
 const authUserMiddleware = require('./../middleware/authUserMiddleware')
 
 router.post('/add-cart', authUserMiddleware.verifyAccessToken, cartController.addCartItem);
+router.post('/update-cart-selected', authUserMiddleware.verifyAccessToken, cartController.updateCartItemsSelected);
 router.post('/get-cart', authUserMiddleware.verifyAccessToken, cartController.getCart);
 router.post("/remove-cart", authUserMiddleware.verifyAccessToken, cartController.removeFromCart);
 router.post('/add-cart-combo', authUserMiddleware.verifyAccessToken, cartController.addCartCombo);
