@@ -134,33 +134,43 @@ const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdmi
 const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter');
 
 // Register routes
-app.use('/api/', commonRouter);
-app.use('/api/user', userRouter);
-app.use('/api/admin', userAdminRouter);
-app.use('/api/auth', authRouter);
-app.use('/api/products', productRouter);
-app.use('/api/offer', offerRouter);
-app.use('/api/categories', categoryRouter);
-app.use('/api/coupons', couponsRouter);
-app.use('/api/make-combo', makeComboRouter);
-app.use('/api/combo', comboRouter);
-app.use('/api/address', addressRouter);
-app.use('/api/giftcard', giftcardRouter);
-app.use('/api/affiliate', affiliateRouter);
-app.use('/api/wishlist', wishlistRouter);
-app.use('/api/cart', cartRouter);
-app.use('/api/user-coupon', userCouponsRouter);
-app.use('/api/order', orderRouter);
-app.use('/api/phonepe', phonepeRouter);
-app.use('/api/reviews', reviewRouter);
+app.use('/api/', commonRouter)
+app.use('/api/user', userRouter); //user apis
+app.use('/api/admin', userAdminRouter); //admin user management apis
+app.use('/api/auth', authRouter)
+app.use('/api/products', productRouter)
+app.use('/api/offer', offerRouter)
+app.use('/api/categories', categoryRouter)
+app.use('/api/coupons', couponsRouter)
+app.use('/api/make-combo', makeComboRouter)
+app.use('/api/combo', comboRouter)
+app.use('/api/address', addressRouter)
+app.use('/api/giftcard', giftcardRouter)
+app.use('/api/affiliate', affiliateRouter)
+app.use('/api/wishlist', wishlistRouter)
+app.use('/api/cart', cartRouter)
+app.use('/api/user-coupon', userCouponsRouter)
+app.use('/api/order', orderRouter)
+app.use('/api/phonepe', phonepeRouter)
+app.use('/api/reviews', reviewRouter)
+app.use('/api/coins', coinRouter)
+app.use('/api/presale', presaleRouter)
+
+// ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
 app.use('/api/admin', adminDashboardRouter);
 app.use('/api/admin', brandAdminRouter);
 app.use('/api/admin', brandBankDetailsAdminRouter);
+app.use('/api/admin/flash-sales', flashSaleAdminRouter);
+app.use('/api/admin/coins', coinsAdminRouter);
+app.use('/api/admin/presale-products', presaleProductRouter);
+app.use('/api/admin/presale-groups', presaleDetailsRouter);
 app.use('/api/admin', adminAuthRouter);
-app.use('/api/brand', brandAuthRouter);
-app.use('/api/brand', orderBrandRouter);
-app.use('/api/brand', productBrandRouter);
-app.use('/api/brand', brandBankDetailsRouter);
+
+// BRAND AUTH ROUTE
+app.use('/api/brand', brandAuthRouter)
+app.use('/api/brand', orderBrandRouter)
+app.use('/api/brand', productBrandRouter)
+app.use('/api/brand', brandBankDetailsRouter)
 
 // ✅ HTTPS setup using Let's Encrypt certificate
 const sslOptions = {
