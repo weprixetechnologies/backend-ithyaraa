@@ -105,33 +105,39 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // Routers
-const userRouter = require('./router/usersRouter');
-const authRouter = require('./router/authRouter');
-const cartRouter = require('./router/cartRouter');
-const adminAuthRouter = require('./router/admin/authAdminRouter');
-const userAdminRouter = require('./router/admin/userAdminRouter');
-const productRouter = require('./router/admin/productRouter');
-const brandAuthRouter = require('./router/brand/authBrandRouter');
-const orderBrandRouter = require('./router/brand/orderBrandRouter');
-const productBrandRouter = require('./router/brand/productBrandRouter');
-const offerRouter = require('./router/admin/offerAdminRouter');
-const categoryRouter = require('./router/admin/categoryRouter');
-const commonRouter = require('./router/commonRouter');
-const couponsRouter = require('./router/admin/couponsRouter');
-const makeComboRouter = require('./router/admin/makeComboRouter');
-const comboRouter = require('./router/admin/comboRouter');
-const addressRouter = require('./router/addressRouter');
-const giftcardRouter = require('./router/giftcardRouter');
-const affiliateRouter = require('./router/affiliateRouter');
-const wishlistRouter = require('./router/wishlistRouter');
-const userCouponsRouter = require('./router/userCouponRouter');
-const orderRouter = require('./router/orderRouter');
-const phonepeRouter = require('./router/phonepeRouter');
-const reviewRouter = require('./router/reviewRouter');
-const adminDashboardRouter = require('./router/adminDashboardRouter');
-const brandAdminRouter = require('./router/admin/brandAdminRouter');
-const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter');
-const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter');
+const userRouter = require('./router/usersRouter')
+const authRouter = require('./router/authRouter')
+const cartRouter = require('./router/cartRouter')
+const adminAuthRouter = require('./router/admin/authAdminRouter')
+const userAdminRouter = require('./router/admin/userAdminRouter')
+const productRouter = require('./router/admin/productRouter')
+const brandAuthRouter = require('./router/brand/authBrandRouter')
+const orderBrandRouter = require('./router/brand/orderBrandRouter')
+const productBrandRouter = require('./router/brand/productBrandRouter')
+const offerRouter = require('./router/admin/offerAdminRouter')
+const categoryRouter = require('./router/admin/categoryRouter')
+const commonRouter = require('./router/commonRouter')
+const couponsRouter = require('./router/admin/couponsRouter')
+const makeComboRouter = require('./router/admin/makeComboRouter')
+const comboRouter = require('./router/admin/comboRouter')
+const addressRouter = require('./router/addressRouter')
+const giftcardRouter = require('./router/giftcardRouter')
+const affiliateRouter = require('./router/affiliateRouter')
+const wishlistRouter = require('./router/wishlistRouter')
+const userCouponsRouter = require('./router/userCouponRouter')
+const orderRouter = require('./router/orderRouter')
+const phonepeRouter = require('./router/phonepeRouter')
+const reviewRouter = require('./router/reviewRouter')
+const coinRouter = require('./router/coinRouter')
+const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
+const flashSaleAdminRouter = require('./router/admin/flashSaleRouter')
+const adminDashboardRouter = require('./router/adminDashboardRouter')
+const brandAdminRouter = require('./router/admin/brandAdminRouter')
+const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
+const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter')
+const presaleProductRouter = require('./router/admin/presaleProductRouter')
+const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
+const presaleRouter = require('./router/presaleRouter')
 
 // Register routes
 app.use('/api/', commonRouter)
