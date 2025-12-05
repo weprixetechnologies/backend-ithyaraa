@@ -19,5 +19,16 @@ affiliateRouter.get('/payout-requests', authAdminMiddleware.verifyAccessToken, a
 affiliateRouter.put('/approve-payout/:txnID', authAdminMiddleware.verifyAccessToken, affiliateController.approvePayout);
 affiliateRouter.put('/reject-payout/:txnID', authAdminMiddleware.verifyAccessToken, affiliateController.rejectPayout);
 
+// User routes for bank account management
+affiliateRouter.post('/bank-account', authAdminMiddleware.verifyAccessToken, affiliateController.addBankAccount);
+affiliateRouter.get('/bank-accounts', authAdminMiddleware.verifyAccessToken, affiliateController.getBankAccounts);
+affiliateRouter.get('/bank-account/:bankAccountID', authAdminMiddleware.verifyAccessToken, affiliateController.getBankAccount);
+affiliateRouter.put('/bank-account/set-default', authAdminMiddleware.verifyAccessToken, affiliateController.setDefaultBankAccount);
+affiliateRouter.delete('/bank-account/:bankAccountID', authAdminMiddleware.verifyAccessToken, affiliateController.deleteBankAccount);
+
+// Admin routes for bank account management
+affiliateRouter.get('/admin/bank-accounts', authAdminMiddleware.verifyAccessToken, affiliateController.getAllBankAccountRequests);
+affiliateRouter.put('/admin/bank-account/:bankAccountID/approve', authAdminMiddleware.verifyAccessToken, affiliateController.approveBankAccount);
+affiliateRouter.put('/admin/bank-account/:bankAccountID/reject', authAdminMiddleware.verifyAccessToken, affiliateController.rejectBankAccount);
 
 module.exports = affiliateRouter

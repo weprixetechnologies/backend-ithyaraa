@@ -22,6 +22,7 @@ const uploadProduct = async ({
     tab1,
     tab2,
     productID,
+    sectionid,
     featuredImage,
     attributes,
     categories,
@@ -51,6 +52,7 @@ const uploadProduct = async ({
             tab1,
             tab2,
             productID,
+            sectionid,
             featuredImage,
             productAttributes,
             categories,
@@ -73,6 +75,7 @@ const uploadProduct = async ({
             '${safeString(tab1)}',
             '${safeString(tab2)}',
             '${safeString(productID)}',
+            ${sectionid === null || sectionid === undefined ? 'NULL' : `'${safeString(sectionid)}'`},
             '${safeString(JSON.stringify(featuredImage))}',
             ${attributes === null || attributes === undefined ? 'NULL' : `'${safeString(JSON.stringify(attributes))}'`},
             ${categories === null || categories === undefined ? 'NULL' : `'${safeString(JSON.stringify(categories))}'`},
@@ -110,7 +113,8 @@ const editProductModel = async (product) => {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
         productID, featuredImage, attributes, categories, brand, galleryImage, custom_inputs,
-        allowCustomerImageUpload
+        allowCustomerImageUpload,
+        sectionid
     } = product;
     console.log(categories);
 
@@ -119,7 +123,7 @@ const editProductModel = async (product) => {
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, allowCustomerImageUpload = ?
+            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, allowCustomerImageUpload = ?
         WHERE productID = ?
     `;
 
@@ -127,6 +131,7 @@ const editProductModel = async (product) => {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type,
         status || 'In Stock', offerID || null, overridePrice || null, tab1, tab2,
+        sectionid || null,
         JSON.stringify(featuredImage),
         attributes ? JSON.stringify(attributes) : null,
         categories ? JSON.stringify(categories) : null,

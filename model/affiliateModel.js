@@ -21,14 +21,40 @@ const approveAffiliateByUID = async (uid) => {
 };
 
 // Create a new record in affiliateTransactions table
-const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amount, type }) => {
+const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amount, type, bankAccountID = null }) => {
     // Ensure txnID is present
     txnID = txnID || randomUUID();
-    const query = `
-        INSERT INTO affiliateTransactions (txnID, uid, status, amount, type)
-        VALUES (?, ?, ?, ?, ?)
-    `;
-    const [result] = await db.execute(query, [txnID, uid, status, amount, type]);
+
+    // Check if bankAccountID column exists by trying to describe the table
+    let query, params;
+    try {
+        // Try to check if column exists
+        const [columns] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'bankAccountID'`);
+        if (columns.length > 0) {
+            // Column exists, use it
+            query = `
+                INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, bankAccountID)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `;
+            params = [txnID, uid, status, amount, type, bankAccountID];
+        } else {
+            // Column doesn't exist yet, don't include it
+            query = `
+                INSERT INTO affiliateTransactions (txnID, uid, status, amount, type)
+                VALUES (?, ?, ?, ?, ?)
+            `;
+            params = [txnID, uid, status, amount, type];
+        }
+    } catch (error) {
+        // If check fails, use the safe version without bankAccountID
+        query = `
+            INSERT INTO affiliateTransactions (txnID, uid, status, amount, type)
+            VALUES (?, ?, ?, ?, ?)
+        `;
+        params = [txnID, uid, status, amount, type];
+    }
+
+    const [result] = await db.execute(query, params);
     return result;
 };
 
@@ -90,6 +116,413 @@ async function getAffiliateTransactions(uid, {
 }
 
 module.exports.getAffiliateTransactions = getAffiliateTransactions;
+
+// ==================== Bank Account Functions ====================
+
+// Create a new bank account
+const createBankAccount = async (bankAccountData) => {
+    try {
+        const {
+            uid,
+            accountHolderName,
+            accountNumber,
+            ifscCode,
+            bankName,
+            branchName = null,
+            accountType = 'savings',
+            panNumber = null,
+            gstin = null,
+            address = null
+        } = bankAccountData;
+
+        // Check if account already exists
+        const [existing] = await db.execute(
+            'SELECT bankAccountID FROM affiliate_bank_accounts WHERE uid = ? AND accountNumber = ? AND ifscCode = ?',
+            [uid, accountNumber, ifscCode]
+        );
+
+        if (existing.length > 0) {
+            return { success: false, error: 'Bank account already exists' };
+        }
+
+        // If this is the first account or isDefault is true, set others to not default
+        if (bankAccountData.isDefault) {
+            await db.execute(
+                'UPDATE affiliate_bank_accounts SET isDefault = 0 WHERE uid = ?',
+                [uid]
+            );
+        } else {
+            // Check if user has any approved accounts
+            const [approvedAccounts] = await db.execute(
+                'SELECT COUNT(*) as count FROM affiliate_bank_accounts WHERE uid = ? AND status = "approved"',
+                [uid]
+            );
+            // If no approved accounts exist, set this as default
+            if (approvedAccounts[0].count === 0) {
+                bankAccountData.isDefault = 1;
+            }
+        }
+
+        const query = `
+            INSERT INTO affiliate_bank_accounts 
+            (uid, accountHolderName, accountNumber, ifscCode, bankName, branchName, accountType, panNumber, gstin, address, status, isDefault, submittedBy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        `;
+
+        const [result] = await db.execute(query, [
+            uid,
+            accountHolderName,
+            accountNumber,
+            ifscCode,
+            bankName,
+            branchName,
+            accountType,
+            panNumber,
+            gstin,
+            address,
+            bankAccountData.isDefault || 0,
+            uid
+        ]);
+
+        return { success: true, data: { bankAccountID: result.insertId } };
+    } catch (error) {
+        console.error('Error creating bank account:', error);
+        throw error;
+    }
+};
+
+// Get bank accounts for a user
+const getBankAccounts = async (uid, includeRejected = false) => {
+    try {
+        const where = ['uid = ?'];
+        const params = [uid];
+
+        if (!includeRejected) {
+            where.push('status != ?');
+            params.push('rejected');
+        }
+
+        const query = `
+            SELECT 
+                bankAccountID,
+                accountHolderName,
+                accountNumber,
+                ifscCode,
+                bankName,
+                branchName,
+                accountType,
+                panNumber,
+                gstin,
+                address,
+                status,
+                isDefault,
+                createdAt,
+                updatedAt,
+                approvedAt,
+                rejectedAt,
+                rejectionReason
+            FROM affiliate_bank_accounts
+            WHERE ${where.join(' AND ')}
+            ORDER BY isDefault DESC, createdAt DESC
+        `;
+
+        const [rows] = await db.execute(query, params);
+        return rows;
+    } catch (error) {
+        console.error('Error fetching bank accounts:', error);
+        throw error;
+    }
+};
+
+// Get a single bank account by ID
+const getBankAccountById = async (bankAccountID, uid) => {
+    try {
+        const query = `
+            SELECT 
+                bankAccountID,
+                uid,
+                accountHolderName,
+                accountNumber,
+                ifscCode,
+                bankName,
+                branchName,
+                accountType,
+                panNumber,
+                gstin,
+                address,
+                status,
+                isDefault,
+                createdAt,
+                updatedAt,
+                approvedAt,
+                rejectedAt,
+                rejectionReason,
+                approvedBy,
+                rejectedBy
+            FROM affiliate_bank_accounts
+            WHERE bankAccountID = ? AND uid = ?
+        `;
+
+        const [rows] = await db.execute(query, [bankAccountID, uid]);
+        return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+        console.error('Error fetching bank account:', error);
+        throw error;
+    }
+};
+
+// Set default bank account
+const setDefaultBankAccount = async (bankAccountID, uid) => {
+    try {
+        // Verify account belongs to user and is approved
+        const [account] = await db.execute(
+            'SELECT status FROM affiliate_bank_accounts WHERE bankAccountID = ? AND uid = ?',
+            [bankAccountID, uid]
+        );
+
+        if (account.length === 0) {
+            return { success: false, error: 'Bank account not found' };
+        }
+
+        if (account[0].status !== 'approved') {
+            return { success: false, error: 'Only approved bank accounts can be set as default' };
+        }
+
+        // Set all accounts to not default
+        await db.execute(
+            'UPDATE affiliate_bank_accounts SET isDefault = 0 WHERE uid = ?',
+            [uid]
+        );
+
+        // Set selected account as default
+        await db.execute(
+            'UPDATE affiliate_bank_accounts SET isDefault = 1 WHERE bankAccountID = ? AND uid = ?',
+            [bankAccountID, uid]
+        );
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error setting default bank account:', error);
+        throw error;
+    }
+};
+
+// Delete bank account (only if not approved or user's own)
+const deleteBankAccount = async (bankAccountID, uid) => {
+    try {
+        const [account] = await db.execute(
+            'SELECT status, isDefault FROM affiliate_bank_accounts WHERE bankAccountID = ? AND uid = ?',
+            [bankAccountID, uid]
+        );
+
+        if (account.length === 0) {
+            return { success: false, error: 'Bank account not found' };
+        }
+
+        // Can only delete pending or rejected accounts
+        if (account[0].status === 'approved') {
+            return { success: false, error: 'Cannot delete approved bank account' };
+        }
+
+        await db.execute(
+            'DELETE FROM affiliate_bank_accounts WHERE bankAccountID = ? AND uid = ?',
+            [bankAccountID, uid]
+        );
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error deleting bank account:', error);
+        throw error;
+    }
+};
+
+// Admin: Get all bank account requests
+const getAllBankAccountRequests = async ({ page = 1, limit = 10, status, uid = null }) => {
+    try {
+        const offset = (page - 1) * limit;
+        const where = [];
+        const params = [];
+
+        if (status) {
+            where.push('aba.status = ?');
+            params.push(status);
+        }
+
+        if (uid) {
+            where.push('aba.uid = ?');
+            params.push(uid);
+        }
+
+        const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+        const listQuery = `
+            SELECT 
+                aba.bankAccountID,
+                aba.uid,
+                aba.accountHolderName,
+                aba.accountNumber,
+                aba.ifscCode,
+                aba.bankName,
+                aba.branchName,
+                aba.accountType,
+                aba.panNumber,
+                aba.gstin,
+                aba.address,
+                aba.status,
+                aba.isDefault,
+                aba.createdAt,
+                aba.updatedAt,
+                aba.approvedAt,
+                aba.rejectedAt,
+                aba.rejectionReason,
+                aba.approvedBy,
+                aba.rejectedBy,
+                u.name as userName,
+                u.emailID as userEmail
+            FROM affiliate_bank_accounts aba
+            LEFT JOIN users u ON aba.uid = u.uid
+            ${whereClause}
+            ORDER BY aba.createdAt DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM affiliate_bank_accounts aba
+            ${whereClause}
+        `;
+
+        const [rows] = await db.execute(listQuery, [...params, limit, offset]);
+        const [countRows] = await db.execute(countQuery, params);
+        const total = countRows && countRows[0] ? countRows[0].total : 0;
+
+        return {
+            data: rows,
+            page: page,
+            limit: limit,
+            total,
+            totalPages: Math.ceil(total / limit)
+        };
+    } catch (error) {
+        console.error('Error fetching bank account requests:', error);
+        throw error;
+    }
+};
+
+// Admin: Approve bank account
+const approveBankAccount = async (bankAccountID, adminUID) => {
+    try {
+        // Check if account exists and is pending
+        const [account] = await db.execute(
+            'SELECT uid, status FROM affiliate_bank_accounts WHERE bankAccountID = ?',
+            [bankAccountID]
+        );
+
+        if (account.length === 0) {
+            return { success: false, error: 'Bank account not found' };
+        }
+
+        if (account[0].status !== 'pending') {
+            return { success: false, error: 'Bank account is not pending approval' };
+        }
+
+        // If this is the first approved account for the user, set as default
+        const [approvedAccounts] = await db.execute(
+            'SELECT COUNT(*) as count FROM affiliate_bank_accounts WHERE uid = ? AND status = "approved"',
+            [account[0].uid]
+        );
+
+        const isDefault = approvedAccounts[0].count === 0 ? 1 : 0;
+
+        // Update account status
+        await db.execute(
+            `UPDATE affiliate_bank_accounts 
+             SET status = 'approved', 
+                 isDefault = ?,
+                 approvedBy = ?,
+                 approvedAt = NOW(),
+                 updatedAt = NOW()
+             WHERE bankAccountID = ?`,
+            [isDefault, adminUID, bankAccountID]
+        );
+
+        return { success: true, data: { bankAccountID, status: 'approved' } };
+    } catch (error) {
+        console.error('Error approving bank account:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Admin: Reject bank account
+const rejectBankAccount = async (bankAccountID, adminUID, rejectionReason = null) => {
+    try {
+        // Check if account exists and is pending
+        const [account] = await db.execute(
+            'SELECT uid, status FROM affiliate_bank_accounts WHERE bankAccountID = ?',
+            [bankAccountID]
+        );
+
+        if (account.length === 0) {
+            return { success: false, error: 'Bank account not found' };
+        }
+
+        if (account[0].status !== 'pending') {
+            return { success: false, error: 'Bank account is not pending approval' };
+        }
+
+        // Update account status
+        await db.execute(
+            `UPDATE affiliate_bank_accounts 
+             SET status = 'rejected', 
+                 rejectedBy = ?,
+                 rejectionReason = ?,
+                 rejectedAt = NOW(),
+                 updatedAt = NOW()
+             WHERE bankAccountID = ?`,
+            [adminUID, rejectionReason, bankAccountID]
+        );
+
+        return { success: true, data: { bankAccountID, status: 'rejected' } };
+    } catch (error) {
+        console.error('Error rejecting bank account:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Get approved default bank account for user
+const getDefaultBankAccount = async (uid) => {
+    try {
+        const query = `
+            SELECT 
+                bankAccountID,
+                accountHolderName,
+                accountNumber,
+                ifscCode,
+                bankName,
+                branchName,
+                accountType
+            FROM affiliate_bank_accounts
+            WHERE uid = ? AND status = 'approved' AND isDefault = 1
+            LIMIT 1
+        `;
+
+        const [rows] = await db.execute(query, [uid]);
+        return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+        console.error('Error fetching default bank account:', error);
+        throw error;
+    }
+};
+
+module.exports.createBankAccount = createBankAccount;
+module.exports.getBankAccounts = getBankAccounts;
+module.exports.getBankAccountById = getBankAccountById;
+module.exports.setDefaultBankAccount = setDefaultBankAccount;
+module.exports.deleteBankAccount = deleteBankAccount;
+module.exports.getAllBankAccountRequests = getAllBankAccountRequests;
+module.exports.approveBankAccount = approveBankAccount;
+module.exports.rejectBankAccount = rejectBankAccount;
+module.exports.getDefaultBankAccount = getDefaultBankAccount;
 
 // Fetch affiliated orders (items purchased via this user's referral)
 async function getAffiliateOrdersByReferrer(uid, {
@@ -324,22 +757,41 @@ const getPayoutRequests = async ({ page = 1, limit = 10, status }) => {
 
         const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-        const listQuery = `
-            SELECT 
-                at.txnID,
-                at.amount,
-                at.status,
-                at.type,
-                at.createdOn,
-                COALESCE(at.updatedOn, at.createdOn) as updatedOn,
-                u.name as userName,
-                u.emailID as userEmail
-            FROM affiliateTransactions at
-            LEFT JOIN users u ON at.uid = u.uid
-            ${whereClause}
-            ORDER BY at.createdOn DESC
-            LIMIT ? OFFSET ?
-        `;
+        // Check if bankAccountID column exists - use dynamic query
+        let listQuery;
+        try {
+            const [columns] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'bankAccountID'`);
+            if (columns.length > 0) {
+                listQuery = `
+                    SELECT at.txnID, at.amount, at.status, at.type, at.bankAccountID, at.createdOn,
+                    COALESCE(at.updatedOn, at.createdOn) as updatedOn, u.name as userName, u.emailID as userEmail,
+                    aba.accountHolderName, aba.accountNumber, aba.ifscCode, aba.bankName
+                    FROM affiliateTransactions at
+                    LEFT JOIN users u ON at.uid = u.uid
+                    LEFT JOIN affiliate_bank_accounts aba ON at.bankAccountID = aba.bankAccountID
+                    ${whereClause}
+                    ORDER BY at.createdOn DESC LIMIT ? OFFSET ?
+                `;
+            } else {
+                listQuery = `
+                    SELECT at.txnID, at.amount, at.status, at.type, at.createdOn,
+                    COALESCE(at.updatedOn, at.createdOn) as updatedOn, u.name as userName, u.emailID as userEmail
+                    FROM affiliateTransactions at
+                    LEFT JOIN users u ON at.uid = u.uid
+                    ${whereClause}
+                    ORDER BY at.createdOn DESC LIMIT ? OFFSET ?
+                `;
+            }
+        } catch (error) {
+            listQuery = `
+                SELECT at.txnID, at.amount, at.status, at.type, at.createdOn,
+                COALESCE(at.updatedOn, at.createdOn) as updatedOn, u.name as userName, u.emailID as userEmail
+                FROM affiliateTransactions at
+                LEFT JOIN users u ON at.uid = u.uid
+                ${whereClause}
+                ORDER BY at.createdOn DESC LIMIT ? OFFSET ?
+            `;
+        }
 
         const countQuery = `
             SELECT COUNT(*) as total

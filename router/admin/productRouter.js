@@ -7,6 +7,10 @@ productRouter.post('/add-product', authAdminMiddleware.verifyAccessToken, produc
 productRouter.post('/add-custom-product', authAdminMiddleware.verifyAccessToken, productController.addCustomProduct)
 productRouter.post('/edit-product', authAdminMiddleware.verifyAccessToken, productController.editProduct)
 productRouter.delete('/delete/:productID', authAdminMiddleware.verifyAccessToken, productController.deleteProduct)
+productRouter.post('/bulk-delete', authAdminMiddleware.verifyAccessToken, productController.bulkDeleteProducts)
+productRouter.post('/bulk-sale-update', authAdminMiddleware.verifyAccessToken, productController.bulkUpdateSale)
+productRouter.post('/bulk-assign-section', authAdminMiddleware.verifyAccessToken, productController.bulkAssignSection)
+productRouter.post('/bulk-remove-section', authAdminMiddleware.verifyAccessToken, productController.bulkRemoveSection)
 productRouter.get('/all-products', productController.getPaginatedProducts)
 productRouter.get('/count-product', authAdminMiddleware.verifyAccessToken, productController.getProductPageCount)
 productRouter.get('/details/:productID', productController.getProductDetails);

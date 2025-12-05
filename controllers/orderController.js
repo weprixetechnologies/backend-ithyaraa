@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { addSendEmailJob } = require('../queue/emailProducer');
 const usersModel = require('../model/usersModel');
+const db = require('../utils/dbconnect');
 
 // Load from environment only
 const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
@@ -119,6 +120,138 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
     }
 }
 
+// Helper function to send seller notification emails
+async function sendSellerNotificationEmails(orderID, paymentMode) {
+    try {
+        // Get order items grouped by brandID
+        const [orderItems] = await db.query(
+            `SELECT oi.name, oi.variationName, oi.quantity, oi.brandID, od.paymentMode, od.createdAt
+             FROM order_items oi
+             INNER JOIN orderDetail od ON oi.orderID = od.orderID
+             WHERE oi.orderID = ?
+             ORDER BY oi.brandID, oi.createdAt`,
+            [orderID]
+        );
+
+        if (!orderItems || orderItems.length === 0) {
+            console.log(`No order items found for order ${orderID}`);
+            return;
+        }
+
+        // Group items by brandID
+        const itemsByBrand = {};
+        orderItems.forEach(item => {
+            const brandID = item.brandID || 'inhouse'; // Use 'inhouse' as key for null brandID
+            if (!itemsByBrand[brandID]) {
+                itemsByBrand[brandID] = [];
+            }
+            itemsByBrand[brandID].push(item);
+        });
+
+        // Get order date
+        const orderDate = orderItems[0].createdAt
+            ? new Date(orderItems[0].createdAt).toLocaleDateString('en-IN', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            })
+            : new Date().toLocaleDateString('en-IN', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+        // Send email for each brand
+        for (const [brandID, items] of Object.entries(itemsByBrand)) {
+            try {
+                let sellerEmail = null;
+                let sellerName = 'Seller';
+
+                if (brandID === 'inhouse') {
+                    // Inhouse products - send to ithyaraa.official@gmail.com
+                    sellerEmail = 'ithyaraa.official@gmail.com';
+                    sellerName = 'Ithyaraa Team';
+                } else {
+                    // Get seller email from users table
+                    const [brandUsers] = await db.query(
+                        `SELECT emailID, name, username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+                        [brandID]
+                    );
+
+                    if (brandUsers && brandUsers.length > 0) {
+                        sellerEmail = brandUsers[0].emailID;
+                        sellerName = brandUsers[0].name || brandUsers[0].username || 'Seller';
+                    } else {
+                        console.warn(`Brand user not found for brandID: ${brandID}`);
+                        continue; // Skip if brand not found
+                    }
+                }
+
+                if (!sellerEmail) {
+                    console.warn(`No email found for brandID: ${brandID}`);
+                    continue;
+                }
+
+                // Format items as HTML
+                let itemsHtml = '';
+                items.forEach(item => {
+                    const variationText = item.variationName
+                        ? `<p style="margin: 0 0 5px 0; color: #666666; font-size: 13px;">Variant: <span style="color: #1a1a1a;">${item.variationName}</span></p>`
+                        : '';
+
+                    itemsHtml += `
+                        <tr>
+                            <td style="padding: 20px; border-bottom: 1px solid #f0f0f0;">
+                                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                    <tr>
+                                        <td style="padding: 0;">
+                                            <p style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 16px; font-weight: 600; line-height: 1.4;">
+                                                ${item.name || 'Product'}</p>
+                                            ${variationText}
+                                            <p style="margin: 0; color: #666666; font-size: 13px;">Quantity:
+                                                <span style="color: #1a1a1a; font-weight: 600;">${item.quantity || 1}</span>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                // Prepare email variables
+                const emailVariables = {
+                    orderID: orderID,
+                    orderDate: orderDate,
+                    paymentMode: paymentMode || 'COD',
+                    productCount: items.length,
+                    itemsList: itemsHtml
+                };
+
+                // Queue email
+                await addSendEmailJob({
+                    to: sellerEmail,
+                    templateName: 'order_notify',
+                    variables: emailVariables,
+                    subject: `New Order #${orderID} - ${items.length} Product(s) - Ithyaraa`
+                });
+
+                console.log(`Seller notification email queued for ${sellerEmail} (${brandID === 'inhouse' ? 'Inhouse' : sellerName}) - Order ${orderID} - ${items.length} product(s)`);
+            } catch (brandError) {
+                console.error(`Error sending notification for brandID ${brandID}:`, brandError);
+                // Continue with other brands even if one fails
+            }
+        }
+    } catch (error) {
+        console.error('Error sending seller notification emails:', error);
+        // Don't throw error - email failure shouldn't break order placement
+    }
+}
+
 const placeOrderController = async (req, res) => {
     try {
         const uid = req.user.uid; // JWT payload uses uid
@@ -146,6 +279,9 @@ const placeOrderController = async (req, res) => {
             // Send confirmation email for COD
             await sendOrderConfirmationEmail(user, order, 'COD');
 
+            // Send seller notification emails
+            await sendSellerNotificationEmails(order.orderID, 'COD');
+
             return res.status(200).json({
                 success: true,
                 paymentMode: 'COD',
@@ -165,7 +301,9 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const redirectUrl = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/payment-status?merchantTransactionId=${merchantOrderId}`;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        // Redirect to order success page after payment
+        const redirectUrl = `${frontendUrl}/order-status/order-summary/${order.orderID}`;
         const callbackUrl = `${process.env.BACKEND_URL || 'http://192.168.1.12:3000'}/api/phonepe/webhook`;
 
         const payload = {
@@ -203,8 +341,8 @@ const placeOrderController = async (req, res) => {
                 // Don't fail the response, just log the error
             }
 
-            // Send confirmation email for PREPAID (order is already placed)
-            await sendOrderConfirmationEmail(user, order, 'PREPAID', merchantOrderId);
+            // DO NOT send confirmation emails here - wait for webhook confirmation
+            // Emails will be sent after successful payment via webhook
 
             // Try to extract the redirect URL if present
             const checkoutUrl = data?.data?.instrumentResponse?.redirectInfo?.url || data?.data?.redirectUrl || null;
@@ -212,7 +350,7 @@ const placeOrderController = async (req, res) => {
                 success: true,
                 paymentMode: 'PREPAID',
                 orderID: order.orderID,
-                merchantOrderId,
+                merchantTransactionId: merchantOrderId,
                 checkoutPageUrl: checkoutUrl || data
             });
         } else {
@@ -461,6 +599,60 @@ const generateInvoiceController = async (req, res) => {
     }
 };
 
+// Generate invoice for user (with ownership check)
+const generateInvoiceForUserController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const uid = req.user.uid; // Get user ID from JWT
+        const { action = 'download' } = req.query; // 'download' or 'data'
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        // Get order details and verify ownership
+        const order = await orderModel.getOrderByID(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        // Verify that the order belongs to the user
+        if (order.uid !== uid) {
+            return res.status(403).json({ success: false, message: 'You do not have permission to access this order' });
+        }
+
+        const result = await orderService.generateInvoice(orderId);
+        if (!result || !result.success) {
+            return res.status(404).json({ success: false, message: 'Failed to generate invoice' });
+        }
+
+        if (action === 'download') {
+            // Set headers for PDF download
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${result.invoice.fileName}"`);
+            res.setHeader('Content-Length', result.invoice.pdfBuffer.length);
+
+            // Send PDF buffer
+            return res.send(result.invoice.pdfBuffer);
+        } else {
+            // Return invoice data for frontend
+            return res.status(200).json({
+                success: true,
+                data: result.data,
+                invoice: {
+                    orderId: result.invoice.orderId,
+                    invoiceNumber: result.invoice.invoiceNumber,
+                    fileName: result.invoice.fileName,
+                    generatedAt: result.invoice.generatedAt
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Generate invoice error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // Email invoice to customer
 const emailInvoiceController = async (req, res) => {
     try {
@@ -565,5 +757,8 @@ module.exports.getAllOrdersController = getAllOrdersController;
 module.exports.updateOrderStatusController = updateOrderStatusController;
 module.exports.updatePaymentStatusController = updatePaymentStatusController;
 module.exports.generateInvoiceController = generateInvoiceController;
+module.exports.generateInvoiceForUserController = generateInvoiceForUserController;
 module.exports.emailInvoiceController = emailInvoiceController;
 module.exports.updateOrderItemsTrackingController = updateOrderItemsTrackingController;
+module.exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
+module.exports.sendSellerNotificationEmails = sendSellerNotificationEmails;

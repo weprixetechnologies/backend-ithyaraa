@@ -1,6 +1,8 @@
 const phonepeService = require('../services/phonepeService');
 const orderModel = require('../model/orderModel');
 const usersModel = require('../model/usersModel');
+const orderService = require('../services/orderService');
+const db = require('../utils/dbconnect');
 const { addSendEmailJob } = require('../queue/emailProducer');
 
 /**
@@ -37,17 +39,23 @@ const handleWebhookController = async (req, res) => {
         // Process the webhook data
         const processedStatus = phonepeService.processPaymentStatus(webhookData);
 
+        // Map payment status: 'paid' -> 'successful' to match database schema
+        let paymentStatus = processedStatus.orderStatus;
+        if (paymentStatus === 'paid') {
+            paymentStatus = 'successful';
+        }
+
         // Update order status based on webhook
         if (webhookData.merchantTransactionId) {
             try {
                 await orderModel.updateOrderPaymentStatus(
                     webhookData.merchantTransactionId,
-                    processedStatus.orderStatus
+                    paymentStatus
                 );
 
-                // Send confirmation email if payment successful
+                // Send order confirmation and seller notifications if payment successful
                 if (processedStatus.isSuccess) {
-                    await sendPaymentConfirmationEmail(webhookData.merchantTransactionId);
+                    await sendOrderConfirmationAndNotifications(webhookData.merchantTransactionId);
                 }
 
                 console.log(`Order status updated: ${webhookData.merchantTransactionId} -> ${processedStatus.orderStatus}`);
@@ -130,6 +138,8 @@ const getOrderPaymentStatusController = async (req, res) => {
     try {
         const { orderId } = req.params;
 
+        console.log('Checking');
+
         if (!orderId) {
             return res.status(400).json({
                 success: false,
@@ -147,47 +157,19 @@ const getOrderPaymentStatusController = async (req, res) => {
             });
         }
 
-        if (!order.merchantTransactionId) {
-            return res.status(400).json({
-                success: false,
-                message: 'No payment transaction found for this order'
-            });
-        }
-
-        // Check current payment status
-        const result = await phonepeService.checkPaymentStatus(order.merchantTransactionId);
-
-        if (!result.success) {
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to check payment status',
-                error: result.error
-            });
-        }
-
-        const processedStatus = phonepeService.processPaymentStatus(result.data);
-
-        // Update order status if it has changed
-        if (processedStatus.orderStatus !== order.paymentStatus) {
-            try {
-                await orderModel.updateOrderPaymentStatus(order.merchantTransactionId, processedStatus.orderStatus);
-
-                // Send confirmation email if payment successful
-                if (processedStatus.isSuccess) {
-                    await sendPaymentConfirmationEmail(order.merchantTransactionId);
-                }
-            } catch (updateError) {
-                console.error('Error updating order status:', updateError);
-            }
-        }
+        // Check locally from database only (no PhonePe API call)
+        const isSuccess = order.paymentStatus === 'successful' || order.paymentStatus === 'paid';
 
         res.json({
             success: true,
             orderId,
             merchantTransactionId: order.merchantTransactionId,
             currentStatus: order.paymentStatus,
-            latestStatus: processedStatus,
-            rawData: result.data
+            latestStatus: {
+                orderStatus: order.paymentStatus,
+                isSuccess: isSuccess,
+                statusMessage: isSuccess ? 'Payment successful' : order.paymentStatus === 'pending' ? 'Payment pending' : 'Payment status unknown'
+            }
         });
 
     } catch (error) {
@@ -201,10 +183,10 @@ const getOrderPaymentStatusController = async (req, res) => {
 };
 
 /**
- * Send payment confirmation email
+ * Send order confirmation email and seller notifications after successful payment
  * @param {string} merchantTransactionId - Merchant transaction ID
  */
-async function sendPaymentConfirmationEmail(merchantTransactionId) {
+async function sendOrderConfirmationAndNotifications(merchantTransactionId) {
     try {
         // Get order details
         const order = await orderModel.getOrderByMerchantTransactionId(merchantTransactionId);
@@ -222,31 +204,53 @@ async function sendPaymentConfirmationEmail(merchantTransactionId) {
             return;
         }
 
-        // Send payment confirmation email
-        await addSendEmailJob({
-            to: user.emailID,
-            templateName: 'payment-confirmation',
-            variables: {
-                customerName: user.name || user.username,
-                orderID: order.orderID,
-                merchantTransactionId: merchantTransactionId,
-                amount: order.total,
-                paymentDate: new Date().toLocaleDateString('en-IN', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }),
-                websiteUrl: process.env.FRONTEND_URL || 'http://192.168.1.12:3000'
-            },
-            subject: `Payment Confirmation - Order #${order.orderID}`
-        });
+        // Get order items to build orderData structure
+        const [orderItems] = await db.query(
+            `SELECT oi.name, oi.variationName, oi.quantity, oi.lineTotalAfter, oi.lineTotalBefore, 
+                    oi.offerApplied, oi.brandID
+             FROM order_items oi
+             WHERE oi.orderID = ?
+             ORDER BY oi.createdAt ASC`,
+            [order.orderID]
+        );
 
-        console.log(`Payment confirmation email sent for order ${order.orderID}`);
+        // Build orderData structure expected by sendOrderConfirmationEmail
+        const orderData = {
+            items: orderItems.map(item => ({
+                name: item.name,
+                variationName: item.variationName,
+                quantity: item.quantity,
+                lineTotalAfter: item.lineTotalAfter,
+                lineTotalBefore: item.lineTotalBefore,
+                offerApplied: item.offerApplied || false
+            })),
+            summary: {
+                subtotal: Number(order.subtotal) || 0,
+                totalDiscount: Number(order.totalDiscount) || 0,
+                total: Number(order.total) || 0
+            }
+        };
+
+        // Build order object in the format expected by sendOrderConfirmationEmail
+        const orderObject = {
+            orderID: order.orderID,
+            orderData: orderData
+        };
+
+        // Import email functions from orderController
+        const orderController = require('./orderController');
+
+        // Send order confirmation email
+        await orderController.sendOrderConfirmationEmail(user, orderObject, order.paymentMode || 'PREPAID', merchantTransactionId);
+
+        // Send seller notification emails
+        await orderController.sendSellerNotificationEmails(order.orderID, order.paymentMode || 'PREPAID');
+
+        console.log(`Order confirmation and seller notifications sent for order ${order.orderID}`);
 
     } catch (error) {
-        console.error('Error sending payment confirmation email:', error);
+        console.error('Error sending order confirmation and notifications:', error);
+        // Don't throw - email failures shouldn't break webhook processing
     }
 }
 

@@ -336,10 +336,10 @@ const getProductCount = async (query) => {
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
         'overridePrice', 'tab1', 'tab2', 'productID',
-        'featuredImage', 'categoryID', 'categoryName'
+        'sectionid', 'featuredImage', 'categoryID', 'categoryName'
     ];
 
-    const likeFields = ['name', 'type', 'productID'];
+    const likeFields = ['name', 'type', 'productID', 'sectionid'];
 
     for (const key in query) {
         if (!allowedFilters.includes(key)) continue;
@@ -402,10 +402,10 @@ const fetchPaginatedProducts = async (query) => {
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
         'overridePrice', 'tab1', 'tab2', 'productID',
-        'featuredImage', 'categoryID', 'categoryName'
+        'sectionid', 'featuredImage', 'categoryID', 'categoryName'
     ];
 
-    const likeFields = ['name', 'productID'];
+    const likeFields = ['name', 'productID', 'sectionid'];
 
     for (const key in query) {
         if (allowedFilters.includes(key)) {
@@ -429,7 +429,25 @@ const fetchPaginatedProducts = async (query) => {
         }
     }
 
-    let baseQuery = `SELECT * FROM products`;
+    // Only select columns actually needed by admin list + frontend product cards
+    let baseQuery = `
+        SELECT 
+            productID,
+            name,
+            sectionid,
+            regularPrice,
+            salePrice,
+            discountType,
+            discountValue,
+            offerID,
+            featuredImage,
+            brand,
+            categories,
+            type,
+            status,
+            createdAt
+        FROM products
+    `;
 
     if (filters.length > 0) {
         baseQuery += ` WHERE ${filters.join(' AND ')}`;
@@ -516,7 +534,7 @@ const getProductDetails = async (productID) => {
         // Extract only the first image URL for cross-sell products
         product.crossSellProducts = crossSellProducts.map(p => {
             const parsed = { ...p };
-            
+
             // Extract first image URL from featuredImage
             let imageUrl = null;
             try {
@@ -536,7 +554,7 @@ const getProductDetails = async (productID) => {
                 // If parsing fails, imageUrl remains null
                 console.error('Error parsing featuredImage for cross-sell product:', error);
             }
-            
+
             // Return only essential fields with imageUrl and type
             return {
                 productID: parsed.productID,
@@ -578,6 +596,19 @@ async function getShopProductsPublic(query) {
             const orConds = ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
             filters.push(`(${orConds.join(' OR ')})`);
             values.push(...ids);
+        }
+    }
+
+    // Section filter: sectionid can be a single value or comma-separated list
+    if (query.sectionid) {
+        const sectionIds = String(query.sectionid)
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+        if (sectionIds.length > 0) {
+            const orConds = sectionIds.map(() => `sectionid = ?`);
+            filters.push(`(${orConds.join(' OR ')})`);
+            values.push(...sectionIds);
         }
     }
 
@@ -636,7 +667,7 @@ async function getShopProductsPublic(query) {
     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     // Base query
-    let baseQuery = `SELECT productID, name, description, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, createdAt FROM products`;
+    let baseQuery = `SELECT productID, name, description, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
@@ -697,6 +728,130 @@ const deleteProduct = async (productID) => {
 };
 
 /**
+ * Bulk delete products by productID array.
+ * Uses existing single delete logic so related variations and other links are also removed.
+ * @param {string[]} productIDs
+ */
+const bulkDeleteProducts = async (productIDs = []) => {
+    if (!Array.isArray(productIDs) || productIDs.length === 0) {
+        return { success: false, message: 'productIDs must be a non-empty array' };
+    }
+
+    const results = [];
+    for (const id of productIDs) {
+        // Reuse the existing deleteProduct logic which already deletes variations etc.
+        const result = await deleteProduct(id);
+        results.push({ productID: id, ...result });
+    }
+
+    const allOk = results.every(r => r.success);
+    return {
+        success: allOk,
+        message: allOk ? 'All products deleted successfully' : 'Some products could not be deleted',
+        results
+    };
+};
+
+/**
+ * Bulk update discountType and discountValue for products.
+ * Optionally also updates salePrice based on these values when updateSalePrice = true.
+ */
+const bulkUpdateSale = async ({ productIDs = [], discountType, discountValue, updateSalePrice = false }) => {
+    if (!Array.isArray(productIDs) || productIDs.length === 0) {
+        return { success: false, message: 'productIDs must be a non-empty array' };
+    }
+    if (!discountType || typeof discountValue === 'undefined' || discountValue === null) {
+        return { success: false, message: 'discountType and discountValue are required' };
+    }
+
+    const validTypes = new Set(['percentage', 'fixed', 'flat']);
+    const normType = String(discountType).toLowerCase();
+    if (!validTypes.has(normType)) {
+        return { success: false, message: 'Invalid discountType. Use percentage, fixed or flat.' };
+    }
+
+    const numericDiscount = Number(discountValue);
+    if (Number.isNaN(numericDiscount)) {
+        return { success: false, message: 'discountValue must be a number' };
+    }
+
+    const placeholders = productIDs.map(() => '?').join(',');
+
+    // Always update discountType and discountValue
+    let sql = `
+        UPDATE products
+        SET discountType = ?, discountValue = ?
+    `;
+
+    const values = [normType, numericDiscount];
+
+    // Optionally recalculate salePrice from regularPrice
+    if (updateSalePrice) {
+        sql += `,
+            salePrice = CASE
+                WHEN ? = 'percentage' THEN GREATEST(0, ROUND(regularPrice * (1 - (? / 100)), 2))
+                WHEN ? IN ('fixed', 'flat') THEN GREATEST(0, regularPrice - ?)
+                ELSE salePrice
+            END
+        `;
+        values.push(normType, numericDiscount, normType, numericDiscount);
+    }
+
+    sql += ` WHERE productID IN (${placeholders})`;
+    values.push(...productIDs);
+
+    const [result] = await db.query(sql, values);
+
+    return {
+        success: true,
+        message: 'Bulk sale updated successfully',
+        affectedRows: result.affectedRows
+    };
+};
+
+/**
+ * Bulk assign a sectionid to products.
+ */
+const bulkAssignSection = async ({ productIDs = [], sectionid }) => {
+    if (!Array.isArray(productIDs) || productIDs.length === 0) {
+        return { success: false, message: 'productIDs must be a non-empty array' };
+    }
+    if (!sectionid) {
+        return { success: false, message: 'sectionid is required' };
+    }
+
+    const placeholders = productIDs.map(() => '?').join(',');
+    const sql = `UPDATE products SET sectionid = ? WHERE productID IN (${placeholders})`;
+    const values = [sectionid, ...productIDs];
+    const [result] = await db.query(sql, values);
+
+    return {
+        success: true,
+        message: 'Section assigned successfully to selected products',
+        affectedRows: result.affectedRows
+    };
+};
+
+/**
+ * Bulk remove sectionid from products (set to NULL).
+ */
+const bulkRemoveSection = async ({ productIDs = [] }) => {
+    if (!Array.isArray(productIDs) || productIDs.length === 0) {
+        return { success: false, message: 'productIDs must be a non-empty array' };
+    }
+
+    const placeholders = productIDs.map(() => '?').join(',');
+    const sql = `UPDATE products SET sectionid = NULL WHERE productID IN (${placeholders})`;
+    const [result] = await db.query(sql, productIDs);
+
+    return {
+        success: true,
+        message: 'Section removed successfully from selected products',
+        affectedRows: result.affectedRows
+    };
+};
+
+/**
  * Handle cross-sell mappings for a product
  * @param {string} productID - The product ID
  * @param {number[]} crossSellProductIDs - Array of cross-sell product IDs
@@ -738,7 +893,7 @@ async function searchProducts(query) {
         const trimmedQuery = query.trim();
         const searchTerm = `%${trimmedQuery}%`;
         const startMatch = `${trimmedQuery}%`;
-        
+
         // Search in both name and description
         const searchQuery = `
             SELECT 
@@ -767,7 +922,7 @@ async function searchProducts(query) {
                 createdAt DESC
             LIMIT 20
         `;
-        
+
         const [rows] = await db.query(searchQuery, [
             searchTerm,
             searchTerm,
@@ -792,4 +947,21 @@ async function searchProducts(query) {
     }
 }
 
-module.exports = { generateUniqueProductID, uploadVariationMap, uploadAttributeService, fetchPaginatedProducts, getProductCount, getProductDetails, editAttributeService, editVariationMap, getShopProductsPublic, deleteProduct, handleCrossSells, searchProducts };
+module.exports = {
+    generateUniqueProductID,
+    uploadVariationMap,
+    uploadAttributeService,
+    fetchPaginatedProducts,
+    getProductCount,
+    getProductDetails,
+    editAttributeService,
+    editVariationMap,
+    getShopProductsPublic,
+    deleteProduct,
+    bulkDeleteProducts,
+    bulkUpdateSale,
+    bulkAssignSection,
+    bulkRemoveSection,
+    handleCrossSells,
+    searchProducts
+};

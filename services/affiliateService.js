@@ -85,6 +85,43 @@ const rejectPayoutService = async (txnID) => {
     return await affiliateModel.rejectPayout(txnID);
 };
 
+// Bank Account Services
+const createBankAccountService = async (bankAccountData) => {
+    return await affiliateModel.createBankAccount(bankAccountData);
+};
+
+const getBankAccountsService = async (uid, includeRejected = false) => {
+    return await affiliateModel.getBankAccounts(uid, includeRejected);
+};
+
+const getBankAccountByIdService = async (bankAccountID, uid) => {
+    return await affiliateModel.getBankAccountById(bankAccountID, uid);
+};
+
+const setDefaultBankAccountService = async (bankAccountID, uid) => {
+    return await affiliateModel.setDefaultBankAccount(bankAccountID, uid);
+};
+
+const deleteBankAccountService = async (bankAccountID, uid) => {
+    return await affiliateModel.deleteBankAccount(bankAccountID, uid);
+};
+
+const getAllBankAccountRequestsService = async (filters) => {
+    return await affiliateModel.getAllBankAccountRequests(filters);
+};
+
+const approveBankAccountService = async (bankAccountID, adminUID) => {
+    return await affiliateModel.approveBankAccount(bankAccountID, adminUID);
+};
+
+const rejectBankAccountService = async (bankAccountID, adminUID, rejectionReason) => {
+    return await affiliateModel.rejectBankAccount(bankAccountID, adminUID, rejectionReason);
+};
+
+const getDefaultBankAccountService = async (uid) => {
+    return await affiliateModel.getDefaultBankAccount(uid);
+};
+
 module.exports = {
     applyAffiliateService,
     approveAffiliateService,
@@ -98,5 +135,14 @@ module.exports = {
     getRequestablePayoutsService,
     getPayoutRequestsService,
     approvePayoutService,
-    rejectPayoutService
+    rejectPayoutService,
+    createBankAccountService,
+    getBankAccountsService,
+    getBankAccountByIdService,
+    setDefaultBankAccountService,
+    deleteBankAccountService,
+    getAllBankAccountRequestsService,
+    approveBankAccountService,
+    rejectBankAccountService,
+    getDefaultBankAccountService
 };

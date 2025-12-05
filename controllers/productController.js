@@ -403,8 +403,99 @@ const deleteProduct = async (req, res) => {
         });
     }
 };
+/**
+ * Bulk delete products (and their related variations etc.).
+ * Expects body: { productIDs: string[] }
+ */
+const bulkDeleteProducts = async (req, res) => {
+    try {
+        const { productIDs } = req.body || {};
+        const result = await service.bulkDeleteProducts(productIDs);
+        const statusCode = result.success ? 200 : 400;
+        return res.status(statusCode).json(result);
+    } catch (error) {
+        console.error('Error in bulkDeleteProducts:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
 
-module.exports = { addProduct, addCustomProduct, getPaginatedProducts, getProductPageCount , getProductDetails, editProduct, deleteProduct };
+/**
+ * Bulk sale update: discountType, discountValue (and optional salePrice recalculation).
+ * Expects body: { productIDs: string[], discountType, discountValue, updateSalePrice?: boolean }
+ */
+const bulkUpdateSale = async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const result = await service.bulkUpdateSale(payload);
+        const statusCode = result.success ? 200 : 400;
+        return res.status(statusCode).json(result);
+    } catch (error) {
+        console.error('Error in bulkUpdateSale:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Bulk assign sectionid.
+ * Expects body: { productIDs: string[], sectionid: string }
+ */
+const bulkAssignSection = async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const result = await service.bulkAssignSection(payload);
+        const statusCode = result.success ? 200 : 400;
+        return res.status(statusCode).json(result);
+    } catch (error) {
+        console.error('Error in bulkAssignSection:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Bulk remove sectionid (set to NULL).
+ * Expects body: { productIDs: string[] }
+ */
+const bulkRemoveSection = async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const result = await service.bulkRemoveSection(payload);
+        const statusCode = result.success ? 200 : 400;
+        return res.status(statusCode).json(result);
+    } catch (error) {
+        console.error('Error in bulkRemoveSection:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+module.exports = {
+    addProduct,
+    addCustomProduct,
+    getPaginatedProducts,
+    getProductPageCount,
+    getProductDetails,
+    editProduct,
+    deleteProduct,
+    bulkDeleteProducts,
+    bulkUpdateSale,
+    bulkAssignSection,
+    bulkRemoveSection
+};
 
 // Public shop products endpoint
 async function shopList(req, res) {

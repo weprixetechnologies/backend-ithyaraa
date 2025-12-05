@@ -56,7 +56,7 @@ const createUser = async (req, res) => {
 const loginUser = async (req, res) => {
     try {
         const { email, phonenumber, password } = req.body;
-
+        console.log(req.body);
         if ((!email && !phonenumber) || !password) {
             return res.status(400).json({ success: false, message: 'Missing required fields' });
         }

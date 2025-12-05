@@ -173,6 +173,14 @@ const requestPayout = async (req, res) => {
             return res.status(400).json({ error: 'Minimum payout amount is ₹50' });
         }
 
+        // Check if user has an approved bank account
+        const defaultBankAccount = await affiliateService.getDefaultBankAccountService(uid);
+        if (!defaultBankAccount) {
+            return res.status(400).json({ 
+                error: 'Please add and get approval for a bank account before requesting payout' 
+            });
+        }
+
         // Create payout request using createAffiliate function
         const txnID = require('crypto').randomUUID();
         await affiliateService.createAffiliate({
@@ -180,7 +188,8 @@ const requestPayout = async (req, res) => {
             uid,
             status: 'pending',
             amount: amount,
-            type: 'outgoing'
+            type: 'outgoing',
+            bankAccountID: defaultBankAccount.bankAccountID
         });
 
         // Deduct from pending payment
@@ -398,3 +407,257 @@ module.exports.cancelPayout = cancelPayout;
 module.exports.getPayoutRequests = getPayoutRequests;
 module.exports.approvePayout = approvePayout;
 module.exports.rejectPayout = rejectPayout;
+
+// ==================== Bank Account Controllers ====================
+
+// User: Add bank account
+const addBankAccount = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        const {
+            accountHolderName,
+            accountNumber,
+            ifscCode,
+            bankName,
+            branchName,
+            accountType = 'savings',
+            panNumber,
+            gstin,
+            address,
+            isDefault = false
+        } = req.body;
+
+        // Validation
+        if (!accountHolderName || !accountNumber || !ifscCode || !bankName) {
+            return res.status(400).json({ error: 'Account holder name, account number, IFSC code, and bank name are required' });
+        }
+
+        // Validate IFSC format (11 characters)
+        if (ifscCode.length !== 11) {
+            return res.status(400).json({ error: 'IFSC code must be 11 characters' });
+        }
+
+        const result = await affiliateService.createBankAccountService({
+            uid,
+            accountHolderName,
+            accountNumber,
+            ifscCode: ifscCode.toUpperCase(),
+            bankName,
+            branchName,
+            accountType,
+            panNumber,
+            gstin,
+            address,
+            isDefault
+        });
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Bank account added successfully. It will be reviewed by admin.',
+                data: result.data
+            });
+        } else {
+            return res.status(400).json({ success: false, error: result.error });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// User: Get bank accounts
+const getBankAccounts = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        const includeRejected = req.query.includeRejected === 'true';
+        const accounts = await affiliateService.getBankAccountsService(uid, includeRejected);
+
+        return res.status(200).json({
+            success: true,
+            data: accounts
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// User: Get single bank account
+const getBankAccount = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        const { bankAccountID } = req.params;
+
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        const account = await affiliateService.getBankAccountByIdService(bankAccountID, uid);
+
+        if (!account) {
+            return res.status(404).json({ success: false, error: 'Bank account not found' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: account
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// User: Set default bank account
+const setDefaultBankAccount = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        const { bankAccountID } = req.body;
+
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        if (!bankAccountID) {
+            return res.status(400).json({ error: 'Bank account ID is required' });
+        }
+
+        const result = await affiliateService.setDefaultBankAccountService(bankAccountID, uid);
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Default bank account updated successfully'
+            });
+        } else {
+            return res.status(400).json({ success: false, error: result.error });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// User: Delete bank account
+const deleteBankAccount = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        const { bankAccountID } = req.params;
+
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+
+        const result = await affiliateService.deleteBankAccountService(bankAccountID, uid);
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Bank account deleted successfully'
+            });
+        } else {
+            return res.status(400).json({ success: false, error: result.error });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// Admin: Get all bank account requests
+const getAllBankAccountRequests = async (req, res) => {
+    try {
+        const { page = 1, limit = 10, status, uid } = req.query;
+
+        const result = await affiliateService.getAllBankAccountRequestsService({
+            page: parseInt(page),
+            limit: parseInt(limit),
+            status,
+            uid
+        });
+
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// Admin: Approve bank account
+const approveBankAccount = async (req, res) => {
+    try {
+        const { bankAccountID } = req.params;
+        const { uid: adminUID } = req.user;
+
+        if (!bankAccountID) {
+            return res.status(400).json({ error: 'Bank account ID is required' });
+        }
+
+        const result = await affiliateService.approveBankAccountService(bankAccountID, adminUID);
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Bank account approved successfully',
+                data: result.data
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: result.error
+            });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// Admin: Reject bank account
+const rejectBankAccount = async (req, res) => {
+    try {
+        const { bankAccountID } = req.params;
+        const { uid: adminUID } = req.user;
+        const { rejectionReason } = req.body;
+
+        if (!bankAccountID) {
+            return res.status(400).json({ error: 'Bank account ID is required' });
+        }
+
+        const result = await affiliateService.rejectBankAccountService(bankAccountID, adminUID, rejectionReason);
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Bank account rejected successfully',
+                data: result.data
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: result.error
+            });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+module.exports.addBankAccount = addBankAccount;
+module.exports.getBankAccounts = getBankAccounts;
+module.exports.getBankAccount = getBankAccount;
+module.exports.setDefaultBankAccount = setDefaultBankAccount;
+module.exports.deleteBankAccount = deleteBankAccount;
+module.exports.getAllBankAccountRequests = getAllBankAccountRequests;
+module.exports.approveBankAccount = approveBankAccount;
+module.exports.rejectBankAccount = rejectBankAccount;
