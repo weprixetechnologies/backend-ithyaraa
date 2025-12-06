@@ -361,7 +361,7 @@ if (!response.ok) {
 
 ### 1. Test Order Creation
 ```bash
-curl -X POST "http://192.168.1.12:3000/api/order/place" \
+curl -X POST "http://72.60.219.181:3002/api/order/place" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
@@ -372,7 +372,7 @@ curl -X POST "http://192.168.1.12:3000/api/order/place" \
 
 ### 2. Test Webhook
 ```bash
-curl -X POST "http://192.168.1.12:3000/api/phonepe/webhook" \
+curl -X POST "http://72.60.219.181:3002/api/phonepe/webhook" \
   -H "Content-Type: application/json" \
   -H "X-VERIFY: <signature>" \
   -d '{
@@ -383,7 +383,7 @@ curl -X POST "http://192.168.1.12:3000/api/phonepe/webhook" \
 
 ### 3. Test Status Check
 ```bash
-curl -X GET "http://192.168.1.12:3000/api/phonepe/status/test-123"
+curl -X GET "http://72.60.219.181:3002/api/phonepe/status/test-123"
 ```
 
 ## 🚀 Deployment

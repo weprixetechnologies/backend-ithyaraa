@@ -29,7 +29,7 @@ const sendVerifyEmail = async (user) => {
   const payload = { uid: user.uid, email: user.emailID };
   const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET || 'email_verify_secret', { expiresIn: '1d' });
   // Construct verify link
-  const verifyLink = `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/verify-email/${token}`;
+  const verifyLink = `${process.env.FRONTEND_URL || 'http://72.60.219.181:3002'}/verify-email/${token}`;
   // Send email via queue
   await addSendEmailJob({
     to: user.emailID,

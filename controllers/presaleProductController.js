@@ -1,5 +1,6 @@
 const presaleProductModel = require('../model/presaleProductModel');
 const presaleProductService = require('../services/presaleProductService');
+const productService = require('../services/productServices');
 const { randomUUID } = require('crypto');
 const db = require('../utils/dbconnect');
 
@@ -13,12 +14,36 @@ const createPresaleProductController = async (req, res) => {
             productData.presaleProductID = `PRESALE_${randomUUID().substring(0, 8).toUpperCase()}`;
         }
 
+        const presaleProductID = productData.presaleProductID;
+
+        // Create the main product
         const result = await presaleProductModel.createPresaleProduct(productData);
+
+        // Handle variations if provided
+        // Note: presaleProductID is used as productID in the variations table
+        const variations = productData.productVariations || productData.variations;
+        if (variations && Array.isArray(variations) && variations.length > 0) {
+            try {
+                const variationsResult = await productService.uploadVariationMap({ 
+                    variations, 
+                    productID: presaleProductID 
+                });
+                
+                if (!variationsResult.success) {
+                    console.error('Variation upload failed:', variationsResult.error);
+                    // Don't fail the entire request, but log the error
+                    // You can choose to return an error here if needed
+                }
+            } catch (varError) {
+                console.error('Error uploading variations:', varError);
+                // Don't fail the entire request, but log the error
+            }
+        }
 
         res.status(201).json({
             success: true,
             message: result.message,
-            data: { presaleProductID: productData.presaleProductID }
+            data: { presaleProductID }
         });
     } catch (error) {
         console.error('Error creating presale product:', error);
@@ -110,6 +135,7 @@ const updatePresaleProductController = async (req, res) => {
         const { presaleProductID } = req.params;
         const updateData = req.body;
 
+        // Update the main product data (excluding variations)
         const result = await presaleProductModel.updatePresaleProduct(presaleProductID, updateData);
 
         if (!result.success) {
@@ -117,6 +143,27 @@ const updatePresaleProductController = async (req, res) => {
                 success: false,
                 message: result.message
             });
+        }
+
+        // Handle variations if provided
+        // Note: presaleProductID is used as productID in the variations table
+        const variations = updateData.productVariations || updateData.variations;
+        if (variations && Array.isArray(variations) && variations.length > 0) {
+            try {
+                const varResult = await productService.editVariationMap({ 
+                    variations, 
+                    productID: presaleProductID 
+                });
+                
+                if (!varResult.success) {
+                    console.error('Variation update failed:', varResult.error);
+                    // Don't fail the entire request, but log the error
+                    // You can choose to return an error here if needed
+                }
+            } catch (varError) {
+                console.error('Error updating variations:', varError);
+                // Don't fail the entire request, but log the error
+            }
         }
 
         res.status(200).json({

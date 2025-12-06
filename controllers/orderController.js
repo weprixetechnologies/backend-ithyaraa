@@ -57,8 +57,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://192.168.1.12:3000'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'http://192.168.1.12:3000'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://72.60.219.181:3002'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'http://72.60.219.181:3002'
         };
 
         // Generate invoice PDF for attachment
@@ -301,10 +301,11 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const frontendUrl = process.env.FRONTEND_URL || 'http://72.60.219.181:3002';
         // Redirect to order success page after payment
         const redirectUrl = `${frontendUrl}/order-status/order-summary/${order.orderID}`;
-        const callbackUrl = `${process.env.BACKEND_URL || 'http://192.168.1.12:3000'}/api/phonepe/webhook`;
+        // Use order-specific webhook endpoint
+        const callbackUrl = `${process.env.BACKEND_URL || 'http://72.60.219.181:3002'}/api/phonepe/webhook/order`;
 
         const payload = {
             merchantId,

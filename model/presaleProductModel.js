@@ -26,6 +26,21 @@ function toMySQLDate(value) {
     }
 }
 
+// Helper function to safely parse JSON fields
+function safeParseJSON(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+    return value;
+}
+
 // Create presale product
 const createPresaleProduct = async (productData) => {
     try {
@@ -146,7 +161,18 @@ const getAllPresaleProducts = async (filters = {}) => {
         `;
 
         const [rows] = await db.query(query, queryParams);
-        return rows;
+        
+        // Parse JSON fields for all products
+        const jsonFields = ['featuredImage', 'productAttributes', 'categories', 'galleryImage', 'custom_inputs'];
+        return rows.map(product => {
+            const parsed = { ...product };
+            jsonFields.forEach(field => {
+                if (parsed[field]) {
+                    parsed[field] = safeParseJSON(parsed[field]);
+                }
+            });
+            return parsed;
+        });
     } catch (error) {
         console.error('Error fetching presale products:', error);
         throw error;
@@ -179,6 +205,7 @@ const getPresaleProductsPaginated = async (limit, offset) => {
                 discountValue,
                 status,
                 featuredImage,
+                categories,
                 brand,
                 preSaleEndDate
             FROM presale_products 
@@ -186,7 +213,18 @@ const getPresaleProductsPaginated = async (limit, offset) => {
             LIMIT ? OFFSET ?
         `;
         const [rows] = await db.query(query, [limit, offset]);
-        return rows;
+        
+        // Parse JSON fields for all products
+        const jsonFields = ['featuredImage', 'categories'];
+        return rows.map(product => {
+            const parsed = { ...product };
+            jsonFields.forEach(field => {
+                if (parsed[field]) {
+                    parsed[field] = safeParseJSON(parsed[field]);
+                }
+            });
+            return parsed;
+        });
     } catch (error) {
         console.error('Error fetching paginated presale products:', error);
         throw error;
@@ -200,7 +238,47 @@ const getPresaleProductByID = async (presaleProductID) => {
             'SELECT * FROM presale_products WHERE presaleProductID = ?',
             [presaleProductID]
         );
-        return rows[0] || null;
+        
+        if (rows.length === 0) {
+            return null;
+        }
+
+        const product = rows[0];
+
+        // Parse JSON fields
+        const jsonFields = ['featuredImage', 'productAttributes', 'categories', 'galleryImage', 'custom_inputs'];
+        jsonFields.forEach(field => {
+            if (product[field]) {
+                product[field] = safeParseJSON(product[field]);
+            }
+        });
+
+        // Fetch variations for this product (presaleProductID is used as productID in variations table)
+        const [variationRows] = await db.query(
+            'SELECT * FROM variations WHERE productID = ?',
+            [presaleProductID]
+        );
+
+        // Parse variationValues JSON for each variation
+        const variations = (variationRows || []).map(v => {
+            try {
+                return {
+                    ...v,
+                    variationValues: typeof v.variationValues === 'string' 
+                        ? JSON.parse(v.variationValues) 
+                        : v.variationValues
+                };
+            } catch {
+                return {
+                    ...v,
+                    variationValues: v.variationValues
+                };
+            }
+        });
+
+        product.variations = variations;
+
+        return product;
     } catch (error) {
         console.error('Error fetching presale product:', error);
         throw error;
@@ -219,7 +297,9 @@ const updatePresaleProduct = async (presaleProductID, productData) => {
             'id',
             'createdAt',
             'updatedAt',
-            'attributes'  // This column doesn't exist in the table
+            'attributes',  // This column doesn't exist in the table
+            'productVariations',  // Variations are stored in a separate table
+            'variations'  // Variations are stored in a separate table
         ];
 
         Object.keys(productData).forEach(key => {

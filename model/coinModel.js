@@ -10,28 +10,28 @@ async function ensureBalanceRow(uid) {
 }
 
 // Create pending coin transaction (order placed, not yet delivered)
-async function createPendingCoins(uid, orderID, coins) {
+async function createPendingCoins(uid, orderID, coins, refType = 'order') {
     await ensureBalanceRow(uid);
     await db.query(
-        `INSERT INTO coin_transactions (uid, type, coins, refType, refID) VALUES (?, 'pending', ?, 'order', ?)`,
-        [uid, coins, String(orderID || '')]
+        `INSERT INTO coin_transactions (uid, type, coins, refType, refID) VALUES (?, 'pending', ?, ?, ?)`,
+        [uid, coins, refType, String(orderID || '')]
     );
     // Don't credit balance yet - wait for delivery
     return true;
 }
 
 // Complete pending coins when order is delivered (convert to earned)
-async function completePendingCoins(uid, orderID) {
+async function completePendingCoins(uid, orderID, refType = 'order') {
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
 
-        // Find pending transaction for this order
+        // Find pending transaction for this order/presale booking
         const [pending] = await connection.query(
             `SELECT txnID, coins FROM coin_transactions 
-             WHERE uid = ? AND type = 'pending' AND refType = 'order' AND refID = ? 
+             WHERE uid = ? AND type = 'pending' AND refType = ? AND refID = ? 
              LIMIT 1 FOR UPDATE`,
-            [uid, String(orderID)]
+            [uid, refType, String(orderID)]
         );
 
         if (!pending || pending.length === 0) {
@@ -71,17 +71,17 @@ async function completePendingCoins(uid, orderID) {
 }
 
 // Reverse pending coins when order cancelled/returned
-async function reversePendingCoins(uid, orderID) {
+async function reversePendingCoins(uid, orderID, refType = 'order') {
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
 
-        // Find pending transaction for this order
+        // Find pending transaction for this order/presale booking
         const [pending] = await connection.query(
             `SELECT txnID, coins FROM coin_transactions 
-             WHERE uid = ? AND type = 'pending' AND refType = 'order' AND refID = ? 
+             WHERE uid = ? AND type = 'pending' AND refType = ? AND refID = ? 
              LIMIT 1 FOR UPDATE`,
-            [uid, String(orderID)]
+            [uid, refType, String(orderID)]
         );
 
         if (!pending || pending.length === 0) {

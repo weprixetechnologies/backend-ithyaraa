@@ -104,7 +104,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Routers
 const userRouter = require('./router/usersRouter')
 const authRouter = require('./router/authRouter')
 const cartRouter = require('./router/cartRouter')
@@ -139,7 +138,6 @@ const presaleProductRouter = require('./router/admin/presaleProductRouter')
 const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleRouter = require('./router/presaleRouter')
 
-// Register routes
 app.use('/api/', commonRouter)
 app.use('/api/user', userRouter); //user apis
 app.use('/api/admin', userAdminRouter); //admin user management apis
@@ -177,6 +175,7 @@ app.use('/api/brand', brandAuthRouter)
 app.use('/api/brand', orderBrandRouter)
 app.use('/api/brand', productBrandRouter)
 app.use('/api/brand', brandBankDetailsRouter)
+
 
 // ✅ HTTPS setup using Let's Encrypt certificate
 const sslOptions = {
