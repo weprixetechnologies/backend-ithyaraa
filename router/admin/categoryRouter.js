@@ -13,6 +13,8 @@ router.get('/all-category', categoryController.getCategories); // GET with optio
 router.get('/detail/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.getCategoryByID);
 // Edit category by ID
 router.put('/edit/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.editCategory);
+// Delete category by ID
+router.delete('/delete/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.deleteCategory);
 
 
 

@@ -159,5 +159,33 @@ const fetchOfferDetails = async (offerID) => {
     return offer;
 };
 
+const deleteOffer = async (offerID) => {
+    try {
+        // Step 1: Clear offerID from all products that reference this offer
+        await offerModel.clearOfferIDFromProducts(offerID);
 
-module.exports = { createOffer, fetchFilteredOffers, fetchOfferCount, updateOffer, fetchOfferDetails };
+        // Step 2: Delete the offer
+        const result = await offerModel.deleteOffer(offerID);
+
+        if (result.affectedRows === 0) {
+            return {
+                success: false,
+                message: 'Offer not found'
+            };
+        }
+
+        return {
+            success: true,
+            message: 'Offer deleted successfully',
+            affectedRows: result.affectedRows
+        };
+    } catch (error) {
+        console.error('Error deleting offer:', error);
+        return {
+            success: false,
+            error: error.message || 'Unknown error occurred while deleting the offer'
+        };
+    }
+};
+
+module.exports = { createOffer, fetchFilteredOffers, fetchOfferCount, updateOffer, fetchOfferDetails, deleteOffer };

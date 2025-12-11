@@ -17,6 +17,7 @@ router.get('/products/:presaleProductID', presaleProductController.getPresalePro
 // User routes for presale bookings (requires authentication)
 router.post('/place-prebooking-order', userAuth.verifyAccessToken, presaleBookingController.placePrebookingOrderController);
 router.get('/booking-details/:preBookingID', userAuth.verifyAccessToken, presaleBookingController.getPresaleBookingDetailsController);
+router.get('/my-bookings', userAuth.verifyAccessToken, presaleBookingController.getUserPresaleBookingsController);
 
 module.exports = router;
 

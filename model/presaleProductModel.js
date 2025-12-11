@@ -179,6 +179,32 @@ const getAllPresaleProducts = async (filters = {}) => {
     }
 };
 
+// Search presale products (returns only name and ID)
+const searchPresaleProducts = async (searchTerm = '') => {
+    try {
+        let query = `
+            SELECT presaleProductID, name 
+            FROM presale_products 
+            WHERE status = 'active'
+        `;
+        const queryParams = [];
+
+        if (searchTerm && searchTerm.trim() !== '') {
+            query += ` AND (name LIKE ? OR presaleProductID LIKE ?)`;
+            const searchPattern = `%${searchTerm.trim()}%`;
+            queryParams.push(searchPattern, searchPattern);
+        }
+
+        query += ` ORDER BY name ASC LIMIT 50`;
+
+        const [rows] = await db.query(query, queryParams);
+        return rows;
+    } catch (error) {
+        console.error('Error searching presale products:', error);
+        throw error;
+    }
+};
+
 // Get total count of presale products
 const getPresaleProductsCount = async () => {
     try {
@@ -358,6 +384,14 @@ const updatePresaleProduct = async (presaleProductID, productData) => {
 // Delete presale product
 const deletePresaleProduct = async (presaleProductID) => {
     try {
+        // First, delete all variations associated with this presale product
+        // Note: presaleProductID is used as productID in the variations table
+        await db.query(
+            'DELETE FROM variations WHERE productID = ? COLLATE utf8mb4_unicode_ci',
+            [presaleProductID]
+        );
+
+        // Then delete the presale product
         const [result] = await db.query(
             'DELETE FROM presale_products WHERE presaleProductID = ?',
             [presaleProductID]
@@ -372,6 +406,41 @@ const deletePresaleProduct = async (presaleProductID) => {
     }
 };
 
+// Bulk delete presale products
+const bulkDeletePresaleProducts = async (presaleProductIDs) => {
+    try {
+        if (!Array.isArray(presaleProductIDs) || presaleProductIDs.length === 0) {
+            return {
+                success: false,
+                message: 'presaleProductIDs must be a non-empty array'
+            };
+        }
+
+        // Delete all variations associated with these presale products
+        // Apply COLLATE to the column name, not after IN clause
+        const placeholders = presaleProductIDs.map(() => '?').join(',');
+        await db.query(
+            `DELETE FROM variations WHERE productID COLLATE utf8mb4_unicode_ci IN (${placeholders})`,
+            presaleProductIDs
+        );
+
+        // Delete the presale products
+        const [result] = await db.query(
+            `DELETE FROM presale_products WHERE presaleProductID IN (${placeholders})`,
+            presaleProductIDs
+        );
+
+        return {
+            success: true,
+            message: `${result.affectedRows} presale product(s) deleted successfully`,
+            deletedCount: result.affectedRows
+        };
+    } catch (error) {
+        console.error('Error bulk deleting presale products:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     createPresaleProduct,
     getAllPresaleProducts,
@@ -379,6 +448,8 @@ module.exports = {
     getPresaleProductsPaginated,
     getPresaleProductByID,
     updatePresaleProduct,
-    deletePresaleProduct
+    deletePresaleProduct,
+    bulkDeletePresaleProducts,
+    searchPresaleProducts
 };
 

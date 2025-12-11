@@ -24,7 +24,7 @@ const rawBodyParser = express.raw({ type: 'application/json' });
  * @desc Handle PhonePe webhook notifications for regular orders
  * @access Public (but signature verified via X-VERIFY header)
  * 
- * @body {Object} - PhonePe webhook payload with merchantTransactionId
+ * @body {Object} - PhonePe webhook payload with merchantID
  * @headers {string} X-VERIFY - PhonePe webhook signature for verification
  * 
  * @returns {Object} { success: true, message: 'Webhook processed successfully' }
@@ -50,7 +50,7 @@ router.post('/webhook/order', rawBodyParser, phonepeController.handleOrderWebhoo
  * @desc Handle PhonePe webhook notifications for presale bookings
  * @access Public (but signature verified via X-VERIFY header)
  * 
- * @body {Object} - PhonePe webhook payload with merchantTransactionId
+ * @body {Object} - PhonePe webhook payload with merchantID
  * @headers {string} X-VERIFY - PhonePe webhook signature for verification
  * 
  * @returns {Object} { success: true, message: 'Webhook processed successfully' }
@@ -58,11 +58,11 @@ router.post('/webhook/order', rawBodyParser, phonepeController.handleOrderWebhoo
 router.post('/webhook/presale', rawBodyParser, phonepeController.handlePresaleWebhookController);
 
 /**
- * @route GET /api/phonepe/status/:merchantTransactionId
+ * @route GET /api/phonepe/status/:merchantID
  * @desc Manual payment status check by merchant transaction ID
  * @access Public
  */
-router.get('/status/:merchantTransactionId', phonepeController.checkPaymentStatusController);
+router.get('/status/:merchantID', phonepeController.checkPaymentStatusController);
 
 /**
  * @route GET /api/phonepe/order/:orderId/status
@@ -70,5 +70,12 @@ router.get('/status/:merchantTransactionId', phonepeController.checkPaymentStatu
  * @access Public
  */
 router.get('/order/:orderId/status', phonepeController.getOrderPaymentStatusController);
+
+/**
+ * @route GET /api/phonepe/presale/:preBookingID/status
+ * @desc Get payment status by presale booking ID
+ * @access Public
+ */
+router.get('/presale/:preBookingID/status', phonepeController.getPresalePaymentStatusController);
 
 module.exports = router;

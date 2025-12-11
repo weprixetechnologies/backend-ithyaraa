@@ -81,12 +81,12 @@ Run the following SQL to add required columns to your `orderDetail` table:
 ```sql
 -- Add payment-related columns to orderDetail table
 ALTER TABLE orderDetail 
-ADD COLUMN merchantTransactionId VARCHAR(100) DEFAULT NULL AFTER couponDiscount,
-ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending' AFTER merchantTransactionId,
+ADD COLUMN merchantID VARCHAR(100) DEFAULT NULL AFTER couponDiscount,
+ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending' AFTER merchantID,
 ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER paymentStatus;
 
 -- Add index for better performance
-CREATE INDEX idx_merchant_transaction_id ON orderDetail(merchantTransactionId);
+CREATE INDEX idx_merchant_transaction_id ON orderDetail(merchantID);
 CREATE INDEX idx_payment_status ON orderDetail(paymentStatus);
 ```
 
@@ -133,7 +133,7 @@ Content-Type: application/json
 X-VERIFY: <signature>
 
 {
-  "merchantTransactionId": "uuid-123",
+  "merchantID": "uuid-123",
   "code": "PAYMENT_SUCCESS",
   "state": "COMPLETED",
   "amount": 10000
@@ -142,14 +142,14 @@ X-VERIFY: <signature>
 
 #### Manual Status Check
 ```http
-GET /api/phonepe/status/:merchantTransactionId
+GET /api/phonepe/status/:merchantID
 ```
 
 **Response:**
 ```json
 {
   "success": true,
-  "merchantTransactionId": "uuid-123",
+  "merchantID": "uuid-123",
   "status": {
     "orderStatus": "paid",
     "isSuccess": true,
@@ -184,7 +184,7 @@ CREATE TABLE orderDetail (
   deliveryCompany VARCHAR(100) DEFAULT NULL,
   couponCode VARCHAR(50) DEFAULT NULL,
   couponDiscount DECIMAL(10,2) DEFAULT 0.00,
-  merchantTransactionId VARCHAR(100) DEFAULT NULL,
+  merchantID VARCHAR(100) DEFAULT NULL,
   paymentStatus VARCHAR(20) DEFAULT 'pending',
   updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -229,7 +229,7 @@ backend/
 #### 4. `model/orderModel.js`
 - **createOrder**: Creates new orders with payment details
 - **updateOrderPaymentStatus**: Updates payment status
-- **addMerchantTransactionId**: Stores PhonePe transaction ID
+- **addmerchantID**: Stores PhonePe transaction ID
 
 ## 🔄 Payment Flow
 
@@ -249,7 +249,7 @@ POST /api/order/place
 // Backend creates PhonePe payment request
 const payload = {
   merchantId: "MERCHANT_ID",
-  merchantTransactionId: "uuid-123",
+  merchantID: "uuid-123",
   amount: 10000, // in paise
   redirectUrl: "https://frontend.com/payment-status",
   callbackUrl: "https://backend.com/api/phonepe/webhook",
@@ -267,7 +267,7 @@ const payload = {
 // PhonePe calls webhook automatically
 POST /api/phonepe/webhook
 {
-  "merchantTransactionId": "uuid-123",
+  "merchantID": "uuid-123",
   "code": "PAYMENT_SUCCESS",
   "state": "COMPLETED"
 }
@@ -277,7 +277,7 @@ POST /api/phonepe/webhook
 ```javascript
 // Backend updates order status
 await orderModel.updateOrderPaymentStatus(
-  merchantTransactionId, 
+  merchantID, 
   'paid'
 );
 ```
@@ -285,7 +285,7 @@ await orderModel.updateOrderPaymentStatus(
 ### 6. Email Notification
 ```javascript
 // Send confirmation email
-await sendPaymentConfirmationEmail(merchantTransactionId);
+await sendPaymentConfirmationEmail(merchantID);
 ```
 
 ## 🔗 Webhook Handling
@@ -319,7 +319,7 @@ switch (code) {
 ```javascript
 // Update order status
 await orderModel.updateOrderPaymentStatus(
-  webhookData.merchantTransactionId,
+  webhookData.merchantID,
   processedStatus.orderStatus
 );
 ```
@@ -361,7 +361,7 @@ if (!response.ok) {
 
 ### 1. Test Order Creation
 ```bash
-curl -X POST "http://72.60.219.181:3002/api/order/place" \
+curl -X POST "http://localhost:3000/api/order/place" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
@@ -372,18 +372,18 @@ curl -X POST "http://72.60.219.181:3002/api/order/place" \
 
 ### 2. Test Webhook
 ```bash
-curl -X POST "http://72.60.219.181:3002/api/phonepe/webhook" \
+curl -X POST "http://localhost:3000/api/phonepe/webhook" \
   -H "Content-Type: application/json" \
   -H "X-VERIFY: <signature>" \
   -d '{
-    "merchantTransactionId": "test-123",
+    "merchantID": "test-123",
     "code": "PAYMENT_SUCCESS"
   }'
 ```
 
 ### 3. Test Status Check
 ```bash
-curl -X GET "http://72.60.219.181:3002/api/phonepe/status/test-123"
+curl -X GET "http://localhost:3000/api/phonepe/status/test-123"
 ```
 
 ## 🚀 Deployment
@@ -402,7 +402,7 @@ BACKEND_URL=https://yourdomain.com
 ```sql
 -- Run the schema update SQL
 ALTER TABLE orderDetail 
-ADD COLUMN merchantTransactionId VARCHAR(100) DEFAULT NULL,
+ADD COLUMN merchantID VARCHAR(100) DEFAULT NULL,
 ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending',
 ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
 ```
@@ -434,7 +434,7 @@ ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMES
 **Symptoms**: Webhook received but order status not updated
 **Solutions**:
 - Check database connection
-- Verify merchantTransactionId exists in database
+- Verify merchantID exists in database
 - Check database column names and types
 
 #### 4. Email Not Sending

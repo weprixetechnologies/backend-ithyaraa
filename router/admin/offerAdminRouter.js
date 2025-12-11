@@ -13,6 +13,7 @@ offerRouter.post('/add-offer', authAdminMiddleware.verifyAccessToken, controller
 offerRouter.get('/all-offers', authAdminMiddleware.verifyAccessToken, controller.getOffers)
 offerRouter.get('/count', authAdminMiddleware.verifyAccessToken, controller.getOfferCount)
 offerRouter.put('/edit-offer/:offerID', authAdminMiddleware.verifyAccessToken, controller.editOffer)
-offerRouter.get('/detail/:offerID', authAdminMiddleware.verifyAccessToken, controller.getOfferDetails);
+offerRouter.get('/detail/:offerID', authAdminMiddleware.verifyAccessToken, controller.getOfferDetails)
+offerRouter.delete('/delete/:offerID', authAdminMiddleware.verifyAccessToken, controller.deleteOffer);
 
 module.exports = offerRouter

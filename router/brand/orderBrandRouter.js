@@ -253,6 +253,176 @@ orderBrandRouter.get('/orders/analytics/top-products', authBrandMiddleware.verif
     }
 });
 
+// GET /api/brand/orders/stats/date-range - Get stats with date range (MUST BE BEFORE /orders/:id)
+orderBrandRouter.get('/orders/stats/date-range', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const { startDate, endDate } = req.query;
+
+        if (!startDate || !endDate) {
+            return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
+        }
+
+        // Build date filter
+        const dateFilter = `DATE(oi.createdAt) BETWEEN ? AND ?`;
+
+        // Totals in date range
+        const [rangeRows] = await db.query(
+            `SELECT 
+                COALESCE(SUM(oi.lineTotalAfter), 0) AS revenue,
+                COUNT(DISTINCT oi.orderID) AS orders,
+                COUNT(*) AS items
+            FROM order_items oi
+            WHERE oi.brandID = ? AND ${dateFilter}`,
+            [brandID, startDate, endDate]
+        );
+
+        // Status counts
+        const [statusRows] = await db.query(
+            `SELECT oi.itemStatus, COUNT(*) AS count
+             FROM order_items oi
+             WHERE oi.brandID = ? AND ${dateFilter}
+             GROUP BY oi.itemStatus`,
+            [brandID, startDate, endDate]
+        );
+
+        const statusCounts = { pending: 0, shipped: 0, delivered: 0, unknown: 0 };
+        for (const r of statusRows) {
+            const key = (r.itemStatus || 'unknown').toLowerCase();
+            if (statusCounts[key] !== undefined) statusCounts[key] = r.count;
+            else statusCounts.unknown += r.count;
+        }
+
+        // Payment-mode revenue split
+        const [codRows] = await db.query(
+            `SELECT COALESCE(SUM(oi.lineTotalAfter), 0) AS codAmount
+             FROM order_items oi
+             INNER JOIN orderDetail od ON od.orderID = oi.orderID
+             WHERE oi.brandID = ? AND ${dateFilter} AND LOWER(od.paymentMode) = 'cod'`,
+            [brandID, startDate, endDate]
+        );
+        const [prepaidRows] = await db.query(
+            `SELECT COALESCE(SUM(oi.lineTotalAfter), 0) AS prepaidAmount
+             FROM order_items oi
+             INNER JOIN orderDetail od ON od.orderID = oi.orderID
+             WHERE oi.brandID = ? AND ${dateFilter} AND LOWER(od.paymentMode) <> 'cod'`,
+            [brandID, startDate, endDate]
+        );
+
+        // Get all order items for the date range
+        const [orderItems] = await db.query(
+            `SELECT 
+                oi.orderID,
+                oi.name,
+                oi.variationName,
+                oi.quantity,
+                oi.unitPriceAfter,
+                oi.lineTotalAfter,
+                oi.itemStatus,
+                oi.createdAt
+            FROM order_items oi
+            WHERE oi.brandID = ? AND ${dateFilter}
+            ORDER BY oi.createdAt ASC, oi.orderID ASC`,
+            [brandID, startDate, endDate]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                dateRange: { startDate, endDate },
+                totals: rangeRows[0] || { revenue: 0, orders: 0, items: 0 },
+                statusCounts,
+                payments: {
+                    codAmount: codRows[0]?.codAmount || 0,
+                    prepaidAmount: prepaidRows[0]?.prepaidAmount || 0
+                },
+                orderItems: orderItems || []
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching brand stats with date range:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch stats', error: error.message });
+    }
+});
+
+// GET /api/brand/orders/invoice-pdf - Generate invoice PDF for date range (MUST BE BEFORE /orders/:id)
+orderBrandRouter.get('/orders/invoice-pdf', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const { startDate, endDate } = req.query;
+
+        if (!startDate || !endDate) {
+            return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
+        }
+
+        // Get brand info from users table
+        const [brandRows] = await db.query(
+            `SELECT uid, username, name, emailID, gstin
+             FROM users
+             WHERE uid = ? AND role = 'brand'`,
+            [brandID]
+        );
+
+        if (brandRows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Brand not found' });
+        }
+
+        const brand = brandRows[0];
+        
+        // For now, use basic address structure - can be enhanced if address is stored separately
+        const brandInfo = {
+            name: brand.name || brand.username || 'Brand',
+            address: {
+                line1: brand.emailID || '',
+                line2: '',
+                line3: ''
+            },
+            gstin: brand.gstin ? `GSTIN: ${brand.gstin}` : null
+        };
+
+        // Get all order items for the date range
+        const dateFilter = `DATE(oi.createdAt) BETWEEN ? AND ?`;
+        const [orderItems] = await db.query(
+            `SELECT 
+                oi.orderID,
+                oi.name,
+                oi.variationName,
+                oi.quantity,
+                oi.unitPriceAfter,
+                oi.lineTotalAfter,
+                oi.itemStatus,
+                oi.createdAt
+            FROM order_items oi
+            WHERE oi.brandID = ? AND ${dateFilter}
+            ORDER BY oi.createdAt ASC, oi.orderID ASC`,
+            [brandID, startDate, endDate]
+        );
+
+        if (orderItems.length === 0) {
+            return res.status(404).json({ success: false, message: 'No orders found for the selected date range' });
+        }
+
+        // Generate PDF
+        const brandInvoiceService = require('../../services/brandInvoiceService');
+        const pdfBuffer = await brandInvoiceService.generateBrandInvoicePDF(
+            brandInfo,
+            orderItems,
+            { startDate, endDate }
+        );
+
+        // Set response headers
+        const fileName = `invoice_${brandID}_${startDate}_to_${endDate}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+
+        return res.send(pdfBuffer);
+    } catch (error) {
+        console.error('Error generating brand invoice PDF:', error);
+        res.status(500).json({ success: false, message: 'Failed to generate invoice PDF', error: error.message });
+    }
+});
+
 // GET /api/brand/orders/:id - Get order details by ID
 orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async (req, res) => {
     try {

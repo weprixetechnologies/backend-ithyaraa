@@ -151,12 +151,12 @@ async function createOrder(orderData) {
         // 4. Clear only the selected items from the cart (AFTER successful commit)
         // Get cartItemIDs of items that were included in the order
         const cartItemIDs = orderData.items.map(item => item.cartItemID).filter(id => id != null);
-        
+
         console.log('\n=== CART CLEANUP DEBUG ===');
         console.log('Total items in order:', orderData.items.length);
         console.log('CartItemIDs to delete:', cartItemIDs);
         console.log('UID:', orderData.uid);
-        
+
         if (cartItemIDs.length > 0) {
             const placeholders = cartItemIDs.map(() => '?').join(',');
             // Use a new connection for cart cleanup (after transaction commit)
@@ -168,7 +168,7 @@ async function createOrder(orderData) {
                     [orderData.uid, ...cartItemIDs]
                 );
                 console.log('Items that will be deleted (selected = TRUE):', itemsToDelete);
-                
+
                 // Explicitly check selected = TRUE to ensure only selected items are deleted
                 const [deleteResult] = await cleanupConnection.query(
                     `DELETE FROM cart_items WHERE uid = ? AND cartItemID IN (${placeholders}) AND (selected = TRUE OR selected = 1)`,
@@ -182,7 +182,7 @@ async function createOrder(orderData) {
                     [orderData.uid]
                 );
                 console.log('Remaining items in cart:', remainingItems[0].count);
-                
+
                 if (remainingItems[0].count === 0) {
                     await cleanupConnection.query(`DELETE FROM cartDetail WHERE uid = ?`, [orderData.uid]);
                     console.log('CartDetail cleared (cart is empty)');
@@ -542,12 +542,12 @@ async function getOrderByID(orderID) {
 }
 
 // Get order by merchant transaction ID
-async function getOrderByMerchantTransactionId(merchantTransactionId) {
+async function getOrderBymerchantID(merchantID) {
     const connection = await db.getConnection();
     try {
         const [rows] = await connection.query(
-            'SELECT * FROM orderDetail WHERE merchantTransactionId = ?',
-            [merchantTransactionId]
+            'SELECT * FROM orderDetail WHERE merchantID = ?',
+            [merchantID]
         );
         return rows[0] || null;
     } finally {
@@ -556,12 +556,12 @@ async function getOrderByMerchantTransactionId(merchantTransactionId) {
 }
 
 // Update order payment status
-async function updateOrderPaymentStatus(merchantTransactionId, status) {
+async function updateOrderPaymentStatus(merchantID, status) {
     const connection = await db.getConnection();
     try {
         const [result] = await connection.query(
-            'UPDATE orderDetail SET paymentStatus = ? WHERE merchantTransactionId = ?',
-            [status, merchantTransactionId]
+            'UPDATE orderDetail SET paymentStatus = ? WHERE merchantID = ?',
+            [status, merchantID]
         );
         return result.affectedRows > 0;
     } finally {
@@ -570,12 +570,12 @@ async function updateOrderPaymentStatus(merchantTransactionId, status) {
 }
 
 // Add merchant transaction ID to order
-async function addMerchantTransactionId(orderID, merchantTransactionId) {
+async function addmerchantID(orderID, merchantID) {
     const connection = await db.getConnection();
     try {
         const [result] = await connection.query(
-            'UPDATE orderDetail SET merchantTransactionId = ? WHERE orderID = ?',
-            [merchantTransactionId, orderID]
+            'UPDATE orderDetail SET merchantID = ? WHERE orderID = ?',
+            [merchantID, orderID]
         );
         return result.affectedRows > 0;
     } finally {
@@ -584,9 +584,9 @@ async function addMerchantTransactionId(orderID, merchantTransactionId) {
 }
 
 module.exports.getOrderByID = getOrderByID;
-module.exports.getOrderByMerchantTransactionId = getOrderByMerchantTransactionId;
+module.exports.getOrderBymerchantID = getOrderBymerchantID;
 module.exports.updateOrderPaymentStatus = updateOrderPaymentStatus;
-module.exports.addMerchantTransactionId = addMerchantTransactionId;
+module.exports.addmerchantID = addmerchantID;
 
 // Update selected columns of an order by orderID (whitelisted fields only)
 async function updateOrderByID(orderID, updateData = {}) {
@@ -603,7 +603,7 @@ async function updateOrderByID(orderID, updateData = {}) {
             'totalDiscount',
             'couponCode',
             'couponDiscount',
-            'merchantTransactionId',
+            'merchantID',
             'modified'
         ]);
 

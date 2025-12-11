@@ -88,9 +88,47 @@ const updateCategory = async (payload) => {
     return { success: true, message: 'Category updated successfully' };
 };
 
+const deleteCategory = async (categoryID) => {
+    if (!categoryID) {
+        return { success: false, message: 'Category ID is required' };
+    }
+
+    try {
+        // Check if category exists
+        const category = await categoryModel.getCategoryByID(categoryID);
+        if (!category) {
+            return { success: false, message: 'Category not found' };
+        }
+
+        // Remove category from all products first
+        const updatedProductsCount = await categoryModel.removeCategoryFromProducts(categoryID);
+
+        // Delete the category
+        const deleted = await categoryModel.deleteCategoryByID(categoryID);
+
+        if (!deleted) {
+            return { success: false, message: 'Failed to delete category' };
+        }
+
+        return {
+            success: true,
+            message: 'Category deleted successfully',
+            updatedProductsCount
+        };
+    } catch (error) {
+        console.error('Error in deleteCategory service:', error);
+        return {
+            success: false,
+            message: 'Failed to delete category',
+            error: error.message
+        };
+    }
+};
+
 module.exports = {
     uploadCategory,
     getAllCategories,
     fetchCategoryByID,
-    updateCategory
+    updateCategory,
+    deleteCategory
 };

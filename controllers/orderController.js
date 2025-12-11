@@ -57,8 +57,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://72.60.219.181:3002'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'http://72.60.219.181:3002'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
         };
 
         // Generate invoice PDF for attachment
@@ -301,11 +301,11 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const frontendUrl = process.env.FRONTEND_URL || 'http://72.60.219.181:3002';
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         // Redirect to order success page after payment
         const redirectUrl = `${frontendUrl}/order-status/order-summary/${order.orderID}`;
         // Use order-specific webhook endpoint
-        const callbackUrl = `${process.env.BACKEND_URL || 'http://72.60.219.181:3002'}/api/phonepe/webhook/order`;
+        const callbackUrl = `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/phonepe/webhook/order`;
 
         const payload = {
             merchantId,
@@ -336,7 +336,7 @@ const placeOrderController = async (req, res) => {
         if (data.success) {
             // Store merchant transaction ID in the order
             try {
-                await orderModel.addMerchantTransactionId(order.orderID, merchantOrderId);
+                await orderModel.addmerchantID(order.orderID, merchantOrderId);
             } catch (updateError) {
                 console.error('Error storing merchant transaction ID:', updateError);
                 // Don't fail the response, just log the error

@@ -79,6 +79,26 @@ const getAllPresaleProductsController = async (req, res) => {
     }
 };
 
+// Search presale products (returns only name and ID)
+const searchPresaleProductsController = async (req, res) => {
+    try {
+        const { search } = req.query;
+        const products = await presaleProductModel.searchPresaleProducts(search);
+
+        res.status(200).json({
+            success: true,
+            data: products
+        });
+    } catch (error) {
+        console.error('Error searching presale products:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to search presale products',
+            error: error.message
+        });
+    }
+};
+
 // Get all presale products with pagination
 const getAllPresaleProductsPaginatedController = async (req, res) => {
     try {
@@ -207,12 +227,50 @@ const deletePresaleProductController = async (req, res) => {
     }
 };
 
+// Bulk delete presale products
+const bulkDeletePresaleProductsController = async (req, res) => {
+    try {
+        const { presaleProductIDs } = req.body;
+
+        if (!Array.isArray(presaleProductIDs) || presaleProductIDs.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'presaleProductIDs must be a non-empty array'
+            });
+        }
+
+        const result = await presaleProductModel.bulkDeletePresaleProducts(presaleProductIDs);
+
+        if (!result.success) {
+            return res.status(400).json({
+                success: false,
+                message: result.message
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: result.message,
+            deletedCount: result.deletedCount
+        });
+    } catch (error) {
+        console.error('Error bulk deleting presale products:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to bulk delete presale products',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     createPresaleProductController,
     getAllPresaleProductsController,
     getAllPresaleProductsPaginatedController,
     getPresaleProductByIDController,
     updatePresaleProductController,
-    deletePresaleProductController
+    deletePresaleProductController,
+    bulkDeletePresaleProductsController,
+    searchPresaleProductsController
 };
 

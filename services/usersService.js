@@ -20,7 +20,7 @@ const sendVerificationEmail = async (user) => {
     const payload = { uid: user.uid, email: user.emailID };
     const token = jwt.sign(payload, process.env.EMAIL_VERIFY_SECRET, { expiresIn: '1d' });
     // Construct verify link
-    const verifyLink = `${process.env.FRONTEND_URL || 'http://72.60.219.181:3002'}/verify-email/${token}`;
+    const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
     // Send email via queue
     await addSendEmailJob({
         to: user.emailID,
@@ -45,7 +45,7 @@ const sendResetPasswordEmail = async (email) => {
     const payload = { uid: user.uid, email: user.emailID };
     const token = jwt.sign(payload, RESET_TOKEN_SECRET, { expiresIn: RESET_TOKEN_EXPIRY });
     // Construct reset link
-    const resetLink = `${process.env.FRONTEND_URL || 'http://72.60.219.181:3002'}/reset-password?token=${token}`;
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
     // Send email via queue
     await addSendEmailJob({
         to: user.emailID,

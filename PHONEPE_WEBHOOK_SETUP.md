@@ -21,7 +21,7 @@ This implementation uses PhonePe webhooks to automatically update payment status
 - **Email sent** if payment successful
 
 ### 4. **User Redirected to Frontend**
-- User redirected to Next.js frontend: `/payment-status?merchantTransactionId=xxx`
+- User redirected to Next.js frontend: `/payment-status?merchantID=xxx`
 - Frontend can check payment status using the manual API
 
 ## 📋 API Endpoints
@@ -36,7 +36,7 @@ POST /api/phonepe/webhook
 
 ### Manual Status Check
 ```http
-GET /api/phonepe/status/:merchantTransactionId
+GET /api/phonepe/status/:merchantID
 ```
 - **Purpose**: Check payment status manually
 - **Use Case**: Frontend can call this to get current status
@@ -73,8 +73,8 @@ BACKEND_URL=https://yourdomain.com
 ### 3. **Database Schema**
 ```sql
 ALTER TABLE orderDetail 
-ADD COLUMN merchantTransactionId VARCHAR(100) DEFAULT NULL AFTER couponDiscount,
-ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending' AFTER merchantTransactionId,
+ADD COLUMN merchantID VARCHAR(100) DEFAULT NULL AFTER couponDiscount,
+ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending' AFTER merchantID,
 ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER paymentStatus;
 ```
 
@@ -90,19 +90,19 @@ import { useRouter } from 'next/router';
 
 export default function PaymentStatus() {
   const router = useRouter();
-  const { merchantTransactionId } = router.query;
+  const { merchantID } = router.query;
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (merchantTransactionId) {
+    if (merchantID) {
       checkPaymentStatus();
     }
-  }, [merchantTransactionId]);
+  }, [merchantID]);
 
   const checkPaymentStatus = async () => {
     try {
-      const response = await fetch(`/api/phonepe/status/${merchantTransactionId}`);
+      const response = await fetch(`/api/phonepe/status/${merchantID}`);
       const data = await response.json();
       
       if (data.success) {
@@ -147,12 +147,12 @@ export default function PaymentStatus() {
 Create an API route in Next.js to proxy the status check:
 
 ```javascript
-// pages/api/phonepe/status/[merchantTransactionId].js
+// pages/api/phonepe/status/[merchantID].js
 export default async function handler(req, res) {
-  const { merchantTransactionId } = req.query;
+  const { merchantID } = req.query;
   
   try {
-    const response = await fetch(`${process.env.BACKEND_URL}/api/phonepe/status/${merchantTransactionId}`);
+    const response = await fetch(`${process.env.BACKEND_URL}/api/phonepe/status/${merchantID}`);
     const data = await response.json();
     
     res.json(data);
@@ -191,7 +191,7 @@ export default async function handler(req, res) {
 curl -X POST "https://yourdomain.com/api/phonepe/webhook" \
   -H "Content-Type: application/json" \
   -H "X-VERIFY: your_signature" \
-  -d '{"merchantTransactionId":"test123","code":"PAYMENT_SUCCESS"}'
+  -d '{"merchantID":"test123","code":"PAYMENT_SUCCESS"}'
 ```
 
 ### Test Status Check

@@ -10,7 +10,24 @@ router.get('/balance', async (req, res) => {
     try {
         const uid = req.user.uid;
         const balance = await coinModel.getBalance(uid);
-        return res.json({ success: true, balance });
+        
+        // Try to get redeemable balance, fall back to total balance if column doesn't exist
+        let redeemableBalance = balance;
+        let lockedBalance = 0;
+        try {
+            redeemableBalance = await coinModel.getRedeemableBalance(uid);
+            lockedBalance = balance - redeemableBalance;
+        } catch (e) {
+            // If redeemableAt column doesn't exist, all coins are redeemable (backward compatibility)
+            console.warn('Could not get redeemable balance, using total balance:', e.message);
+        }
+        
+        return res.json({ 
+            success: true, 
+            balance,
+            redeemableBalance,
+            lockedBalance // Coins still in 7-day hold period (0 if migration not run)
+        });
     } catch (e) {
         console.error('coin balance error', e);
         return res.status(500).json({ success: false, message: 'Failed to fetch balance' });
@@ -35,6 +52,21 @@ router.post('/redeem', async (req, res) => {
         const uid = req.user.uid;
         const coins = parseInt(req.body?.coins || 0, 10);
         if (!coins || coins <= 0) return res.status(400).json({ success: false, message: 'Invalid coins' });
+        
+        // Check if user has enough redeemable balance (if column exists)
+        try {
+            const redeemableBalance = await coinModel.getRedeemableBalance(uid);
+            if (coins > redeemableBalance) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Insufficient redeemable coins. You have ${redeemableBalance} redeemable coins. Coins become redeemable 7 days after order delivery.` 
+                });
+            }
+        } catch (e) {
+            // If redeemableAt column doesn't exist, skip the check (backward compatibility)
+            console.warn('Could not check redeemable balance, proceeding with redemption:', e.message);
+        }
+        
         await coinModel.redeemCoinsToWallet(uid, coins);
         return res.json({ success: true, message: 'Coins redeemed to wallet' });
     } catch (e) {

@@ -155,6 +155,19 @@ const clearOfferIDFromProducts = async (offerID) => {
     return result;
 };
 
+const deleteOffer = async (offerID) => {
+    try {
+        const [result] = await db.execute('DELETE FROM offers WHERE offerID = ?', [offerID]);
+        return {
+            success: true,
+            affectedRows: result.affectedRows
+        };
+    } catch (error) {
+        console.error('deleteOffer error:', error);
+        throw new Error('Error deleting offer: ' + error.message);
+    }
+};
+
 module.exports = {
     searchOfferByName,
     insertOffer,
@@ -164,6 +177,8 @@ module.exports = {
     updateOffer,
     updateOfferByID,
     getOfferByID,
-    findOffersByName
-    , updateProductOfferID, clearOfferIDFromProducts
+    findOffersByName,
+    updateProductOfferID,
+    clearOfferIDFromProducts,
+    deleteOffer
 };

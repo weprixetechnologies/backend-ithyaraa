@@ -14,14 +14,14 @@ BACKEND_URL=https://yourdomain.com
 ### 2. Database Setup
 ```sql
 ALTER TABLE orderDetail 
-ADD COLUMN merchantTransactionId VARCHAR(100) DEFAULT NULL,
+ADD COLUMN merchantID VARCHAR(100) DEFAULT NULL,
 ADD COLUMN paymentStatus VARCHAR(20) DEFAULT 'pending',
 ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
 ```
 
 ### 3. Test Payment
 ```bash
-curl -X POST "http://72.60.219.181:3002/api/order/place" \
+curl -X POST "http://localhost:3000/api/order/place" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"addressID": "test", "paymentMode": "PREPAID"}'
@@ -33,7 +33,7 @@ curl -X POST "http://72.60.219.181:3002/api/order/place" \
 |--------|----------|---------|
 | POST | `/api/order/place` | Create order and initiate payment |
 | POST | `/api/phonepe/webhook` | PhonePe webhook (automatic) |
-| GET | `/api/phonepe/status/:merchantTransactionId` | Check payment status |
+| GET | `/api/phonepe/status/:merchantID` | Check payment status |
 | GET | `/api/phonepe/order/:orderId/status` | Check order payment status |
 
 ## 🔄 Payment Flow
@@ -65,7 +65,7 @@ const handleWebhookController = async (req, res) => {
 ### Status Check
 ```javascript
 // In phonepeService.js
-const checkPaymentStatus = async (merchantTransactionId) => {
+const checkPaymentStatus = async (merchantID) => {
   // Checks payment status with PhonePe API
 }
 ```
@@ -79,7 +79,7 @@ const checkPaymentStatus = async (merchantTransactionId) => {
 
 ### Database Not Updating
 - Verify database columns exist
-- Check merchantTransactionId is stored
+- Check merchantID is stored
 - Check database connection
 
 ### Payment Status Issues

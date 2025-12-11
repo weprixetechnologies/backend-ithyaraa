@@ -14,12 +14,50 @@ router.get('/', async (req, res) => {
     const i = schema.items;
     const orderCol = d.updatedAt ? `ORDER BY ${d.updatedAt} DESC` : (d.createdAt ? `ORDER BY ${d.createdAt} DESC` : '');
     const [details] = await db.query(`SELECT * FROM ${schema.tables.details} ${orderCol}`);
+    
+    // Get item counts
     const [counts] = await db.query(`SELECT ${i.saleID} AS saleID, COUNT(*) AS itemCount FROM ${schema.tables.items} GROUP BY ${i.saleID}`);
     const saleIdToCount = new Map(counts.map(r => [r.saleID, r.itemCount]));
-    const data = (details || []).map(row => ({
-      ...row,
-      itemCount: saleIdToCount.get(row[d.saleID]) || 0
-    }));
+    
+    // Get discount info from items (first item's discount as representative)
+    const saleIdToDiscount = new Map();
+    if (i.discountType && i.discountValue && details.length > 0) {
+      const saleIDs = details.map(row => row[d.saleID]);
+      if (saleIDs.length > 0) {
+        // Get first item's discount for each sale
+        const placeholders = saleIDs.map(() => '?').join(',');
+        const [discounts] = await db.query(`
+          SELECT DISTINCT
+            ${i.saleID} AS saleID,
+            ${i.discountType} AS discountType,
+            ${i.discountValue} AS discountValue
+          FROM ${schema.tables.items}
+          WHERE ${i.saleID} IN (${placeholders})
+          ORDER BY ${i.saleID}, ${i.createdAt || '1'}
+        `, saleIDs);
+        
+        // Use first discount found for each sale
+        discounts.forEach(r => {
+          if (!saleIdToDiscount.has(r.saleID)) {
+            saleIdToDiscount.set(r.saleID, {
+              discountType: r.discountType,
+              discountValue: r.discountValue
+            });
+          }
+        });
+      }
+    }
+    
+    const data = (details || []).map(row => {
+      const saleID = row[d.saleID];
+      const discount = saleIdToDiscount.get(saleID);
+      return {
+        ...row,
+        itemCount: saleIdToCount.get(saleID) || 0,
+        discountType: discount?.discountType || null,
+        discountValue: discount?.discountValue || null
+      };
+    });
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message || 'Failed to list flash sales' });

@@ -170,11 +170,12 @@ async function createPresaleBooking(bookingData) {
 /**
  * Update presale booking payment status
  * @param {string} preBookingID - PreBooking ID
- * @param {string} paymentStatus - Payment status (pending, successful, failed)
+ * @param {string} paymentStatus - Payment status (pending, successful, failed, refunded)
  * @param {string} txnID - Optional transaction ID
  * @param {string} merchantID - Optional merchant ID
+ * @param {string} paymentType - Optional payment type (COD, PREPAID, PHONEPE) - used to determine if order status should be updated
  */
-async function updatePresaleBookingPaymentStatus(preBookingID, paymentStatus, txnID = null, merchantID = null) {
+async function updatePresaleBookingPaymentStatus(preBookingID, paymentStatus, txnID = null, merchantID = null, paymentType = null) {
     try {
         const updateFields = ['paymentStatus = ?'];
         const updateValues = [paymentStatus];
@@ -200,9 +201,17 @@ async function updatePresaleBookingPaymentStatus(preBookingID, paymentStatus, tx
         }
 
         // If payment is successful, update status to confirmed
-        if (paymentStatus === 'successful' || paymentStatus === 'paid') {
+        if (paymentStatus === 'successful') {
             updateFields.push('status = ?');
             updateValues.push('confirmed');
+        } else if (paymentStatus === 'pending') {
+            // If payment status is changed to pending and payment type is PREPAID or PHONEPE,
+            // also update order status to pending
+            const paymentTypeUpper = (paymentType || '').toUpperCase();
+            if (paymentTypeUpper === 'PREPAID' || paymentTypeUpper === 'PHONEPE') {
+                updateFields.push('status = ?');
+                updateValues.push('pending');
+            }
         } else if (paymentStatus === 'failed') {
             // Keep status as pending for failed payments (don't change to confirmed)
             // Status remains as it was initially set
@@ -228,7 +237,7 @@ async function updatePresaleBookingPaymentStatus(preBookingID, paymentStatus, tx
  * @param {string} txnID - Transaction ID
  * @param {string} merchantID - Merchant ID
  */
-async function addMerchantTransactionId(preBookingID, txnID, merchantID = null) {
+async function addmerchantID(preBookingID, txnID, merchantID = null) {
     try {
         const updateFields = ['txnID = ?'];
         const updateValues = [txnID];
@@ -275,7 +284,7 @@ async function getPresaleBookingByID(preBookingID) {
  * @param {string} txnID - Transaction ID
  * @returns {Object|null} - Booking details or null
  */
-async function getPresaleBookingByMerchantTransactionId(txnID) {
+async function getPresaleBookingBymerchantID(txnID) {
     try {
         const [rows] = await db.query(
             `SELECT * FROM presale_booking_details WHERE txnID = ?`,
@@ -309,9 +318,9 @@ async function getPresaleBookingItems(preBookingID) {
 module.exports = {
     createPresaleBooking,
     updatePresaleBookingPaymentStatus,
-    addMerchantTransactionId,
+    addmerchantID,
     getPresaleBookingByID,
-    getPresaleBookingByMerchantTransactionId,
+    getPresaleBookingBymerchantID,
     getPresaleBookingItems
 };
 

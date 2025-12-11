@@ -70,9 +70,32 @@ const editCategory = async (req, res) => {
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
+
+const deleteCategory = async (req, res) => {
+    const { categoryID } = req.params;
+
+    if (!categoryID) {
+        return res.status(400).json({ success: false, message: 'Category ID is required' });
+    }
+
+    try {
+        const result = await categoryService.deleteCategory(categoryID);
+
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+
+        res.json(result);
+    } catch (error) {
+        console.error('deleteCategory error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 module.exports = {
     postCategory,
     getCategories,
     getCategoryByID,
-    editCategory
+    editCategory,
+    deleteCategory
 };

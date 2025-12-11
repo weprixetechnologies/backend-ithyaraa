@@ -67,12 +67,62 @@ const updateCategoryByID = async ({
     return result.affectedRows > 0;
 };
 
+const deleteCategoryByID = async (categoryID) => {
+    const [result] = await db.query(
+        'DELETE FROM categories WHERE categoryID = ?',
+        [categoryID]
+    );
+    return result.affectedRows > 0;
+};
+
+const removeCategoryFromProducts = async (categoryID) => {
+    // Find all products that contain this category
+    const [products] = await db.query(
+        `SELECT productID, categories FROM products 
+         WHERE JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`,
+        [categoryID]
+    );
+
+    let updatedCount = 0;
+
+    // Update each product to remove the category
+    for (const product of products) {
+        try {
+            let categories = [];
+            if (product.categories) {
+                // Parse JSON if it's a string
+                categories = typeof product.categories === 'string'
+                    ? JSON.parse(product.categories)
+                    : product.categories;
+            }
+
+            // Filter out the category with matching categoryID (normalize both to numbers for comparison)
+            const categoryIDNum = Number(categoryID);
+            const updatedCategories = categories.filter(
+                cat => Number(cat.categoryID) !== categoryIDNum
+            );
+
+            // Update the product with the filtered categories
+            await db.query(
+                'UPDATE products SET categories = ? WHERE productID = ?',
+                [JSON.stringify(updatedCategories), product.productID]
+            );
+            updatedCount++;
+        } catch (error) {
+            console.error(`Error updating product ${product.productID}:`, error);
+        }
+    }
+
+    return updatedCount;
+};
 
 module.exports = {
     getCategoryByID,
     insertCategory,
     getFilteredCategories,
-    updateCategoryByID
+    updateCategoryByID,
+    deleteCategoryByID,
+    removeCategoryFromProducts
 };
 
 // Fetch all categories: categoryID and categoryName only

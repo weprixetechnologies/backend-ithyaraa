@@ -108,5 +108,31 @@ const getOfferDetails = async (req, res) => {
     }
 };
 
+const deleteOffer = async (req, res) => {
+    try {
+        const { offerID } = req.params;
 
-module.exports = { fetchOfferbyName, postOfferController, getOffers, getOfferCount, editOffer, getOfferDetails };
+        if (!offerID) {
+            return res.status(400).json({
+                success: false,
+                message: 'offerID param is required'
+            });
+        }
+
+        const result = await offerService.deleteOffer(offerID);
+
+        if (!result.success) {
+            return res.status(404).json(result);
+        }
+
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error deleting offer:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+module.exports = { fetchOfferbyName, postOfferController, getOffers, getOfferCount, editOffer, getOfferDetails, deleteOffer };
