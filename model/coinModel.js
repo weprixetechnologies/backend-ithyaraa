@@ -61,10 +61,10 @@ async function completePendingCoins(uid, orderID, refType = 'order') {
             if (error.message && error.message.includes('redeemableAt')) {
                 console.warn('redeemableAt column not found, inserting without it (migration may not be run yet)');
                 [lotRes] = await connection.query(
-                    `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
-                     VALUES (?, ?, ?, 0, 0, ?, ?)`,
-                    [uid, orderID, coins, earnedAt, expiresAt]
-                );
+            `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
+             VALUES (?, ?, ?, 0, 0, ?, ?)`,
+            [uid, orderID, coins, earnedAt, expiresAt]
+        );
             } else {
                 throw error;
             }
@@ -183,10 +183,10 @@ async function createEarnLot(uid, orderID, coins, earnedAt, expiresAt) {
         if (error.message && error.message.includes('redeemableAt')) {
             console.warn('redeemableAt column not found, inserting without it (migration may not be run yet)');
             [res] = await db.query(
-                `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
-                 VALUES (?, ?, ?, 0, 0, ?, ?)`,
-                [uid, orderID || null, coins, earnedAt, expiresAt]
-            );
+        `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
+         VALUES (?, ?, ?, 0, 0, ?, ?)`,
+        [uid, orderID || null, coins, earnedAt, expiresAt]
+    );
         } else {
             throw error;
         }
@@ -279,14 +279,14 @@ async function redeemCoinsToWallet(uid, coins) {
             if (error.message && error.message.includes('redeemableAt')) {
                 console.warn('redeemableAt column not found, using all available coins (migration may not be run yet)');
                 [lots] = await connection.query(
-                    `SELECT lotID, coinsTotal, coinsUsed, coinsExpired, expiresAt
+            `SELECT lotID, coinsTotal, coinsUsed, coinsExpired, expiresAt
                      FROM coin_lots 
                      WHERE uid = ? 
                      AND (coinsTotal - coinsUsed - coinsExpired) > 0
-                     ORDER BY expiresAt ASC, earnedAt ASC
-                     FOR UPDATE`,
-                    [uid]
-                );
+             ORDER BY expiresAt ASC, earnedAt ASC
+             FOR UPDATE`,
+            [uid]
+        );
             } else {
                 throw error;
             }

@@ -214,7 +214,7 @@ async function getPresaleBookingDetails(preBookingID, uid) {
 
         // Get booking items
         const items = await presaleBookingModel.getPresaleBookingItems(preBookingID);
-
+        
         // Calculate quantity from subtotal and unit price (quantity is not stored in DB)
         // For presale bookings, we can calculate it from: quantity = subtotal / unitPrice
         let bookingQuantity = 1;

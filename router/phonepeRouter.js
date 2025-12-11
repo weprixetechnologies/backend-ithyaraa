@@ -78,4 +78,21 @@ router.get('/order/:orderId/status', phonepeController.getOrderPaymentStatusCont
  */
 router.get('/presale/:preBookingID/status', phonepeController.getPresalePaymentStatusController);
 
+/**
+ * @route GET /api/phonepe/webhook/test
+ * @desc Test endpoint to verify webhook URL is accessible
+ * @access Public
+ */
+router.get('/webhook/test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Webhook endpoint is accessible',
+        timestamp: new Date().toISOString(),
+        endpoints: {
+            order: '/api/phonepe/webhook/order',
+            presale: '/api/phonepe/webhook/presale'
+        }
+    });
+});
+
 module.exports = router;

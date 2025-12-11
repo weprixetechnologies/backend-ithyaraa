@@ -301,11 +301,16 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const frontendUrl = process.env.FRONTEND_URL || 'https://build.ithyaraa.com';
-        // Redirect to order success page after payment
-        const redirectUrl = `${frontendUrl}/order-status/order-summary/${order.orderID}`;
-        // Use order-specific webhook endpoint
-        const callbackUrl = `${process.env.BACKEND_URL || 'https://build.ithyaraa.com'}/api/phonepe/webhook/order`;
+        // Normalize FRONTEND_URL - remove trailing slashes
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://build.ithyaraa.com').replace(/\/+$/, '');
+        // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
+        const redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
+        // Use order-specific webhook endpoint - ensure no trailing slashes
+        const backendUrl = (process.env.BACKEND_URL || 'https://api.ithyaraa.com').replace(/\/+$/, '');
+        const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
+
+        console.log('[ORDER] PhonePe callback URL:', callbackUrl);
+        console.log('[ORDER] PhonePe redirect URL:', redirectUrl);
 
         const payload = {
             merchantId,

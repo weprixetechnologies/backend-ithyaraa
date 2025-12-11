@@ -52,7 +52,7 @@ router.get('/', async (req, res) => {
       const saleID = row[d.saleID];
       const discount = saleIdToDiscount.get(saleID);
       return {
-        ...row,
+      ...row,
         itemCount: saleIdToCount.get(saleID) || 0,
         discountType: discount?.discountType || null,
         discountValue: discount?.discountValue || null
