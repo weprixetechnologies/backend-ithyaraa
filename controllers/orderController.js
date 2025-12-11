@@ -322,6 +322,12 @@ const placeOrderController = async (req, res) => {
             paymentInstrument: { type: "PAY_PAGE" }
         };
 
+        console.log('[ORDER] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
+        console.log('[ORDER] PhonePe API URL:', phonePeUrl);
+        console.log('[ORDER] Callback URL being sent to PhonePe:', callbackUrl);
+        console.log('[ORDER] Redirect URL being sent to PhonePe:', redirectUrl);
+        console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
+
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = generateChecksum(base64Payload);
 
@@ -336,7 +342,15 @@ const placeOrderController = async (req, res) => {
         });
 
         const data = await response.json();
-        console.log("PhonePe response:", data);
+        console.log("[ORDER] PhonePe API Response:", JSON.stringify(data, null, 2));
+
+        // Check if PhonePe accepted the callback URL
+        if (data.success && data.data) {
+            console.log('[ORDER] PhonePe accepted the payment request');
+            console.log('[ORDER] Check PhonePe dashboard for webhook delivery logs');
+        } else {
+            console.error('[ORDER] PhonePe payment request may have failed or callback URL not accepted');
+        }
 
         if (data.success) {
             // Store merchant transaction ID in the order

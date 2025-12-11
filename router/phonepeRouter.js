@@ -84,14 +84,34 @@ router.get('/presale/:preBookingID/status', phonepeController.getPresalePaymentS
  * @access Public
  */
 router.get('/webhook/test', (req, res) => {
+    const backendUrl = process.env.BACKEND_URL || 'https://api.ithyaraa.com';
     res.json({
         success: true,
         message: 'Webhook endpoint is accessible',
         timestamp: new Date().toISOString(),
+        backendUrl: backendUrl,
         endpoints: {
-            order: '/api/phonepe/webhook/order',
-            presale: '/api/phonepe/webhook/presale'
-        }
+            order: `${backendUrl}/api/phonepe/webhook/order`,
+            presale: `${backendUrl}/api/phonepe/webhook/presale`
+        },
+        note: 'These URLs should be configured in PhonePe dashboard as callback URLs'
+    });
+});
+
+/**
+ * @route POST /api/phonepe/webhook/test
+ * @desc Test endpoint to verify webhook can receive POST requests
+ * @access Public
+ */
+router.post('/webhook/test', express.json(), (req, res) => {
+    console.log('[WEBHOOK-TEST] Received test webhook:', JSON.stringify(req.body, null, 2));
+    console.log('[WEBHOOK-TEST] Headers:', JSON.stringify(req.headers, null, 2));
+    res.json({
+        success: true,
+        message: 'Test webhook received successfully',
+        timestamp: new Date().toISOString(),
+        receivedData: req.body,
+        headers: req.headers
     });
 });
 

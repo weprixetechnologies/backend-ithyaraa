@@ -124,6 +124,12 @@ const placePrebookingOrderController = async (req, res) => {
             paymentInstrument: { type: "PAY_PAGE" }
         };
 
+        console.log('[PRESALE] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
+        console.log('[PRESALE] PhonePe API URL:', phonePeUrl);
+        console.log('[PRESALE] Callback URL being sent to PhonePe:', callbackUrl);
+        console.log('[PRESALE] Redirect URL being sent to PhonePe:', redirectUrl);
+        console.log('[PRESALE] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
+
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = generateChecksum(base64Payload);
 
@@ -138,7 +144,15 @@ const placePrebookingOrderController = async (req, res) => {
         });
 
         const data = await response.json();
-        console.log("PhonePe response for presale booking:", data);
+        console.log("[PRESALE] PhonePe API Response:", JSON.stringify(data, null, 2));
+
+        // Check if PhonePe accepted the callback URL
+        if (data.success && data.data) {
+            console.log('[PRESALE] PhonePe accepted the payment request');
+            console.log('[PRESALE] Check PhonePe dashboard for webhook delivery logs');
+        } else {
+            console.error('[PRESALE] PhonePe payment request may have failed or callback URL not accepted');
+        }
 
         if (data.success) {
             // Store transaction IDs in the booking
