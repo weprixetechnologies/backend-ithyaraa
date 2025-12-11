@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 // Test configuration
-const BASE_URL = 'http://localhost:3000/api/wishlist';
+const BASE_URL = 'https://build.ithyaraa.com/api/wishlist';
 const TEST_TOKEN = 'YOUR_JWT_TOKEN_HERE'; // Replace with actual JWT token
 
 // Test data

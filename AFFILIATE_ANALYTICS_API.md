@@ -128,7 +128,7 @@ async function getAffiliateAnalytics() {
 
 ### cURL
 ```bash
-curl -X GET "http://localhost:3000/api/affiliate/analytics" \
+curl -X GET "https://build.ithyaraa.com/api/affiliate/analytics" \
   -H "Authorization: Bearer your_access_token_here" \
   -H "Content-Type: application/json"
 ```

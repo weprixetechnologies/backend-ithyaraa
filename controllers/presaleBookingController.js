@@ -103,7 +103,7 @@ const placePrebookingOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const frontendUrl = process.env.FRONTEND_URL || 'https://build.ithyaraa.com';
         // Redirect to presale order-status page after payment
         const redirectUrl = `${frontendUrl}/presale/order-status/${booking.preBookingID}`;
         // Use presale-specific webhook endpoint
@@ -554,8 +554,8 @@ async function sendPreBookingOrderConfirmationEmail(user, booking, paymentMode, 
             totalDiscount: booking.bookingData.summary.totalDiscount || 0,
             total: booking.bookingData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/presale/order-status/${booking.preBookingID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'https://build.ithyaraa.com'}/presale/order-status/${booking.preBookingID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'https://build.ithyaraa.com'
         };
 
         // Generate invoice PDF for attachment
