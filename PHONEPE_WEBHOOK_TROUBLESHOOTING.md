@@ -10,10 +10,10 @@ Test if your webhook endpoint is accessible from the internet:
 
 ```bash
 # Test GET endpoint
-curl https://api.ithyaraa.com/api/phonepe/webhook/test
+curl https://backend.ithyaraa.com/api/phonepe/webhook/test
 
 # Test POST endpoint (simulate webhook)
-curl -X POST https://api.ithyaraa.com/api/phonepe/webhook/test \
+curl -X POST https://backend.ithyaraa.com/api/phonepe/webhook/test \
   -H "Content-Type: application/json" \
   -d '{"test": "data"}'
 ```
@@ -25,7 +25,7 @@ Both should return success responses.
 Look for these log entries when a payment is made:
 
 ```
-[ORDER] PhonePe callback URL: https://api.ithyaraa.com/api/phonepe/webhook/order
+[ORDER] PhonePe callback URL: https://backend.ithyaraa.com/api/phonepe/webhook/order
 [ORDER] PhonePe API Response: {...}
 ```
 
@@ -44,8 +44,8 @@ After payment, check for:
 1. **Login to PhonePe Merchant Dashboard**
 2. **Navigate to Settings → Webhooks** (or similar section)
 3. **Add/Configure Webhook URLs:**
-   - Order Webhook: `https://api.ithyaraa.com/api/phonepe/webhook/order`
-   - Presale Webhook: `https://api.ithyaraa.com/api/phonepe/webhook/presale`
+   - Order Webhook: `https://backend.ithyaraa.com/api/phonepe/webhook/order`
+   - Presale Webhook: `https://backend.ithyaraa.com/api/phonepe/webhook/presale`
 4. **Enable Webhook Notifications**
 5. **Save the configuration**
 
@@ -58,7 +58,7 @@ After payment, check for:
 Check server logs for the callback URL being sent to PhonePe:
 
 ```
-[ORDER] Callback URL being sent to PhonePe: https://api.ithyaraa.com/api/phonepe/webhook/order
+[ORDER] Callback URL being sent to PhonePe: https://backend.ithyaraa.com/api/phonepe/webhook/order
 ```
 
 **Ensure:**
@@ -98,7 +98,7 @@ Check server logs for the callback URL being sent to PhonePe:
 You can test if your webhook endpoint works by sending a test request:
 
 ```bash
-curl -X POST https://api.ithyaraa.com/api/phonepe/webhook/order \
+curl -X POST https://backend.ithyaraa.com/api/phonepe/webhook/order \
   -H "Content-Type: application/json" \
   -H "X-VERIFY: test-signature" \
   -d '{
@@ -140,7 +140,7 @@ If webhooks still don't work after checking all above:
 Ensure these are set correctly:
 
 ```env
-BACKEND_URL=https://api.ithyaraa.com
+BACKEND_URL=https://backend.ithyaraa.com
 FRONTEND_URL=https://build.ithyaraa.com
 MERCHANT_ID=your_merchant_id
 KEY=your_salt_key

@@ -165,6 +165,65 @@ async function reversePendingCoins(uid, orderID, refType = 'order') {
     }
 }
 
+// Reverse earned coins when order is returned/cancelled after delivery
+async function reverseEarnedCoins(uid, orderID, refType = 'order') {
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Find the coin lot for this order/presale booking
+        const [lots] = await connection.query(
+            `SELECT lotID, coinsTotal, coinsUsed, coinsExpired 
+             FROM coin_lots 
+             WHERE uid = ? AND orderID = ? 
+             FOR UPDATE`,
+            [uid, String(orderID)]
+        );
+
+        if (!lots || lots.length === 0) {
+            await connection.rollback();
+            return { success: false, message: 'No earned coins found for this order' };
+        }
+
+        const lot = lots[0];
+        const coinsEarned = lot.coinsTotal;
+        const coinsAvailable = coinsEarned - lot.coinsUsed - lot.coinsExpired;
+
+        if (coinsAvailable <= 0) {
+            await connection.rollback();
+            return { success: false, message: 'No available coins to reverse (already used or expired)' };
+        }
+
+        // Mark the remaining coins as expired (reversed)
+        const coinsToReverse = coinsAvailable;
+        await connection.query(
+            `UPDATE coin_lots SET coinsExpired = coinsExpired + ? WHERE lotID = ?`,
+            [coinsToReverse, lot.lotID]
+        );
+
+        // Create reversal transaction entry
+        await connection.query(
+            `INSERT INTO coin_transactions (uid, type, coins, refType, refID) 
+             VALUES (?, 'reversal', ?, ?, ?)`,
+            [uid, coinsToReverse, refType, String(orderID)]
+        );
+
+        // Deduct from balance
+        await connection.query(
+            `UPDATE coin_balance SET balance = balance - ? WHERE uid = ?`,
+            [coinsToReverse, uid]
+        );
+
+        await connection.commit();
+        return { success: true, coinsReversed: coinsToReverse };
+    } catch (e) {
+        await connection.rollback();
+        throw e;
+    } finally {
+        connection.release();
+    }
+}
+
 async function createEarnLot(uid, orderID, coins, earnedAt, expiresAt) {
     await ensureBalanceRow(uid);
     // Coins are credited instantly but become redeemable after 7 days (return period)
@@ -359,6 +418,7 @@ module.exports = {
     completePendingCoins,
     cancelPendingCoins,
     reversePendingCoins,
+    reverseEarnedCoins,
     getBalance,
     getRedeemableBalance,
     getHistory,

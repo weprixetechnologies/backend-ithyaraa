@@ -75,8 +75,8 @@ app.use('/api/brand', brandBankDetailsRouter);
 
 // ✅ HTTPS setup using Let's Encrypt certificate
 const sslOptions = {
-  key: fs.readFileSync('/etc/letsencrypt/live/api.ithyaraa.com/privkey.pem'),
-  cert: fs.readFileSync('/etc/letsencrypt/live/api.ithyaraa.com/fullchain.pem')
+  key: fs.readFileSync('/etc/letsencrypt/live/backend.ithyaraa.com/privkey.pem'),
+  cert: fs.readFileSync('/etc/letsencrypt/live/backend.ithyaraa.com/fullchain.pem')
 };
 
 // Start HTTPS server

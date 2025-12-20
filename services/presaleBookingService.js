@@ -625,16 +625,29 @@ async function updatePresaleBookingStatus(preBookingID, orderStatus) {
         // Handle coin state transitions based on status change
         if (hasPendingCoins) {
             try {
-                if (orderStatus.toLowerCase() === 'delivered' && oldStatus.toLowerCase() !== 'delivered') {
+                const coinModel = require('../model/coinModel');
+                const statusLower = orderStatus.toLowerCase();
+                const oldStatusLower = oldStatus.toLowerCase();
+                
+                if (statusLower === 'delivered' && oldStatusLower !== 'delivered') {
                     // Complete pending coins (award them) when order is delivered
-                    const coinModel = require('../model/coinModel');
                     await coinModel.completePendingCoins(uid, preBookingID, 'presale');
                     console.log(`[Presale Coins] Completed pending coins for presale booking ${preBookingID}`);
-                } else if (orderStatus.toLowerCase() === 'cancelled' && oldStatus.toLowerCase() !== 'cancelled') {
-                    // Reverse pending coins when order is cancelled (for returns/cancellations)
-                    const coinModel = require('../model/coinModel');
-                    await coinModel.reversePendingCoins(uid, preBookingID, 'presale');
-                    console.log(`[Presale Coins] Reversed pending coins for cancelled presale booking ${preBookingID}`);
+                } else if ((statusLower === 'cancelled' || statusLower === 'returned') && oldStatusLower !== 'cancelled' && oldStatusLower !== 'returned') {
+                    // Check if coins were already earned (booking was delivered) or still pending
+                    if (oldStatusLower === 'delivered') {
+                        // Reverse earned coins (coins were already awarded)
+                        const result = await coinModel.reverseEarnedCoins(uid, preBookingID, 'presale');
+                        if (result.success) {
+                            console.log(`[Presale Coins] Reversed ${result.coinsReversed} earned coins for ${statusLower} presale booking ${preBookingID}`);
+                        } else {
+                            console.log(`[Presale Coins] ${result.message} for presale booking ${preBookingID}`);
+                        }
+                    } else {
+                        // Reverse pending coins (booking was not yet delivered)
+                        await coinModel.reversePendingCoins(uid, preBookingID, 'presale');
+                        console.log(`[Presale Coins] Reversed pending coins for ${statusLower} presale booking ${preBookingID}`);
+                    }
                 }
             } catch (coinErr) {
                 console.error('[Presale Coins] Error processing coin state change:', coinErr);

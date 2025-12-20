@@ -108,7 +108,7 @@ const placePrebookingOrderController = async (req, res) => {
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         const redirectUrl = `${frontendUrlBase}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
         // Use presale-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'https://api.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;
 
         console.log('[PRESALE] PhonePe callback URL:', callbackUrl);

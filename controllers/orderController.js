@@ -306,7 +306,7 @@ const placeOrderController = async (req, res) => {
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         const redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
         // Use order-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'https://api.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
         console.log('[ORDER] PhonePe callback URL:', callbackUrl);
@@ -533,7 +533,7 @@ const updateOrderStatusController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' });
         }
 
-        const validStatuses = ['Preparing', 'Shipped', 'Delivered', 'Cancelled'];
+        const validStatuses = ['Preparing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
         if (!validStatuses.includes(orderStatus)) {
             return res.status(400).json({ success: false, message: 'Invalid order status' });
         }

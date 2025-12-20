@@ -672,10 +672,21 @@ async function updateOrderStatus(orderId, orderStatus) {
                     // Complete pending coins (award them)
                     await coinModel.completePendingCoins(uid, orderId);
                     console.log(`[Coins] Completed pending coins for order ${orderId}`);
-                } else if (orderStatus === 'Cancelled' && oldStatus !== 'Cancelled') {
-                    // Reverse pending coins
-                    await coinModel.reversePendingCoins(uid, orderId);
-                    console.log(`[Coins] Reversed pending coins for order ${orderId}`);
+                } else if ((orderStatus === 'Cancelled' || orderStatus === 'Returned') && oldStatus !== 'Cancelled' && oldStatus !== 'Returned') {
+                    // Check if coins were already earned (order was delivered) or still pending
+                    if (oldStatus === 'Delivered') {
+                        // Reverse earned coins (coins were already awarded)
+                        const result = await coinModel.reverseEarnedCoins(uid, orderId);
+                        if (result.success) {
+                            console.log(`[Coins] Reversed ${result.coinsReversed} earned coins for ${orderStatus.toLowerCase()} order ${orderId}`);
+                        } else {
+                            console.log(`[Coins] ${result.message} for order ${orderId}`);
+                        }
+                    } else {
+                        // Reverse pending coins (order was not yet delivered)
+                        await coinModel.reversePendingCoins(uid, orderId);
+                        console.log(`[Coins] Reversed pending coins for ${orderStatus.toLowerCase()} order ${orderId}`);
+                    }
                 }
             } catch (coinErr) {
                 console.error('[Coins] Error processing coin state change:', coinErr);
