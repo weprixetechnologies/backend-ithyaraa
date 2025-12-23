@@ -171,14 +171,14 @@ const refreshTokens = async (refreshToken) => {
     const user = await userModel.findUserByEmail(email);
     if (!user) {
         console.log('Error 2: No user found with email:', email);
-        throw new Error('NO USER EXIST');
+        throw new Error('No User Exist');
     }
     console.log('User found:', user);
 
     const session = await sessionModel.findSessionByEmail(email);
     if (!session) {
         console.log('Error 3: No session found for email:', email);
-        throw new Error('PLEASE LOGIN AGAIN');
+        throw new Error('Please Login Again');
     }
     console.log('Session found:', session);
 

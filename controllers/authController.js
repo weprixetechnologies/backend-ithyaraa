@@ -62,11 +62,11 @@ const refreshToken = async (req, res) => {
         const msg = err.message || 'Internal server error';
         console.log('Error during token refresh:', msg);
 
-        if (msg === 'NO USER EXIST') {
+        if (msg === 'No User Exist') {
             console.log('Responding with 404 - user not found');
             return res.status(404).json({ message: msg });
         }
-        if (msg === 'PLEASE LOGIN AGAIN' || msg === 'Invalid session refresh token') {
+        if (msg === 'Please Login Again' || msg === 'Invalid session refresh token') {
             console.log('Responding with 401 - invalid session or token');
             return res.status(401).json({ message: msg });
         }

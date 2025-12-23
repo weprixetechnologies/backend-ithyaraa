@@ -21,7 +21,7 @@ ADD COLUMN updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMES
 
 ### 3. Test Payment
 ```bash
-curl -X POST "https://build.ithyaraa.com/api/order/place" \
+curl -X POST "https://backend.ithyaraa.com/api/order/place" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"addressID": "test", "paymentMode": "PREPAID"}'

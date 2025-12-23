@@ -361,7 +361,7 @@ if (!response.ok) {
 
 ### 1. Test Order Creation
 ```bash
-curl -X POST "https://build.ithyaraa.com/api/order/place" \
+curl -X POST "https://backend.ithyaraa.com/api/order/place" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
@@ -372,7 +372,7 @@ curl -X POST "https://build.ithyaraa.com/api/order/place" \
 
 ### 2. Test Webhook
 ```bash
-curl -X POST "https://build.ithyaraa.com/api/phonepe/webhook" \
+curl -X POST "https://backend.ithyaraa.com/api/phonepe/webhook" \
   -H "Content-Type: application/json" \
   -H "X-VERIFY: <signature>" \
   -d '{
@@ -383,7 +383,7 @@ curl -X POST "https://build.ithyaraa.com/api/phonepe/webhook" \
 
 ### 3. Test Status Check
 ```bash
-curl -X GET "https://build.ithyaraa.com/api/phonepe/status/test-123"
+curl -X GET "https://backend.ithyaraa.com/api/phonepe/status/test-123"
 ```
 
 ## 🚀 Deployment

@@ -14,6 +14,7 @@ productRouter.post('/bulk-remove-section', authAdminMiddleware.verifyAccessToken
 productRouter.get('/all-products', productController.getPaginatedProducts)
 productRouter.get('/count-product', authAdminMiddleware.verifyAccessToken, productController.getProductPageCount)
 productRouter.get('/details/:productID', productController.getProductDetails);
+
 // Public shop list
 productRouter.get('/shop', productController.shopList);
 // Public search endpoint

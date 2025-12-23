@@ -63,7 +63,7 @@ Check server logs for the callback URL being sent to PhonePe:
 
 **Ensure:**
 - URL is HTTPS (PhonePe requires HTTPS)
-- URL is publicly accessible (not localhost)
+- URL is publicly accessible (not 192.168.1.12)
 - URL has no trailing slashes
 - URL matches exactly what's configured in PhonePe dashboard
 
@@ -141,7 +141,7 @@ Ensure these are set correctly:
 
 ```env
 BACKEND_URL=https://backend.ithyaraa.com
-FRONTEND_URL=https://build.ithyaraa.com
+FRONTEND_URL=https://backend.ithyaraa.com
 MERCHANT_ID=your_merchant_id
 KEY=your_salt_key
 KEY_INDEX=1

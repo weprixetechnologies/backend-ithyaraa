@@ -5,12 +5,14 @@ const authBrandMiddleware = require('../../middleware/authBrandMiddleware');
 
 // Get bank details for current brand
 router.get('/bank-details', authBrandMiddleware.verifyAccessToken, (req, res) => {
-    brandBankDetailsController.getBankDetailsByBrandID(req, { ...req, params: { brandID: req.user.uid } });
+    req.params.brandID = req.user.uid;
+    return brandBankDetailsController.getBankDetailsByBrandID(req, res);
 });
 
-// Get active bank details
+// Get active bank details for current brand
 router.get('/bank-details/active', authBrandMiddleware.verifyAccessToken, (req, res) => {
-    brandBankDetailsController.getActiveBankDetails(req, { ...req, params: { brandID: req.user.uid } });
+    req.params.brandID = req.user.uid;
+    return brandBankDetailsController.getActiveBankDetails(req, res);
 });
 
 // Add bank details (will be pending)

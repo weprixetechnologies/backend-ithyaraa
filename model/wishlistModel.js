@@ -224,57 +224,23 @@ const isProductInWishlist = async (uid, productID) => {
 // Get product type from database
 const getProductType = async (productID) => {
     try {
-        // First check in products table
-        const [productResult] = await db.query(
-            'SELECT type FROM products WHERE productID = ?',
+        const [rows] = await db.query(
+            'SELECT type FROM products WHERE productID = ? LIMIT 1',
             [productID]
         );
 
-        if (productResult.length > 0) {
-            return {
-                success: true,
-                type: productResult[0].type
-            };
+        if (rows.length === 0) {
+            return { success: false, message: 'Product not found' };
         }
 
-        // Check in combo table if not found in products
-        const [comboResult] = await db.query(
-            'SELECT type FROM combo WHERE comboID = ?',
-            [productID]
-        );
-
-        if (comboResult.length > 0) {
-            return {
-                success: true,
-                type: comboResult[0].type || 'combo'
-            };
-        }
-
-        // Check in giftcard table if not found in products or combo
-        const [giftcardResult] = await db.query(
-            'SELECT type FROM giftcard WHERE giftcardID = ?',
-            [productID]
-        );
-
-        if (giftcardResult.length > 0) {
-            return {
-                success: true,
-                type: giftcardResult[0].type || 'giftcard'
-            };
-        }
-
-        // Product not found in any table
         return {
-            success: false,
-            message: 'Product not found'
+            success: true,
+            type: rows[0].type
         };
 
     } catch (error) {
         console.error('Error getting product type:', error);
-        return {
-            success: false,
-            error: error.message
-        };
+        return { success: false, error: error.message };
     }
 };
 

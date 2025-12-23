@@ -74,52 +74,97 @@ const getAllBankDetails = async () => {
 
 // Approve bank details
 const approveBankDetails = async (bankDetailID, adminUID) => {
+    const db = require('../utils/dbconnect');
+    const connection = await db.getConnection();
+    
     try {
-        const bankDetails = await brandBankDetailsModel.getBankDetailsByID(bankDetailID);
+        await connection.beginTransaction();
+
+        // Get bank details with FOR UPDATE lock to prevent race conditions
+        const [rows] = await connection.query(
+            `SELECT * FROM brand_bank_details WHERE bankDetailID = ? FOR UPDATE`,
+            [bankDetailID]
+        );
+        
+        const bankDetails = rows[0];
 
         if (!bankDetails) {
+            await connection.rollback();
             return { success: false, message: 'Bank details not found' };
         }
 
         if (bankDetails.status !== 'pending') {
+            await connection.rollback();
             return { success: false, message: 'Bank details are not in pending status' };
         }
 
-        // Deactivate all other active bank details for this brand
-        await brandBankDetailsModel.deactivateAllBankDetailsForBrand(bankDetails.brandID);
+        // Approve the bank details (multiple bank details can be active)
+        await connection.query(
+            `UPDATE brand_bank_details 
+             SET status = 'active', 
+             approvedBy = ?, 
+             approvedAt = NOW() 
+             WHERE bankDetailID = ?`,
+            [adminUID, bankDetailID]
+        );
 
-        // Approve the bank details
-        await brandBankDetailsModel.updateBankDetailsStatus(bankDetailID, {
-            status: 'active',
-            approvedBy: adminUID
-        });
-
+        await connection.commit();
         return { success: true, message: 'Bank details approved successfully' };
     } catch (error) {
+        await connection.rollback();
         console.error('Approve bank details error:', error);
         return { success: false, message: 'Failed to approve bank details' };
+    } finally {
+        connection.release();
     }
 };
 
 // Reject bank details
 const rejectBankDetails = async (bankDetailID, adminUID, rejectionReason) => {
+    const db = require('../utils/dbconnect');
+    const connection = await db.getConnection();
+    
     try {
-        const bankDetails = await brandBankDetailsModel.getBankDetailsByID(bankDetailID);
+        await connection.beginTransaction();
+
+        // Get bank details with FOR UPDATE lock to prevent race conditions
+        const [rows] = await connection.query(
+            `SELECT * FROM brand_bank_details WHERE bankDetailID = ? FOR UPDATE`,
+            [bankDetailID]
+        );
+        
+        const bankDetails = rows[0];
 
         if (!bankDetails) {
+            await connection.rollback();
             return { success: false, message: 'Bank details not found' };
         }
 
-        await brandBankDetailsModel.updateBankDetailsStatus(bankDetailID, {
-            status: 'rejected',
-            rejectedBy: adminUID,
-            rejectionReason
-        });
+        // Only allow rejecting pending bank details to prevent accidental rejection of active ones
+        if (bankDetails.status !== 'pending') {
+            await connection.rollback();
+            return { success: false, message: 'Only pending bank details can be rejected' };
+        }
 
+        // Reject the bank details
+        await connection.query(
+            `UPDATE brand_bank_details 
+             SET status = 'rejected', 
+             rejectedBy = ?, 
+             rejectionReason = ?, 
+             rejectedAt = NOW() 
+             WHERE bankDetailID = ?`,
+            [adminUID, rejectionReason, bankDetailID]
+        );
+
+        await connection.commit();
         return { success: true, message: 'Bank details rejected successfully' };
     } catch (error) {
+        await connection.rollback();
         console.error('Reject bank details error:', error);
         return { success: false, message: 'Failed to reject bank details' };
+    } finally {
+        connection.release();
     }
 };
 

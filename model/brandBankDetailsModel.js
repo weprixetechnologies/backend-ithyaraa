@@ -112,14 +112,20 @@ const updateBankDetailsStatus = async (bankDetailID, updateData) => {
 };
 
 // Deactivate all active bank details for a brand (when approving a new one)
-const deactivateAllBankDetailsForBrand = async (brandID) => {
-    await db.query(
-        `UPDATE brand_bank_details 
-         SET status = 'rejected', 
-         rejectedAt = NOW() 
-         WHERE brandID = ? AND status = 'active'`,
-        [brandID]
-    );
+// Excludes the bankDetailID being approved to prevent it from being rejected
+const deactivateAllBankDetailsForBrand = async (brandID, excludeBankDetailID = null) => {
+    let query = `UPDATE brand_bank_details 
+                 SET status = 'rejected', 
+                 rejectedAt = NOW() 
+                 WHERE brandID = ? AND status = 'active'`;
+    let params = [brandID];
+    
+    if (excludeBankDetailID) {
+        query += ` AND bankDetailID != ?`;
+        params.push(excludeBankDetailID);
+    }
+    
+    await db.query(query, params);
 };
 
 // Update bank details
@@ -128,11 +134,20 @@ const updateBankDetails = async (bankDetailID, updateData) => {
     const values = [];
 
     Object.keys(updateData).forEach(key => {
-        if (updateData[key] !== undefined) {
+        if (updateData[key] !== undefined && key !== 'approvedAt' && key !== 'rejectedAt') {
             updates.push(`${key} = ?`);
             values.push(updateData[key]);
         }
     });
+
+    // Handle status-related timestamps
+    if (updateData.status === 'active' && updateData.approvedBy) {
+        updates.push(`approvedAt = NOW()`);
+    }
+    
+    if (updateData.status === 'rejected' && updateData.rejectedBy) {
+        updates.push(`rejectedAt = NOW()`);
+    }
 
     if (updates.length === 0) {
         throw new Error('No valid fields to update');

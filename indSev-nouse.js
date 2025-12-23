@@ -80,6 +80,6 @@ const sslOptions = {
 };
 
 // Start HTTPS server
-https.createServer(sslOptions, app).listen(process.env.PORT || 8800, () => {
-  console.log('✅ HTTPS Server running on port', process.env.PORT || 8800);
+https.createServer(sslOptions, app).listen(process.env.PORT || 800, () => {
+  console.log('✅ HTTPS Server running on port', process.env.PORT || 800);
 });

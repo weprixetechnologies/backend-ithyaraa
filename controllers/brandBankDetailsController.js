@@ -4,9 +4,13 @@ const brandBankDetailsService = require('../services/brandBankDetailsService');
 const addBankDetails = async (req, res) => {
     try {
         const {
-            brandID, accountHolderName, accountNumber, ifscCode,
+            accountHolderName, accountNumber, ifscCode,
             bankName, branchName, panNumber, gstin, address
         } = req.body;
+
+        const brandID = req.user.uid;
+        console.log(req.user.uid);
+        console.log(req.body);
 
         if (!brandID || !accountHolderName || !accountNumber || !ifscCode || !bankName) {
             return res.status(400).json({ success: false, message: 'Required fields are missing' });
@@ -51,6 +55,14 @@ const getBankDetailsByID = async (req, res) => {
 
         if (!result.success) {
             return res.status(404).json(result);
+        }
+
+        // Ensure brands can only access their own bank details
+        if (req.user && req.user.role === 'brand') {
+            const bankDetails = result.data;
+            if (!bankDetails || String(bankDetails.brandID) !== String(req.user.uid)) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
         }
 
         return res.status(200).json(result);
@@ -151,7 +163,64 @@ const rejectBankDetails = async (req, res) => {
 const updateBankDetails = async (req, res) => {
     try {
         const { bankDetailID } = req.params;
-        const updateData = req.body;
+        let updateData = req.body;
+
+        // If a brand is updating bank details, ensure:
+        // - They can only update their own record
+        // - The status is moved back to 'pending'
+        // - Only allowed fields are updated
+        if (req.user && req.user.role === 'brand') {
+            const existingResult = await brandBankDetailsService.getBankDetailsByID(bankDetailID);
+            if (!existingResult.success || !existingResult.data) {
+                return res.status(404).json({ success: false, message: 'Bank details not found' });
+            }
+
+            const existing = existingResult.data;
+            if (String(existing.brandID) !== String(req.user.uid)) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
+
+            const allowedFields = [
+                'accountHolderName',
+                'accountNumber',
+                'ifscCode',
+                'bankName',
+                'branchName',
+                'panNumber',
+                'gstin',
+                'address'
+            ];
+
+            const sanitizedUpdate = {};
+            allowedFields.forEach((field) => {
+                if (updateData[field] !== undefined) {
+                    sanitizedUpdate[field] = updateData[field];
+                }
+            });
+
+            // Move status back to pending on any brand-side update
+            sanitizedUpdate.status = 'pending';
+            sanitizedUpdate.submittedBy = req.user.uid;
+
+            updateData = sanitizedUpdate;
+        } else if (req.user && req.user.role === 'admin') {
+            // Admin can update status and all fields
+            // If status is being changed, set appropriate fields
+            if (updateData.status) {
+                const existingResult = await brandBankDetailsService.getBankDetailsByID(bankDetailID);
+                if (existingResult.success && existingResult.data) {
+                    const existing = existingResult.data;
+                    // If status changed to active, set approvedBy
+                    if (updateData.status === 'active' && existing.status !== 'active') {
+                        updateData.approvedBy = req.user.uid;
+                    }
+                    // If status changed to rejected, set rejectedBy
+                    if (updateData.status === 'rejected' && existing.status !== 'rejected') {
+                        updateData.rejectedBy = req.user.uid;
+                    }
+                }
+            }
+        }
 
         const result = await brandBankDetailsService.updateBankDetails(bankDetailID, updateData);
 

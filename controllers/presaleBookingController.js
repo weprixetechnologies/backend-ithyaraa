@@ -104,7 +104,7 @@ const placePrebookingOrderController = async (req, res) => {
 
         const merchantOrderId = randomUUID();
         // Normalize FRONTEND_URL - remove trailing slashes
-        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://build.ithyaraa.com').replace(/\/+$/, '');
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         const redirectUrl = `${frontendUrlBase}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
         // Use presale-specific webhook endpoint - ensure no trailing slashes
@@ -574,10 +574,10 @@ async function sendPreBookingOrderConfirmationEmail(user, booking, paymentMode, 
             total: booking.bookingData.summary.total,
             isCOD: paymentMode === 'COD',
             trackOrderUrl: (() => {
-                const baseUrl = (process.env.FRONTEND_URL || 'https://build.ithyaraa.com').replace(/\/+$/, '');
+                const baseUrl = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
                 return `${baseUrl}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
             })(),
-            websiteUrl: process.env.FRONTEND_URL || 'https://build.ithyaraa.com'
+            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
         };
 
         // Generate invoice PDF for attachment
