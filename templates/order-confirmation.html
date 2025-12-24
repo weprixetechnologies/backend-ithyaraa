@@ -9,6 +9,8 @@
     <!--[if mso]>
     <style type="text/css">
         body, table, td {font-family: Arial, sans-serif !important;}
+        .button-table {width: 100% !important;}
+        .button-cell {width: 50% !important; padding: 10px !important;}
     </style>
     <![endif]-->
 </head>
@@ -17,86 +19,105 @@
     style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
     <!-- Wrapper Table -->
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-        style="background-color: #f4f4f4;">
+        style="background-color: #f4f4f4; width: 100%;">
         <tr>
-            <td align="center" style="padding: 40px 20px;">
+            <td align="center" style="padding: 30px 15px;">
                 <!-- Main Container -->
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600"
-                    style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);">
+                    style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
 
                     <!-- Header Section -->
                     <tr>
                         <td
-                            style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+                            style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 50px 30px 40px; text-align: center;">
                             <h1
-                                style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">
+                                style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.2;">
                                 Ithyaraa</h1>
-                            <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 16px; opacity: 0.95;">Order
+                            <p
+                                style="margin: 12px 0 0 0; color: #ffffff; font-size: 17px; opacity: 0.98; letter-spacing: 0.2px;">
+                                Order
                                 Confirmation</p>
                         </td>
                     </tr>
 
                     <!-- Success Icon -->
                     <tr>
-                        <td style="padding: 30px 30px 20px; text-align: center;">
-                            <div
-                                style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
-                                <span style="font-size: 40px; color: #ffffff;">✓</span>
-                            </div>
+                        <td style="padding: 40px 30px 25px; text-align: center;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                                <tr>
+                                    <td
+                                        style="width: 90px; height: 90px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; text-align: center; vertical-align: middle;">
+                                        <span style="font-size: 45px; color: #ffffff; line-height: 90px;">✓</span>
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
 
                     <!-- Greeting -->
                     <tr>
-                        <td style="padding: 0 30px 30px; text-align: center;">
-                            <h2 style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 24px; font-weight: 600;">Thank
-                                You, {{customerName}}!</h2>
-                            <p style="margin: 0; color: #666666; font-size: 16px; line-height: 1.6;">We've received your
-                                order and it's being processed. You'll receive a confirmation email once your order
-                                ships.</p>
+                        <td style="padding: 0 30px 40px; text-align: center;">
+                            <h2
+                                style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 26px; font-weight: 600; line-height: 1.3;">
+                                Thank You, {{customerName}}!</h2>
+                            <p
+                                style="margin: 0; color: #666666; font-size: 16px; line-height: 1.7; max-width: 500px; margin-left: auto; margin-right: auto;">
+                                We've received your order and it's being processed. You'll receive a confirmation email
+                                once your order ships.</p>
                         </td>
                     </tr>
 
                     <!-- Order Info Card -->
                     <tr>
-                        <td style="padding: 0 30px 20px;">
+                        <td style="padding: 0 30px 30px;">
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-                                style="background-color: #f8f9fa; border-radius: 8px; overflow: hidden;">
+                                style="background-color: #f8f9fa; border-radius: 10px; overflow: hidden; border: 1px solid #e9ecef;">
                                 <tr>
                                     <td
-                                        style="padding: 20px; background-color: #ffffff; border-left: 4px solid #667eea;">
+                                        style="padding: 28px 24px; background-color: #ffffff; border-left: 5px solid #667eea;">
                                         <h3
-                                            style="margin: 0 0 15px 0; color: #1a1a1a; font-size: 18px; font-weight: 600;">
+                                            style="margin: 0 0 20px 0; color: #1a1a1a; font-size: 19px; font-weight: 600; letter-spacing: -0.2px;">
                                             Order Details</h3>
                                         <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                                             width="100%">
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;"><strong
-                                                        style="color: #1a1a1a;">Order ID:</strong></td>
                                                 <td
-                                                    style="padding: 8px 0; color: #1a1a1a; font-size: 14px; text-align: right; font-weight: 600;">
-                                                    {{orderID}}</td>
+                                                    style="padding: 10px 0; color: #666666; font-size: 14px; line-height: 1.5;">
+                                                    <strong style="color: #1a1a1a; font-weight: 600;">Order ID:</strong>
+                                                </td>
+                                                <td
+                                                    style="padding: 10px 0; color: #667eea; font-size: 16px; text-align: right; font-weight: 700; letter-spacing: 0.3px;">
+                                                    #{{orderID}}</td>
                                             </tr>
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;"><strong
-                                                        style="color: #1a1a1a;">Order Date:</strong></td>
                                                 <td
-                                                    style="padding: 8px 0; color: #1a1a1a; font-size: 14px; text-align: right;">
+                                                    style="padding: 10px 0; color: #666666; font-size: 14px; line-height: 1.5;">
+                                                    <strong style="color: #1a1a1a; font-weight: 600;">Order
+                                                        Date:</strong>
+                                                </td>
+                                                <td
+                                                    style="padding: 10px 0; color: #1a1a1a; font-size: 14px; text-align: right; font-weight: 500;">
                                                     {{orderDate}}</td>
                                             </tr>
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;"><strong
-                                                        style="color: #1a1a1a;">Payment Mode:</strong></td>
                                                 <td
-                                                    style="padding: 8px 0; color: #1a1a1a; font-size: 14px; text-align: right;">
+                                                    style="padding: 10px 0; color: #666666; font-size: 14px; line-height: 1.5;">
+                                                    <strong style="color: #1a1a1a; font-weight: 600;">Payment
+                                                        Mode:</strong>
+                                                </td>
+                                                <td
+                                                    style="padding: 10px 0; color: #1a1a1a; font-size: 14px; text-align: right; font-weight: 500;">
                                                     {{paymentMode}}</td>
                                             </tr>
                                             {{#if merchantOrderId}}
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;"><strong
-                                                        style="color: #1a1a1a;">Transaction ID:</strong></td>
                                                 <td
-                                                    style="padding: 8px 0; color: #1a1a1a; font-size: 14px; text-align: right; word-break: break-all;">
+                                                    style="padding: 10px 0; color: #666666; font-size: 14px; line-height: 1.5;">
+                                                    <strong style="color: #1a1a1a; font-weight: 600;">Transaction
+                                                        ID:</strong>
+                                                </td>
+                                                <td
+                                                    style="padding: 10px 0; color: #1a1a1a; font-size: 13px; text-align: right; font-weight: 500; word-break: break-all;">
                                                     {{merchantOrderId}}</td>
                                             </tr>
                                             {{/if}}
@@ -109,39 +130,51 @@
 
                     <!-- Items Section -->
                     <tr>
-                        <td style="padding: 0 30px 20px;">
-                            <h3 style="margin: 0 0 15px 0; color: #1a1a1a; font-size: 18px; font-weight: 600;">Items
-                                Ordered</h3>
+                        <td style="padding: 0 30px 30px;">
+                            <h3
+                                style="margin: 0 0 18px 0; color: #1a1a1a; font-size: 19px; font-weight: 600; letter-spacing: -0.2px;">
+                                Items Ordered</h3>
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-                                style="background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 8px; overflow: hidden;">
+                                style="background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 10px; overflow: hidden;">
                                 {{#each items}}
                                 <tr>
-                                    <td style="padding: 20px; border-bottom: 1px solid #f0f0f0;">
+                                    <td
+                                        style="padding: 24px 20px; border-bottom: 1px solid #f0f0f0; background-color: #fafafa;">
                                         <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                                             width="100%">
                                             <tr>
-                                                <td style="padding: 0;">
+                                                <td style="padding: 0; vertical-align: top;" width="100%">
                                                     <p
-                                                        style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 16px; font-weight: 600; line-height: 1.4;">
+                                                        style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 17px; font-weight: 600; line-height: 1.4;">
                                                         {{name}}</p>
                                                     {{#if variationName}}
-                                                    <p style="margin: 0 0 5px 0; color: #666666; font-size: 13px;">
-                                                        Variant: <span style="color: #1a1a1a;">{{variationName}}</span>
+                                                    <p
+                                                        style="margin: 0 0 8px 0; color: #666666; font-size: 13px; line-height: 1.5;">
+                                                        <span style="color: #888888;">Variant:</span> <span
+                                                            style="color: #1a1a1a; font-weight: 500;">{{variationName}}</span>
                                                     </p>
                                                     {{/if}}
-                                                    <p style="margin: 0; color: #666666; font-size: 13px;">Quantity:
-                                                        <span
-                                                            style="color: #1a1a1a; font-weight: 600;">{{quantity}}</span>
-                                                    </p>
+                                                    <table role="presentation" cellspacing="0" cellpadding="0"
+                                                        border="0">
+                                                        <tr>
+                                                            <td
+                                                                style="padding: 6px 12px; background-color: #e8f5e9; border-radius: 4px; display: inline-block;">
+                                                                <span
+                                                                    style="color: #2e7d32; font-size: 13px; font-weight: 600;">Qty:
+                                                                    {{quantity}}</span>
+                                                            </td>
+                                                        </tr>
+                                                    </table>
                                                     {{#if offerApplied}}
                                                     <p
-                                                        style="margin: 8px 0 0 0; color: #28a745; font-size: 12px; font-weight: 600;">
+                                                        style="margin: 10px 0 0 0; color: #28a745; font-size: 13px; font-weight: 600;">
                                                         ✓ Offer Applied</p>
                                                     {{/if}}
                                                 </td>
-                                                <td style="padding: 0; text-align: right; vertical-align: top;">
+                                                <td style="padding: 0 0 0 15px; text-align: right; vertical-align: top; white-space: nowrap;"
+                                                    width="1">
                                                     <p
-                                                        style="margin: 0; color: #1a1a1a; font-size: 18px; font-weight: 700;">
+                                                        style="margin: 0; color: #1a1a1a; font-size: 20px; font-weight: 700; line-height: 1.2;">
                                                         ₹{{lineTotalAfter}}</p>
                                                 </td>
                                             </tr>
@@ -155,39 +188,42 @@
 
                     <!-- Totals Section -->
                     <tr>
-                        <td style="padding: 0 30px 20px;">
+                        <td style="padding: 0 30px 30px;">
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-                                style="background-color: #f8f9fa; border-radius: 8px; overflow: hidden;">
+                                style="background-color: #f8f9fa; border-radius: 10px; overflow: hidden; border: 1px solid #e9ecef;">
                                 <tr>
-                                    <td style="padding: 20px;">
+                                    <td style="padding: 28px 24px;">
                                         <table role="presentation" cellspacing="0" cellpadding="0" border="0"
                                             width="100%">
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;">Subtotal:
-                                                </td>
                                                 <td
-                                                    style="padding: 8px 0; color: #1a1a1a; font-size: 14px; text-align: right; font-weight: 600;">
+                                                    style="padding: 10px 0; color: #666666; font-size: 15px; line-height: 1.6;">
+                                                    Subtotal:</td>
+                                                <td
+                                                    style="padding: 10px 0; color: #1a1a1a; font-size: 15px; text-align: right; font-weight: 600;">
                                                     ₹{{subtotal}}</td>
                                             </tr>
                                             {{#if totalDiscount}}
                                             <tr>
-                                                <td style="padding: 8px 0; color: #666666; font-size: 14px;">Discount:
-                                                </td>
                                                 <td
-                                                    style="padding: 8px 0; color: #28a745; font-size: 14px; text-align: right; font-weight: 600;">
+                                                    style="padding: 10px 0; color: #666666; font-size: 15px; line-height: 1.6;">
+                                                    Discount:</td>
+                                                <td
+                                                    style="padding: 10px 0; color: #28a745; font-size: 15px; text-align: right; font-weight: 600;">
                                                     -₹{{totalDiscount}}</td>
                                             </tr>
                                             {{/if}}
                                             <tr>
                                                 <td colspan="2"
-                                                    style="padding: 15px 0 0 0; border-top: 2px solid #667eea;"></td>
+                                                    style="padding: 20px 0 0 0; border-top: 2px solid #e0e0e0; height: 1px; line-height: 1px; font-size: 1px;">
+                                                    &nbsp;</td>
                                             </tr>
                                             <tr>
                                                 <td
-                                                    style="padding: 15px 0 0 0; color: #1a1a1a; font-size: 18px; font-weight: 700;">
+                                                    style="padding: 20px 0 0 0; color: #1a1a1a; font-size: 20px; font-weight: 700; line-height: 1.3;">
                                                     Total Amount:</td>
                                                 <td
-                                                    style="padding: 15px 0 0 0; color: #667eea; font-size: 22px; text-align: right; font-weight: 700;">
+                                                    style="padding: 20px 0 0 0; color: #667eea; font-size: 26px; text-align: right; font-weight: 700; letter-spacing: -0.3px;">
                                                     ₹{{total}}</td>
                                             </tr>
                                         </table>
@@ -199,27 +235,25 @@
 
                     <!-- Payment Info -->
                     <tr>
-                        <td style="padding: 0 30px 20px;">
+                        <td style="padding: 0 30px 25px;">
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-                                style="background-color: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px;">
+                                style="background-color: #e8f5e9; border-left: 5px solid #4caf50; border-radius: 6px;">
                                 <tr>
-                                    <td style="padding: 20px;">
+                                    <td style="padding: 22px 24px;">
                                         <h4
-                                            style="margin: 0 0 10px 0; color: #2e7d32; font-size: 16px; font-weight: 600;">
+                                            style="margin: 0 0 12px 0; color: #2e7d32; font-size: 17px; font-weight: 600; letter-spacing: -0.2px;">
                                             Payment Information</h4>
                                         {{#if isCOD}}
                                         <p
-                                            style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 14px; line-height: 1.6;">
-                                            <strong>Cash on Delivery (COD)</strong>
-                                        </p>
-                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.6;">Please
+                                            style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 15px; line-height: 1.7; font-weight: 600;">
+                                            Cash on Delivery (COD)</p>
+                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.7;">Please
                                             keep the exact amount ready for payment upon delivery.</p>
                                         {{else}}
                                         <p
-                                            style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 14px; line-height: 1.6;">
-                                            <strong>Prepaid Payment</strong>
-                                        </p>
-                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.6;">Your
+                                            style="margin: 0 0 10px 0; color: #1a1a1a; font-size: 15px; line-height: 1.7; font-weight: 600;">
+                                            Prepaid Payment</p>
+                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.7;">Your
                                             payment will be processed securely. You will receive a separate confirmation
                                             once payment is successful.</p>
                                         {{/if}}
@@ -231,15 +265,15 @@
 
                     <!-- Invoice Note -->
                     <tr>
-                        <td style="padding: 0 30px 20px;">
+                        <td style="padding: 0 30px 30px;">
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
-                                style="background-color: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px;">
+                                style="background-color: #e3f2fd; border-left: 5px solid #2196f3; border-radius: 6px;">
                                 <tr>
-                                    <td style="padding: 20px;">
+                                    <td style="padding: 22px 24px;">
                                         <h4
-                                            style="margin: 0 0 8px 0; color: #1976d2; font-size: 16px; font-weight: 600;">
+                                            style="margin: 0 0 10px 0; color: #1976d2; font-size: 17px; font-weight: 600; letter-spacing: -0.2px;">
                                             📄 Invoice Attached</h4>
-                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.6;">Your
+                                        <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.7;">Your
                                             detailed invoice is attached to this email for your records. The invoice
                                             includes itemized details, taxes, and payment information.</p>
                                     </td>
@@ -250,18 +284,19 @@
 
                     <!-- Action Buttons -->
                     <tr>
-                        <td style="padding: 0 30px 30px; text-align: center;">
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                        <td style="padding: 0 30px 35px; text-align: center;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"
+                                class="button-table" style="width: auto;">
                                 <tr>
-                                    <td style="padding: 0 10px;">
+                                    <td style="padding: 0 8px;" class="button-cell">
                                         <a href="{{trackOrderUrl}}"
-                                            style="display: inline-block; padding: 14px 28px; background-color: #667eea; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px;">Track
-                                            Your Order</a>
+                                            style="display: inline-block; padding: 16px 32px; background-color: #667eea; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px; line-height: 1.2; min-width: 160px; text-align: center;">
+                                            Track Your Order</a>
                                     </td>
-                                    <td style="padding: 0 10px;">
+                                    <td style="padding: 0 8px;" class="button-cell">
                                         <a href="{{websiteUrl}}"
-                                            style="display: inline-block; padding: 14px 28px; background-color: #ffffff; color: #667eea; text-decoration: none; border: 2px solid #667eea; border-radius: 6px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px;">Continue
-                                            Shopping</a>
+                                            style="display: inline-block; padding: 16px 32px; background-color: #ffffff; color: #667eea; text-decoration: none; border: 2px solid #667eea; border-radius: 6px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px; line-height: 1.2; min-width: 160px; text-align: center;">
+                                            Continue Shopping</a>
                                     </td>
                                 </tr>
                             </table>
@@ -271,12 +306,14 @@
                     <!-- Footer -->
                     <tr>
                         <td
-                            style="padding: 30px; background-color: #f8f9fa; border-top: 1px solid #e5e5e5; text-align: center;">
-                            <p style="margin: 0 0 10px 0; color: #666666; font-size: 14px; line-height: 1.6;">If you
-                                have any questions about your order, please contact our customer support.</p>
-                            <p style="margin: 0 0 15px 0; color: #666666; font-size: 14px; line-height: 1.6;">Thank you
-                                for choosing Ithyaraa!</p>
-                            <p style="margin: 0; color: #1a1a1a; font-size: 14px; font-weight: 600;">Ithyaraa Team</p>
+                            style="padding: 35px 30px; background-color: #f8f9fa; border-top: 1px solid #e5e5e5; text-align: center;">
+                            <p
+                                style="margin: 0 0 12px 0; color: #666666; font-size: 14px; line-height: 1.7; max-width: 500px; margin-left: auto; margin-right: auto;">
+                                If you have any questions about your order, please contact our customer support.</p>
+                            <p
+                                style="margin: 0 0 18px 0; color: #666666; font-size: 14px; line-height: 1.7; max-width: 500px; margin-left: auto; margin-right: auto;">
+                                Thank you for choosing Ithyaraa!</p>
+                            <p style="margin: 0; color: #1a1a1a; font-size: 15px; font-weight: 600;">Ithyaraa Team</p>
                         </td>
                     </tr>
 

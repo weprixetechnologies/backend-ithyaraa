@@ -36,6 +36,7 @@ const adminDashboardRouter = require('./router/adminDashboardRouter')
 const brandAdminRouter = require('./router/admin/brandAdminRouter')
 const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
 const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter')
+const adminBrandOrdersRouter = require('./router/admin/adminBrandOrdersRouter')
 const presaleProductRouter = require('./router/admin/presaleProductRouter')
 const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleBookingRouter = require('./router/admin/presaleBookingRouter')
@@ -72,6 +73,7 @@ app.use('/api/presale', presaleRouter)
 app.use('/api/admin', adminDashboardRouter);
 app.use('/api/admin', brandAdminRouter);
 app.use('/api/admin', brandBankDetailsAdminRouter);
+app.use('/api/admin', adminBrandOrdersRouter);
 app.use('/api/admin/flash-sales', flashSaleAdminRouter);
 app.use('/api/admin/coins', coinsAdminRouter);
 app.use('/api/admin/presale-products', presaleProductRouter);

@@ -7,13 +7,16 @@ const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 
 // PhonePe Hermes API URLs
+// Matching the payment API pattern:
+// - Production: uses /apis/hermes
+// - UAT: uses /apis/hermes (same as payment API)
 const phonePeBaseUrl = process.env.NODE_ENV === "production"
     ? "https://api.phonepe.com/apis/hermes"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox";
+    : "https://api-preprod.phonepe.com/apis/hermes";
 
 const phonePeStatusUrl = process.env.NODE_ENV === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/status"
-    : "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/status";
+    : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/status";
 
 const phonePeWebhookUrl = process.env.NODE_ENV === "production"
     ? "https://mercury-t2.phonepe.com/v3/transaction"
@@ -61,7 +64,12 @@ async function checkPaymentStatus(merchantID) {
         console.log(`[PhonePe Status Check] Checksum String: ${apiPath} + key`);
         console.log(`[PhonePe Status Check] URL: ${phonePeBaseUrl}${apiPath}`);
 
-        const response = await fetch(`${phonePeBaseUrl}${apiPath}`, {
+        const fullUrl = `${phonePeBaseUrl}${apiPath}`;
+        console.log(`[PhonePe Status Check] Full URL: ${fullUrl}`);
+        console.log(`[PhonePe Status Check] X-VERIFY header: ${xVerify}`);
+        console.log(`[PhonePe Status Check] X-MERCHANT-ID header: ${merchantId}`);
+
+        const response = await fetch(fullUrl, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -71,8 +79,22 @@ async function checkPaymentStatus(merchantID) {
             }
         });
 
+        console.log(`[PhonePe Status Check] Response status: ${response.status} ${response.statusText}`);
+        console.log(`[PhonePe Status Check] Response headers:`, JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
+
         const responseText = await response.text();
         console.log(`[PhonePe Status Check] Raw response text (length: ${responseText.length}):`, responseText.substring(0, 500));
+
+        // Handle 204 No Content - transaction may not exist
+        if (response.status === 204) {
+            console.warn(`[PhonePe Status Check] 204 No Content - Transaction may not exist or not found`);
+            return {
+                success: false,
+                error: 'Transaction not found or does not exist',
+                data: null,
+                httpStatus: 204
+            };
+        }
 
         if (!response.ok) {
             console.error(`[PhonePe Status Check] HTTP Error - Status: ${response.status}`);
@@ -93,22 +115,65 @@ async function checkPaymentStatus(merchantID) {
             throw new Error(errorMessage);
         }
 
-        // Check if response is empty
+        // Check if response is empty (but not 204, which we handled above)
         if (!responseText || responseText.trim().length === 0) {
-            throw new Error('Empty response from PhonePe API');
+            console.error(`[PhonePe Status Check] Empty response received. Status: ${response.status}`);
+            console.error(`[PhonePe Status Check] Response headers:`, JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
+            console.error(`[PhonePe Status Check] This could mean:`);
+            console.error(`[PhonePe Status Check] 1. Transaction not found`);
+            console.error(`[PhonePe Status Check] 2. Invalid merchant ID or transaction ID`);
+            console.error(`[PhonePe Status Check] 3. API endpoint or checksum format issue`);
+
+            // Return a structured error instead of throwing
+            return {
+                success: false,
+                error: `Empty response from PhonePe API (Status: ${response.status}). Transaction may not exist or API format may be incorrect.`,
+                data: null,
+                httpStatus: response.status
+            };
         }
 
-        // Try to parse JSON response
+        // PhonePe Hermes API response format (similar to payment API):
+        // { success: true, data: { response: "base64EncodedString" } }
+        // or { success: true, data: { ...direct data... } }
         let data;
         try {
-            data = JSON.parse(responseText);
+            const parsedResponse = JSON.parse(responseText);
+            console.log(`[PhonePe Status Check] Parsed response structure:`, JSON.stringify(parsedResponse, null, 2));
+
+            // Check if response has data.response (base64 encoded) - similar to payment API
+            if (parsedResponse.data && parsedResponse.data.response && typeof parsedResponse.data.response === 'string') {
+                console.log(`[PhonePe Status Check] Response appears to be base64 encoded in data.response, decoding...`);
+                const decodedResponse = Buffer.from(parsedResponse.data.response, 'base64').toString('utf-8');
+                console.log(`[PhonePe Status Check] Decoded response:`, decodedResponse.substring(0, 500));
+                try {
+                    data = JSON.parse(decodedResponse);
+                } catch (decodeError) {
+                    // If decoded string is not JSON, use it as is
+                    console.warn(`[PhonePe Status Check] Decoded response is not JSON, using as string`);
+                    data = { raw: decodedResponse, ...parsedResponse };
+                }
+            } else if (parsedResponse.response && typeof parsedResponse.response === 'string') {
+                // Alternative format: direct response field
+                console.log(`[PhonePe Status Check] Response appears to be base64 encoded in response field, decoding...`);
+                const decodedResponse = Buffer.from(parsedResponse.response, 'base64').toString('utf-8');
+                console.log(`[PhonePe Status Check] Decoded response:`, decodedResponse.substring(0, 500));
+                try {
+                    data = JSON.parse(decodedResponse);
+                } catch (decodeError) {
+                    data = { raw: decodedResponse, ...parsedResponse };
+                }
+            } else {
+                // Direct response format
+                data = parsedResponse;
+            }
         } catch (parseError) {
             console.error(`[PhonePe Status Check] JSON Parse Error:`, parseError.message);
             console.error(`[PhonePe Status Check] Response text that failed to parse:`, responseText);
             throw new Error(`Invalid JSON response from PhonePe: ${parseError.message}`);
         }
 
-        console.log(`[PhonePe Status Check] Success response:`, JSON.stringify(data, null, 2));
+        console.log(`[PhonePe Status Check] Final processed data:`, JSON.stringify(data, null, 2));
 
         return {
             success: true,
@@ -207,20 +272,20 @@ function processPaymentStatus(statusData) {
                 break;
             case 'PAYMENT_PENDING':
             case 'PENDING':
-            orderStatus = 'pending';
-            isSuccess = false;
-            statusMessage = 'Payment pending';
-            break;
-        case 'TRANSACTION_NOT_FOUND':
-            orderStatus = 'not_found';
-            isSuccess = false;
-            statusMessage = 'Transaction not found';
-            break;
-        case 'TIMED_OUT':
-            orderStatus = 'timeout';
-            isSuccess = false;
-            statusMessage = 'Payment timed out';
-            break;
+                orderStatus = 'pending';
+                isSuccess = false;
+                statusMessage = 'Payment pending';
+                break;
+            case 'TRANSACTION_NOT_FOUND':
+                orderStatus = 'not_found';
+                isSuccess = false;
+                statusMessage = 'Transaction not found';
+                break;
+            case 'TIMED_OUT':
+                orderStatus = 'timeout';
+                isSuccess = false;
+                statusMessage = 'Payment timed out';
+                break;
         }
     }
 

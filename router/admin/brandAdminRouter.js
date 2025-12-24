@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const brandController = require('../../controllers/brandController');
+const adminBrandOrdersController = require('../../controllers/adminBrandOrdersController');
 const authAdminMiddleware = require('../../middleware/authAdminMiddleware');
 
 // Get all brands
 router.get('/brands', authAdminMiddleware.verifyAccessToken, brandController.getAllBrands);
+
+// Search brands by name
+router.get('/brands/search/by-name', authAdminMiddleware.verifyAccessToken, adminBrandOrdersController.searchBrands);
 
 // Get brand review stats
 router.get('/brands/:brandID/reviews/stats', brandController.getBrandReviewStats);
