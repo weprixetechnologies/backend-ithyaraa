@@ -74,9 +74,17 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     const baseSubtotal = Math.max(0, Number(finalSummary.subtotal) || 0);
     const baseDiscount = Math.max(0, Number(finalSummary.totalDiscount) || 0);
     const baseShipping = Math.max(0, Number(finalSummary.shipping) || 0);
-    const originalTotal = Math.max(0, baseSubtotal - baseDiscount + baseShipping);
+    
+    // Add handling fee for COD orders (8 INR)
+    const HANDLING_FEE_RATE = 8.00;
+    const isCOD = paymentMode === 'COD' || paymentMode === 'cod';
+    const handlingFee = isCOD ? HANDLING_FEE_RATE : 0;
+    
+    const originalTotal = Math.max(0, baseSubtotal - baseDiscount + baseShipping + handlingFee);
     // Ensure summary reflects normalized total (original, not reduced by wallet)
     finalSummary.total = originalTotal;
+    finalSummary.handlingFee = handlingFee;
+    finalSummary.handFeeRate = isCOD ? HANDLING_FEE_RATE : 0;
     
     let paidWallet = 0;
     let isWalletUsed = false;
@@ -115,7 +123,9 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         items: cartData.items,
         summary: finalSummary,
         isWalletUsed: isWalletUsed ? 1 : 0,
-        paidWallet: paidWallet
+        paidWallet: paidWallet,
+        handlingFee: isCOD ? 1 : 0,
+        handFeeRate: isCOD ? HANDLING_FEE_RATE : 0
     });
 
     // Step 5: Increment coupon usage if coupon was applied
@@ -334,8 +344,8 @@ async function getOrderItemsByUid(uid) {
     return await orderModel.getOrderItemsByUid(uid);
 }
 
-async function getOrderSummaries(uid, page, limit, searchOrderID) {
-    return await orderModel.getOrderSummaries(uid, page, limit, searchOrderID);
+async function getOrderSummaries(uid, page, limit, searchOrderID, status, sortField, sortOrder) {
+    return await orderModel.getOrderSummaries(uid, page, limit, searchOrderID, status, sortField, sortOrder);
 }
 
 async function getOrderDetailsByOrderID(orderID, uid) {
@@ -346,6 +356,12 @@ async function getOrderDetailsByOrderID(orderID, uid) {
     // Ensure the order belongs to the requesting user
     if (orderDetail && orderDetail.uid !== uid) {
         return { items: [], orderDetail: null };
+    }
+
+    // Add handling fee fields to orderDetail if not present
+    if (orderDetail) {
+        orderDetail.handlingFee = orderDetail.handlingFee ? Boolean(Number(orderDetail.handlingFee)) : false;
+        orderDetail.handFeeRate = Number(orderDetail.handFeeRate) || 0;
     }
 
     return { items, orderDetail };
@@ -534,7 +550,9 @@ async function getOrderDetails(orderId, uid) {
             total: Number(order.total) || 0,
             deliveryAddress,
             couponCode: order.couponCode,
-            couponDiscount: Number(order.couponDiscount) || 0
+            couponDiscount: Number(order.couponDiscount) || 0,
+            handlingFee: order.handlingFee ? Boolean(Number(order.handlingFee)) : false,
+            handFeeRate: Number(order.handFeeRate) || 0
         };
     } catch (error) {
         console.error('Error in getOrderDetails service:', error);
@@ -945,7 +963,9 @@ async function getAdminOrderDetails(orderId) {
             total: parseFloat(order.total) || 0,
             deliveryAddress: deliveryAddress,
             couponCode: order.couponCode,
-            couponDiscount: parseFloat(order.couponDiscount) || 0
+            couponDiscount: parseFloat(order.couponDiscount) || 0,
+            handlingFee: order.handlingFee ? Boolean(Number(order.handlingFee)) : false,
+            handFeeRate: parseFloat(order.handFeeRate) || 0
         };
 
         return orderDetails;
@@ -1014,12 +1034,89 @@ async function emailInvoice(orderId) {
     }
 }
 
+// Email invoice to customer (user-facing endpoint)
+async function emailInvoiceToCustomer(orderId, uid) {
+    try {
+        // Get order details - verify ownership
+        const orderDetails = await getOrderDetails(orderId, uid);
+        if (!orderDetails) {
+            return { success: false, message: 'Order not found or you do not have permission to access this order' };
+        }
+
+        // Check if order has delivery address with email
+        if (!orderDetails.deliveryAddress || !orderDetails.deliveryAddress.emailID) {
+            return { success: false, message: 'Customer email not found' };
+        }
+
+        // Generate invoice data and PDF
+        const invoiceData = invoiceService.generateInvoiceData(orderDetails);
+        const pdfBuffer = await invoiceService.generateInvoicePDF(invoiceData);
+
+        // Convert Buffer to base64 for queue serialization
+        const base64Content = pdfBuffer.toString('base64');
+
+        // Get current timestamp for "Invoice Requested on" context
+        const requestedTimestamp = new Date().toLocaleString('en-IN', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        // Prepare email data for queue
+        const emailData = {
+            to: orderDetails.deliveryAddress.emailID,
+            templateName: 'invoice-request-email',
+            variables: {
+                customerName: orderDetails.deliveryAddress.emailID.split('@')[0], // Use email prefix as name
+                orderId: orderDetails.orderID,
+                invoiceNumber: invoiceData.invoiceNumber,
+                orderDate: new Date(orderDetails.createdAt).toLocaleDateString('en-IN', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                }),
+                totalAmount: orderDetails.total.toFixed(2),
+                paymentMode: orderDetails.paymentMode,
+                orderStatus: orderDetails.orderStatus,
+                requestedTimestamp: requestedTimestamp
+            },
+            subject: `Invoice Requested on ${requestedTimestamp} - Order #${orderDetails.orderID} - Ithyaraa`,
+            attachments: [
+                {
+                    filename: `invoice_${orderDetails.orderID}.pdf`,
+                    content: base64Content, // Store as base64 string for queue
+                    contentType: 'application/pdf',
+                    encoding: 'base64' // Flag to indicate this needs decoding
+                }
+            ]
+        };
+
+        // Add email job to queue
+        await addSendEmailJob(emailData);
+
+        return {
+            success: true,
+            message: 'Invoice email queued successfully',
+            email: orderDetails.deliveryAddress.emailID,
+            requestedTimestamp: requestedTimestamp
+        };
+    } catch (error) {
+        console.error('Error sending invoice email to customer:', error);
+        return { success: false, message: 'Failed to send invoice email: ' + error.message };
+    }
+}
+
 module.exports.getAdminOrderDetails = getAdminOrderDetails;
 module.exports.getAllOrders = getAllOrders;
 module.exports.updateOrderStatus = updateOrderStatus;
 module.exports.updatePaymentStatus = updatePaymentStatus;
 module.exports.generateInvoice = generateInvoice;
 module.exports.emailInvoice = emailInvoice;
+module.exports.emailInvoiceToCustomer = emailInvoiceToCustomer;
 
 // HELPER FUNCTIONS
 

@@ -205,6 +205,127 @@ const uploadVariations = async ({
     }
 };
 
+const updateVariation = async ({
+    variationName,
+    variationSlug,
+    variationID,
+    variationPrice,
+    variationStock,
+    variationValues,
+    productID,
+    variationSalePrice
+}) => {
+    const query = `
+        UPDATE variations SET
+            variationName = ?,
+            variationPrice = ?,
+            variationStock = ?,
+            variationValues = ?,
+            variationSalePrice = ?
+        WHERE variationID = ? AND productID = ?
+    `;
+
+    try {
+        const [result] = await db.query(query, [
+            variationName,
+            variationPrice,
+            variationStock,
+            JSON.stringify(variationValues),
+            variationSalePrice,
+            variationID,
+            productID
+        ]);
+
+        return {
+            success: true,
+            message: 'Variation updated successfully',
+            affectedRows: result.affectedRows
+        };
+
+    } catch (error) {
+        console.error('Error updating variation:', error);
+
+        return {
+            success: false,
+            message: 'Failed to update variation',
+            error: error.message
+        };
+    }
+};
+
+const getVariationsByProductID = async (productID) => {
+    try {
+        const [rows] = await db.query(
+            `SELECT * FROM variations WHERE productID = ?`,
+            [productID]
+        );
+        
+        // Parse variationValues JSON for each variation
+        return rows.map(v => {
+            try {
+                return {
+                    ...v,
+                    variationValues: typeof v.variationValues === 'string' 
+                        ? JSON.parse(v.variationValues) 
+                        : v.variationValues
+                };
+            } catch {
+                return {
+                    ...v,
+                    variationValues: v.variationValues
+                };
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching variations:', error);
+        throw error;
+    }
+};
+
+const getVariationBySlug = async (productID, variationSlug) => {
+    try {
+        const [rows] = await db.query(
+            `SELECT * FROM variations WHERE productID = ? AND variationSlug = ? LIMIT 1`,
+            [productID, variationSlug]
+        );
+        
+        if (rows.length === 0) return null;
+        
+        const variation = rows[0];
+        try {
+            variation.variationValues = typeof variation.variationValues === 'string' 
+                ? JSON.parse(variation.variationValues) 
+                : variation.variationValues;
+        } catch {
+            // Keep as is if parsing fails
+        }
+        
+        return variation;
+    } catch (error) {
+        console.error('Error fetching variation by slug:', error);
+        throw error;
+    }
+};
+
+const deleteVariationByID = async (variationID) => {
+    try {
+        const [result] = await db.query(
+            `DELETE FROM variations WHERE variationID = ?`,
+            [variationID]
+        );
+        return {
+            success: true,
+            affectedRows: result.affectedRows
+        };
+    } catch (error) {
+        console.error('Error deleting variation:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
 const checkIfVariationIDExists = async (variationID) => {
     const [rows] = await db.query(
         'SELECT variationID FROM variations WHERE variationID = ?',
@@ -293,4 +414,19 @@ const deleteProduct = async (productID) => {
 
 
 
-module.exports = { deleteVariationsByProductID, uploadVariations, uploadProduct, checkIfVariationIDExists, getFilteredProductQuery, getProductWithVariations, getProductByID, editProductModel, deleteAttributesByProductID, deleteProduct }
+module.exports = { 
+    deleteVariationsByProductID, 
+    uploadVariations, 
+    updateVariation,
+    getVariationsByProductID,
+    getVariationBySlug,
+    deleteVariationByID,
+    uploadProduct, 
+    checkIfVariationIDExists, 
+    getFilteredProductQuery, 
+    getProductWithVariations, 
+    getProductByID, 
+    editProductModel, 
+    deleteAttributesByProductID, 
+    deleteProduct 
+}

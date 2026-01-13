@@ -156,6 +156,25 @@ const uploadVariationMap = async ({ variations, productID }) => {
     }
 };
 
+// Helper function to normalize variation values for comparison
+const normalizeVariationValues = (variationValues) => {
+    if (!variationValues || !Array.isArray(variationValues)) return '';
+    // Sort and stringify for consistent comparison
+    const sorted = variationValues
+        .map(v => {
+            if (typeof v === 'object' && v !== null) {
+                const entries = Object.entries(v);
+                if (entries.length > 0) {
+                    return `${entries[0][0]}:${entries[0][1]}`;
+                }
+            }
+            return String(v);
+        })
+        .sort()
+        .join('|');
+    return sorted;
+};
+
 const editVariationMap = async ({ variations, productID }) => {
     if (!variations) {
         return {
@@ -165,32 +184,198 @@ const editVariationMap = async ({ variations, productID }) => {
     }
 
     try {
-        await model.deleteVariationsByProductID(productID); // Overwrite logic
+        // Get existing variations for this product
+        const existingVariations = await model.getVariationsByProductID(productID);
 
-        const results = [];
+        // Create maps for matching: by slug and by variationID (if provided)
+        const existingVariationsBySlug = new Map();
+        const existingVariationsByID = new Map();
+        const existingVariationsByValues = new Map(); // Fallback: match by values
+
+        existingVariations.forEach(v => {
+            if (v.variationSlug) {
+                existingVariationsBySlug.set(v.variationSlug.toLowerCase().trim(), v);
+            }
+            if (v.variationID) {
+                existingVariationsByID.set(v.variationID, v);
+            }
+            // Create a normalized key from variationValues for fallback matching
+            const normalizedValues = normalizeVariationValues(v.variationValues);
+            if (normalizedValues) {
+                existingVariationsByValues.set(normalizedValues, v);
+            }
+        });
 
         const variationsArray = Array.isArray(variations) ? variations : [variations];
+        const processedSlugs = new Set();
+        const processedIDs = new Set();
+        const results = [];
 
+        // Process each variation from the request
+        // This handles mixed scenarios:
+        // - Old variations (with variationID/variationSlug) → matched and updated (preserves ID)
+        // - New variations (without matching ID/slug) → created with new ID
+        // - Variations not in request → deleted
         for (const variation of variationsArray) {
-            const variationID = await generateUniqueVariationID();
+            let existingVariation = null;
+            let matchMethod = null;
 
-            const payload = {
-                ...variation,
-                productID,
-                variationID
-            };
-
-            const result = await model.uploadVariations(payload);
-
-            if (!result.success) {
-                return {
-                    success: false,
-                    message: 'One or more variations failed to upload',
-                    error: result.error
-                };
+            // Priority 1: Match by variationID if provided (most reliable)
+            // Handles: Old variations sent with their variationID
+            if (variation.variationID) {
+                existingVariation = existingVariationsByID.get(variation.variationID);
+                if (existingVariation) {
+                    matchMethod = 'variationID';
+                    processedIDs.add(variation.variationID);
+                }
             }
 
-            results.push(result);
+            // Priority 2: Match by variationSlug
+            // Handles: Old variations sent with variationSlug (even if variationID missing)
+            // Also handles: New variations that accidentally have same slug as existing
+            if (!existingVariation && variation.variationSlug) {
+                const normalizedSlug = variation.variationSlug.toLowerCase().trim();
+                existingVariation = existingVariationsBySlug.get(normalizedSlug);
+                if (existingVariation) {
+                    matchMethod = 'variationSlug';
+                    processedSlugs.add(normalizedSlug);
+                    // Also track the ID if it exists
+                    if (existingVariation.variationID) {
+                        processedIDs.add(existingVariation.variationID);
+                    }
+                }
+            }
+
+            // Priority 3: Fallback - match by variationValues content
+            // Handles: Variations where slug/ID don't match but values are the same
+            if (!existingVariation && variation.variationValues) {
+                const normalizedValues = normalizeVariationValues(variation.variationValues);
+                if (normalizedValues) {
+                    existingVariation = existingVariationsByValues.get(normalizedValues);
+                    if (existingVariation) {
+                        matchMethod = 'variationValues';
+                        if (existingVariation.variationSlug) {
+                            processedSlugs.add(existingVariation.variationSlug.toLowerCase().trim());
+                        }
+                        if (existingVariation.variationID) {
+                            processedIDs.add(existingVariation.variationID);
+                        }
+                    }
+                }
+            }
+
+            if (existingVariation) {
+                // Update existing variation - keep the same variationID and variationSlug
+                const updatePayload = {
+                    variationName: variation.variationName !== undefined ? variation.variationName : existingVariation.variationName,
+                    variationSlug: existingVariation.variationSlug || variation.variationSlug, // Preserve original slug
+                    variationID: existingVariation.variationID, // Always keep original ID
+                    variationPrice: variation.variationPrice !== undefined && variation.variationPrice !== '' ? variation.variationPrice : existingVariation.variationPrice,
+                    variationStock: variation.variationStock !== undefined && variation.variationStock !== '' ? variation.variationStock : existingVariation.variationStock,
+                    variationValues: variation.variationValues || existingVariation.variationValues,
+                    productID: productID,
+                    variationSalePrice: variation.variationSalePrice !== undefined && variation.variationSalePrice !== '' ? variation.variationSalePrice : existingVariation.variationSalePrice
+                };
+
+                const result = await model.updateVariation(updatePayload);
+
+                if (!result.success) {
+                    console.error('Failed to update variation:', updatePayload.variationSlug || updatePayload.variationID, result.error);
+                    return {
+                        success: false,
+                        message: `Failed to update variation: ${updatePayload.variationSlug || updatePayload.variationID}`,
+                        error: result.error
+                    };
+                }
+
+                results.push({
+                    action: 'updated',
+                    matchMethod,
+                    variationSlug: updatePayload.variationSlug,
+                    variationID: updatePayload.variationID,
+                    ...result
+                });
+            } else {
+                // Create new variation with new variationID
+                // If variationID was provided but didn't match any existing variation,
+                // generate a new unique ID to avoid conflicts
+                const variationID = await generateUniqueVariationID();
+
+                // Generate slug if not provided
+                let variationSlug = variation.variationSlug;
+                if (!variationSlug && variation.variationValues) {
+                    const values = Array.isArray(variation.variationValues)
+                        ? variation.variationValues.map(v => {
+                            if (typeof v === 'object' && v !== null) {
+                                const entries = Object.entries(v);
+                                return entries.length > 0 ? entries[0][1] : '';
+                            }
+                            return String(v);
+                        })
+                        : [];
+                    variationSlug = values.join('_').toLowerCase();
+                }
+
+                // Ensure variationSlug is unique for this product
+                // If slug already exists (shouldn't happen if matching worked correctly), append a suffix
+                if (variationSlug && existingVariationsBySlug.has(variationSlug.toLowerCase().trim())) {
+                    console.warn(`Variation slug ${variationSlug} already exists, but wasn't matched. This shouldn't happen.`);
+                    // Still create it, but log a warning - the matching logic should have caught this
+                }
+
+                const createPayload = {
+                    variationName: variation.variationName || variationSlug,
+                    variationSlug: variationSlug,
+                    variationID: variationID,
+                    variationPrice: variation.variationPrice || 0,
+                    variationStock: variation.variationStock || 0,
+                    variationValues: variation.variationValues || [],
+                    productID: productID,
+                    variationSalePrice: variation.variationSalePrice || null
+                };
+
+                const result = await model.uploadVariations(createPayload);
+
+                if (!result.success) {
+                    console.error('Failed to create variation:', createPayload.variationSlug, result.error);
+                    return {
+                        success: false,
+                        message: `Failed to create variation: ${createPayload.variationSlug}`,
+                        error: result.error
+                    };
+                }
+
+                // Track the new variation's slug and ID so it won't be deleted
+                if (createPayload.variationSlug) {
+                    processedSlugs.add(createPayload.variationSlug.toLowerCase().trim());
+                }
+                processedIDs.add(createPayload.variationID);
+
+                results.push({
+                    action: 'created',
+                    variationSlug: createPayload.variationSlug,
+                    variationID: createPayload.variationID,
+                    ...result
+                });
+            }
+        }
+
+        // Delete variations that are no longer in the new list
+        const variationsToDelete = existingVariations.filter(v => {
+            const hasSlug = v.variationSlug && processedSlugs.has(v.variationSlug.toLowerCase().trim());
+            const hasID = v.variationID && processedIDs.has(v.variationID);
+            return !hasSlug && !hasID;
+        });
+
+        for (const variationToDelete of variationsToDelete) {
+            const deleteResult = await model.deleteVariationByID(variationToDelete.variationID);
+            if (deleteResult.success) {
+                results.push({
+                    action: 'deleted',
+                    variationSlug: variationToDelete.variationSlug,
+                    variationID: variationToDelete.variationID
+                });
+            }
         }
 
         return {
@@ -667,7 +852,7 @@ async function getShopProductsPublic(query) {
     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     // Base query
-    let baseQuery = `SELECT productID, name, description, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
+    let baseQuery = `SELECT productID, name, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
@@ -677,6 +862,20 @@ async function getShopProductsPublic(query) {
 
     const offset = (page - 1) * limit;
     const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+
+    // Parse JSON fields
+    rows.forEach(row => {
+        try {
+            if (row.featuredImage && typeof row.featuredImage === 'string') {
+                row.featuredImage = JSON.parse(row.featuredImage);
+            }
+            if (row.categories && typeof row.categories === 'string') {
+                row.categories = JSON.parse(row.categories);
+            }
+        } catch (e) {
+            console.error('Error parsing JSON fields for product:', row.productID, e);
+        }
+    });
     const [countRows] = await db.query(countQuery, values);
     const total = countRows?.[0]?.total || 0;
 

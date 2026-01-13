@@ -15,8 +15,8 @@ async function createOrder(orderData) {
         const paymentStatus = (pm === 'PREPAID') ? 'pending' : 'successful'; // FULL_COIN and COD = successful
 
         const [detailResult] = await connection.query(
-            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy, isWalletUsed, paidWallet) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderData.uid,
                 orderData.summary.subtotal,
@@ -33,7 +33,9 @@ async function createOrder(orderData) {
                 orderData.couponDiscount || 0.00,
                 orderReferBy || null,
                 orderData.isWalletUsed || 0,
-                orderData.paidWallet || 0.00
+                orderData.paidWallet || 0.00,
+                orderData.handlingFee || 0,
+                orderData.handFeeRate || 0.00
             ]
         );
         const orderID = detailResult.insertId;
@@ -343,17 +345,54 @@ async function getOrderItemsByUid(uid) {
 module.exports.getOrderItemsByUid = getOrderItemsByUid;
 
 // Get order summaries (lightweight) for listing with pagination
-async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null) {
+async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null, status = null, sortField = null, sortOrder = null) {
     const connection = await db.getConnection();
     try {
         const offset = (page - 1) * limit;
         const params = [uid];
         let whereClause = 'WHERE od.uid = ?';
 
-        // Add search filter if order ID is provided
+        // Add orderID filter with LIKE for partial match (if provided)
         if (searchOrderID) {
-            whereClause += ' AND od.orderID = ?';
-            params.push(searchOrderID);
+            // Convert to string and use LIKE for partial matching
+            // Escape special LIKE characters (% and _) for safety
+            const escapedOrderID = String(searchOrderID).replace(/[%_]/g, '\\$&');
+            whereClause += ' AND od.orderID LIKE ?';
+            params.push(`%${escapedOrderID}%`);
+        }
+
+        // Add status filter with exact match (if provided)
+        // Validate against allowed enum values
+        const allowedStatuses = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled', 'returned'];
+        if (status && allowedStatuses.includes(String(status).toLowerCase())) {
+            whereClause += ' AND od.orderStatus = ?';
+            params.push(String(status).toLowerCase());
+        }
+
+        // Whitelist of safe sort fields (only fields that exist in orderDetail table)
+        const allowedSortFields = ['orderID', 'total', 'paymentMode', 'paymentStatus', 'orderStatus', 'createdAt'];
+        const defaultSortField = 'createdAt';
+        const defaultSortOrder = 'DESC';
+
+        // Validate and sanitize sortField
+        let safeSortField = defaultSortField;
+        if (sortField && allowedSortFields.includes(String(sortField))) {
+            safeSortField = String(sortField);
+        }
+
+        // Validate and sanitize sortOrder
+        let safeSortOrder = defaultSortOrder;
+        if (sortOrder && (String(sortOrder).toUpperCase() === 'ASC' || String(sortOrder).toUpperCase() === 'DESC')) {
+            safeSortOrder = String(sortOrder).toUpperCase();
+        }
+
+        // Build ORDER BY clause - use column alias for createdAt
+        let orderByClause;
+        if (safeSortField === 'createdAt') {
+            orderByClause = `ORDER BY od.createdAt ${safeSortOrder}`;
+        } else {
+            // For other fields, use direct column reference
+            orderByClause = `ORDER BY od.${safeSortField} ${safeSortOrder}`;
         }
 
         // Get paginated results with total count
@@ -370,12 +409,12 @@ async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null
              LEFT JOIN order_items oi ON od.orderID = oi.orderID
              ${whereClause}
              GROUP BY od.orderID
-             ORDER BY od.createdAt DESC
+             ${orderByClause}
              LIMIT ? OFFSET ?`,
             [...params, limit, offset]
         );
 
-        // Get total count for pagination
+        // Get total count for pagination (without GROUP BY for count query)
         const [countRows] = await connection.query(
             `SELECT COUNT(DISTINCT od.orderID) as total
              FROM orderDetail od

@@ -404,8 +404,11 @@ const getOrderSummariesController = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const searchOrderID = req.query.orderID || null;
+        const status = req.query.status || null;
+        const sortField = req.query.sortField || null;
+        const sortOrder = req.query.sortOrder || null;
 
-        const result = await orderService.getOrderSummaries(uid, page, limit, searchOrderID);
+        const result = await orderService.getOrderSummaries(uid, page, limit, searchOrderID, status, sortField, sortOrder);
         return res.status(200).json({ success: true, ...result });
     } catch (error) {
         console.error('Get order summaries error:', error);
@@ -770,6 +773,33 @@ const updateOrderItemsTrackingController = async (req, res) => {
     }
 };
 
+// Email invoice to customer (user-facing)
+const emailInvoiceToCustomerController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const uid = req.user.uid; // Get user ID from JWT
+
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: 'orderId is required' });
+        }
+
+        const result = await orderService.emailInvoiceToCustomer(orderId, uid);
+        if (!result || !result.success) {
+            return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: result.message,
+            email: result.email,
+            requestedTimestamp: result.requestedTimestamp
+        });
+    } catch (error) {
+        console.error('Email invoice to customer error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports.updateOrderController = updateOrderController;
 module.exports.getOrderDetailsController = getOrderDetailsController;
 module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
@@ -779,6 +809,7 @@ module.exports.updatePaymentStatusController = updatePaymentStatusController;
 module.exports.generateInvoiceController = generateInvoiceController;
 module.exports.generateInvoiceForUserController = generateInvoiceForUserController;
 module.exports.emailInvoiceController = emailInvoiceController;
+module.exports.emailInvoiceToCustomerController = emailInvoiceToCustomerController;
 module.exports.updateOrderItemsTrackingController = updateOrderItemsTrackingController;
 module.exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
 module.exports.sendSellerNotificationEmails = sendSellerNotificationEmails;

@@ -9,9 +9,10 @@ router.post('/place-order', userAuth.verifyAccessToken, orderController.placeOrd
 router.get('/get-order-items', userAuth.verifyAccessToken, orderController.getOrderItemsByUidController);
 router.get('/get-order-summaries', userAuth.verifyAccessToken, orderController.getOrderSummariesController);
 router.get('/order-details/:orderID', userAuth.verifyAccessToken, orderController.getOrderDetailsByOrderIDController);
-router.get('/order-details/:orderId', userAuth.verifyAccessToken, orderController.getOrderDetailsController);
+// router.get('/order-details/:orderId', userAuth.verifyAccessToken, orderController.getOrderDetailsController);
 router.put('/update/:orderID', userAuth.verifyAccessToken, orderController.updateOrderController);
 router.get('/generate-invoice/:orderId', userAuth.verifyAccessToken, orderController.generateInvoiceForUserController);
+router.post('/email-invoice/:orderId', userAuth.verifyAccessToken, orderController.emailInvoiceToCustomerController);
 
 // Admin routes
 router.get('/admin/all', userAuth.verifyAccessToken, orderController.getAllOrdersController);
