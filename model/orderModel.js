@@ -363,7 +363,7 @@ async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null
 
         // Add status filter with exact match (if provided)
         // Validate against allowed enum values
-        const allowedStatuses = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled', 'returned'];
+        const allowedStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
         if (status && allowedStatuses.includes(String(status).toLowerCase())) {
             whereClause += ' AND od.orderStatus = ?';
             params.push(String(status).toLowerCase());
