@@ -408,7 +408,29 @@ const getOrderSummariesController = async (req, res) => {
         const sortField = req.query.sortField || null;
         const sortOrder = req.query.sortOrder || null;
 
+        // Log request filters
+        console.log('[GET /api/order/get-order-summaries] Request filters:', {
+            uid,
+            page,
+            limit,
+            orderID: searchOrderID,
+            status,
+            sortField,
+            sortOrder
+        });
+
         const result = await orderService.getOrderSummaries(uid, page, limit, searchOrderID, status, sortField, sortOrder);
+        
+        // Log response count
+        const responseCount = result.data ? result.data.length : 0;
+        console.log('[GET /api/order/get-order-summaries] Response:', {
+            ordersReturned: responseCount,
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            hasMore: result.hasMore
+        });
+
         return res.status(200).json({ success: true, ...result });
     } catch (error) {
         console.error('Get order summaries error:', error);
