@@ -21,7 +21,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     }
 
     // Filter to only include selected items for checkout
-    const selectedItems = cartData.items.filter(item => 
+    const selectedItems = cartData.items.filter(item =>
         item.selected === true || item.selected === 1 || item.selected === null
     );
 
@@ -74,18 +74,18 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     const baseSubtotal = Math.max(0, Number(finalSummary.subtotal) || 0);
     const baseDiscount = Math.max(0, Number(finalSummary.totalDiscount) || 0);
     const baseShipping = Math.max(0, Number(finalSummary.shipping) || 0);
-    
+
     // Add handling fee for COD orders (8 INR)
     const HANDLING_FEE_RATE = 8.00;
     const isCOD = paymentMode === 'COD' || paymentMode === 'cod';
     const handlingFee = isCOD ? HANDLING_FEE_RATE : 0;
-    
+
     const originalTotal = Math.max(0, baseSubtotal - baseDiscount + baseShipping + handlingFee);
     // Ensure summary reflects normalized total (original, not reduced by wallet)
     finalSummary.total = originalTotal;
     finalSummary.handlingFee = handlingFee;
     finalSummary.handFeeRate = isCOD ? HANDLING_FEE_RATE : 0;
-    
+
     let paidWallet = 0;
     let isWalletUsed = false;
     try {
@@ -463,7 +463,7 @@ async function getOrderDetails(orderId, uid) {
                 } else if (comboItem.brand) {
                     comboBrandName = comboItem.brand;
                 }
-                
+
                 return {
                     ...comboItem,
                     featuredImage: safeParse(comboItem.featuredImage, []),
@@ -483,7 +483,7 @@ async function getOrderDetails(orderId, uid) {
             } : null;
 
             // Determine brand name: use brandName from users table, fallback to productBrand, or "Inhouse" if brandID is null
-            const brandName = item.brandID 
+            const brandName = item.brandID
                 ? (item.brandName || item.productBrand || 'Unknown Brand')
                 : 'Inhouse';
 
@@ -869,7 +869,7 @@ async function getAdminOrderDetails(orderId) {
                 } else if (comboItem.brand) {
                     comboBrandName = comboItem.brand;
                 }
-                
+
                 return {
                     ...comboItem,
                     featuredImage: safeParse(comboItem.featuredImage, []),
@@ -883,7 +883,7 @@ async function getAdminOrderDetails(orderId) {
             const lineTotalAfter = parseFloat(item.lineTotalAfter) || 0;
 
             // Determine brand name: use brandName from users table, fallback to productBrand, or "Inhouse" if brandID is null
-            const brandName = item.brandID 
+            const brandName = item.brandID
                 ? (item.brandName || item.productBrand || 'Unknown Brand')
                 : 'Inhouse';
 

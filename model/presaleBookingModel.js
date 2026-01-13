@@ -187,7 +187,7 @@ async function updatePresaleBookingPaymentStatus(preBookingID, paymentStatus, tx
                 `SELECT txnID FROM presale_booking_details WHERE preBookingID = ?`,
                 [preBookingID]
             );
-            
+
             // Only update if txnID is null or empty
             if (!current || !current[0] || !current[0].txnID) {
                 updateFields.push('txnID = ?');

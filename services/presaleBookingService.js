@@ -202,7 +202,7 @@ async function placePresaleBookingOrder(uid, addressID, productID, paymentMode =
 async function getPresaleBookingDetails(preBookingID, uid) {
     try {
         const booking = await presaleBookingModel.getPresaleBookingByID(preBookingID);
-        
+
         if (!booking) {
             return null;
         }
@@ -214,7 +214,7 @@ async function getPresaleBookingDetails(preBookingID, uid) {
 
         // Get booking items
         const items = await presaleBookingModel.getPresaleBookingItems(preBookingID);
-        
+
         // Calculate quantity from subtotal and unit price (quantity is not stored in DB)
         // For presale bookings, we can calculate it from: quantity = subtotal / unitPrice
         let bookingQuantity = 1;
@@ -241,7 +241,7 @@ async function getPresaleBookingDetails(preBookingID, uid) {
         // Process items to match order items format
         const processedItems = items.map(item => {
             const featuredImage = safeParse(item.featuredImage, []);
-            
+
             // Build shipping address string
             const addressParts = [];
             if (booking.addressLine1) addressParts.push(booking.addressLine1);
@@ -250,11 +250,11 @@ async function getPresaleBookingDetails(preBookingID, uid) {
             if (booking.state) addressParts.push(booking.state);
             if (booking.pincode) addressParts.push(booking.pincode);
             const shippingAddress = addressParts.join(', ');
-            
+
             // Calculate line totals based on booking quantity
             const unitSalePrice = parseFloat(item.unitSalePrice || item.salePrice || 0);
             const unitRegularPrice = parseFloat(item.unitPrice || item.regularPrice || 0);
-            
+
             return {
                 orderID: booking.preBookingID,
                 productID: item.productID,
@@ -291,7 +291,7 @@ async function getPresaleBookingDetails(preBookingID, uid) {
         // If payment failed, coinsEarned should be 0
         const paymentFailed = booking.paymentStatus === 'failed';
         const coinsEarned = paymentFailed ? 0 : parseInt(booking.coinsEarned || 0);
-        
+
         const orderDetail = {
             orderID: booking.preBookingID,
             preBookingID: booking.preBookingID,
@@ -496,14 +496,14 @@ async function getAllPresaleBookings(filters = {}) {
 async function getAdminPresaleBookingDetails(preBookingID) {
     try {
         const booking = await presaleBookingModel.getPresaleBookingByID(preBookingID);
-        
+
         if (!booking) {
             return null;
         }
 
         // Get booking items
         const items = await presaleBookingModel.getPresaleBookingItems(preBookingID);
-        
+
         // Get user details
         const [users] = await db.query(
             `SELECT username, emailID, phonenumber FROM users WHERE uid = ?`,
@@ -536,10 +536,10 @@ async function getAdminPresaleBookingDetails(preBookingID) {
         // Process items
         const processedItems = items.map(item => {
             const featuredImage = safeParse(item.featuredImage, []);
-            
+
             const unitSalePrice = parseFloat(item.unitSalePrice || item.salePrice || 0);
             const unitRegularPrice = parseFloat(item.unitPrice || item.regularPrice || 0);
-            
+
             return {
                 productID: item.productID,
                 quantity: bookingQuantity,
@@ -628,7 +628,7 @@ async function updatePresaleBookingStatus(preBookingID, orderStatus) {
                 const coinModel = require('../model/coinModel');
                 const statusLower = orderStatus.toLowerCase();
                 const oldStatusLower = oldStatus.toLowerCase();
-                
+
                 if (statusLower === 'delivered' && oldStatusLower !== 'delivered') {
                     // Complete pending coins (award them) when order is delivered
                     await coinModel.completePendingCoins(uid, preBookingID, 'presale');
