@@ -41,6 +41,7 @@ const presaleProductRouter = require('./router/admin/presaleProductRouter')
 const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleBookingRouter = require('./router/admin/presaleBookingRouter')
 const presaleRouter = require('./router/presaleRouter')
+const homepageSectionsRouter = require('./router/homepageSectionsRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
@@ -68,6 +69,7 @@ app.use('/api/phonepe', phonepeRouter)
 app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
+app.use('/api/homepage-sections', homepageSectionsRouter)
 
 // ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
 app.use('/api/admin', adminDashboardRouter);
