@@ -42,6 +42,9 @@ const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleBookingRouter = require('./router/admin/presaleBookingRouter')
 const presaleRouter = require('./router/presaleRouter')
 const homepageSectionsRouter = require('./router/homepageSectionsRouter')
+const newsletterRouter = require('./router/newsletterRouter')
+const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
+const newsletterController = require('./controllers/newsletterController')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
@@ -70,6 +73,9 @@ app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
 app.use('/api/homepage-sections', homepageSectionsRouter)
+app.use('/api/newsletter', newsletterRouter)
+// Alias for public newsletters feed: GET /api/newsletters
+app.get('/api/newsletters', newsletterController.listNewsletters)
 
 // ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
 app.use('/api/admin', adminDashboardRouter);
@@ -81,6 +87,7 @@ app.use('/api/admin/coins', coinsAdminRouter);
 app.use('/api/admin/presale-products', presaleProductRouter);
 app.use('/api/admin/presale-groups', presaleDetailsRouter);
 app.use('/api/admin/presale-bookings', presaleBookingRouter);
+app.use('/api/admin', newsletterAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 
 // BRAND AUTH ROUTE

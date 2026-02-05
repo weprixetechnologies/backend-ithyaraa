@@ -228,6 +228,13 @@ async function creditUserBalance(uid, amount) {
     );
 }
 
+async function setNewsletterJoinedByEmail(email, joined) {
+    await db.execute(
+        `UPDATE users SET newsletter_joined = ? WHERE emailID = ?`,
+        [joined ? 1 : 0, email]
+    );
+}
+
 // Increment pendingPayment balance for affiliate earnings
 async function incrementPendingPayment(uid, amount) {
     await db.execute(
@@ -251,5 +258,6 @@ module.exports = {
     setPhoneVerified,
     findUserByEmail, findUserByPhone,
     getOtpRecord, getUserByIdentifier, creditUserBalance, updateUserByUID, incrementPendingPayment,
+    setNewsletterJoinedByEmail,
     deleteUserByUID
 };
