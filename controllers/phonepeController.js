@@ -123,15 +123,35 @@ const handleOrderWebhookController = async (req, res) => {
 
         console.log('[WEBHOOK] PhonePe webhook received:', JSON.stringify(webhookData, null, 2));
 
-        // Extract merchantID from webhook data (could be nested)
-        // PhonePe webhook structure: { data: { merchantID: "...", ... } } or direct
-        const merchantID = webhookData?.merchantID
-            || webhookData?.data?.merchantID
-            || webhookData?.response?.merchantID
-            || webhookData?.transaction?.merchantID;
+        // Hermes PG webhook format:
+        //   { "response": "<base64_encoded_json>" }
+        // where decoded JSON matches the status API format.
+        // If "response" exists, decode and use that as the primary data source.
+        let decodedData = webhookData;
+        if (webhookData && typeof webhookData.response === 'string') {
+            try {
+                const decodedString = Buffer.from(webhookData.response, 'base64').toString('utf8');
+                decodedData = JSON.parse(decodedString);
+                console.log('[WEBHOOK] Decoded PhonePe response:', decodedString.substring(0, 500));
+            } catch (decodeError) {
+                console.error('[WEBHOOK] Failed to decode base64 response field:', decodeError);
+                // Fall back to original webhookData structure
+                decodedData = webhookData;
+            }
+        }
+
+        // Extract merchant transaction ID from decoded data (Hermes status format)
+        // Normal flow: decodedData.data.merchantTransactionId
+        const merchantID =
+            decodedData?.merchantTransactionId ||
+            decodedData?.data?.merchantTransactionId ||
+            decodedData?.merchantID ||
+            decodedData?.data?.merchantID ||
+            decodedData?.response?.merchantID ||
+            decodedData?.transaction?.merchantID;
 
         // Extract status data (could be nested)
-        const statusData = webhookData?.data || webhookData?.response || webhookData;
+        const statusData = decodedData?.data || decodedData?.response || decodedData;
 
         // Process the webhook data to get standardized status
         const processedStatus = phonepeService.processPaymentStatus(statusData);
@@ -291,14 +311,32 @@ const handlePresaleWebhookController = async (req, res) => {
 
         console.log('[WEBHOOK-PRESALE] PhonePe webhook received:', JSON.stringify(webhookData, null, 2));
 
-        // Extract merchantID from webhook data (could be nested)
-        const merchantID = webhookData?.merchantID
-            || webhookData?.data?.merchantID
-            || webhookData?.response?.merchantID
-            || webhookData?.transaction?.merchantID;
+        // Hermes PG webhook format:
+        //   { "response": "<base64_encoded_json>" }
+        // Decode "response" if present to get the actual status data.
+        let decodedData = webhookData;
+        if (webhookData && typeof webhookData.response === 'string') {
+            try {
+                const decodedString = Buffer.from(webhookData.response, 'base64').toString('utf8');
+                decodedData = JSON.parse(decodedString);
+                console.log('[WEBHOOK-PRESALE] Decoded PhonePe response:', decodedString.substring(0, 500));
+            } catch (decodeError) {
+                console.error('[WEBHOOK-PRESALE] Failed to decode base64 response field:', decodeError);
+                decodedData = webhookData;
+            }
+        }
+
+        // Extract merchantID from decoded webhook data (Hermes status format)
+        const merchantID =
+            decodedData?.merchantTransactionId ||
+            decodedData?.data?.merchantTransactionId ||
+            decodedData?.merchantID ||
+            decodedData?.data?.merchantID ||
+            decodedData?.response?.merchantID ||
+            decodedData?.transaction?.merchantID;
 
         // Extract status data (could be nested)
-        const statusData = webhookData?.data || webhookData?.response || webhookData;
+        const statusData = decodedData?.data || decodedData?.response || decodedData;
 
         // Process the webhook data to get standardized status
         const processedStatus = phonepeService.processPaymentStatus(statusData);
