@@ -387,7 +387,7 @@ const deletePresaleProduct = async (presaleProductID) => {
         // First, delete all variations associated with this presale product
         // Note: presaleProductID is used as productID in the variations table
         await db.query(
-            'DELETE FROM variations WHERE productID = ? COLLATE utf8mb4_unicode_ci',
+            'DELETE FROM variations WHERE productID = ?',
             [presaleProductID]
         );
 
@@ -417,10 +417,9 @@ const bulkDeletePresaleProducts = async (presaleProductIDs) => {
         }
 
         // Delete all variations associated with these presale products
-        // Apply COLLATE to the column name, not after IN clause
         const placeholders = presaleProductIDs.map(() => '?').join(',');
         await db.query(
-            `DELETE FROM variations WHERE productID COLLATE utf8mb4_unicode_ci IN (${placeholders})`,
+            `DELETE FROM variations WHERE productID IN (${placeholders})`,
             presaleProductIDs
         );
 

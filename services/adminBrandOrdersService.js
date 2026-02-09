@@ -13,8 +13,9 @@ async function searchBrands(searchText) {
 
         const brands = await adminBrandOrdersModel.searchBrands(searchText.trim());
 
-        // Format response
+        // Format response (uid for consistency with getAllBrands)
         return brands.map(brand => ({
+            uid: brand.uid,
             brandID: brand.uid,
             name: brand.name || brand.username || 'N/A',
             username: brand.username,

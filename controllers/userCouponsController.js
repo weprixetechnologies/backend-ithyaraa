@@ -16,11 +16,20 @@ async function applyCoupon(req, res) {
             finalCartID = cart.cartID;
         }
 
-        const result = await cartService.applyCouponToCart(couponCode, finalCartID);
+        const result = await cartService.applyCouponToCart(couponCode, finalCartID, uid);
 
         res.json({ success: true, ...result });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        // Coupon validation failures (invalid/expired, ineligible cart) are client/business errors, not server errors
+        const status = err.message && (
+            err.message.includes('Invalid or expired') ||
+            err.message.includes('No eligible products') ||
+            err.message.includes('Cart not found or empty') ||
+            err.message.includes('No items selected') ||
+            err.message.includes('Minimum order value') ||
+            err.message.includes('maximum number of times')
+        ) ? 400 : 500;
+        res.status(status).json({ success: false, message: err.message });
     }
 }
 

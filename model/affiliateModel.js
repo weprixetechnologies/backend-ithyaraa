@@ -1,6 +1,14 @@
 const db = require('./../utils/dbconnect')
 const { randomUUID } = require('crypto');
 
+// Affiliate transaction status enums (manual variants: mPending, mCompleted, etc.; frontend strips "m" for display)
+const AFFILIATE_TXN_STATUS = ['pending', 'confirmed', 'completed', 'failed', 'rejected', 'returned', 'mPending', 'mConfirmed', 'mCompleted', 'mFailed', 'mRejected', 'mReturned'];
+const AFFILIATE_TXN_STATUS_SQL_IN_COMPLETED = "(status IN ('completed','mCompleted'))";
+const AFFILIATE_TXN_STATUS_SQL_IN_PENDING = "(status IN ('pending','mPending'))";
+const AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED = "(status IN ('confirmed','mConfirmed'))";
+const AFFILIATE_TXN_STATUS_SQL_NOT_RETURNED = "(status NOT IN ('returned','mReturned'))";
+const AFFILIATE_TXN_STATUS_SQL_IN_PENDING_OR_COMPLETED = "(status IN ('pending','mPending','completed','mCompleted'))";
+
 const updateAffiliateStatus = async (emailID, uid) => {
     const query = `
         UPDATE users 
@@ -20,37 +28,43 @@ const approveAffiliateByUID = async (uid) => {
     return result;
 };
 
+const rejectAffiliateByUID = async (uid) => {
+    const query = `
+        UPDATE users 
+        SET affiliate = NULL
+        WHERE uid = ?
+    `;
+    const [result] = await db.execute(query, [uid]);
+    return result;
+};
+
 // Create a new record in affiliateTransactions table
-const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amount, type, bankAccountID = null }) => {
+const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amount, type, bankAccountID = null, orderID = null }) => {
     // Ensure txnID is present
     txnID = txnID || randomUUID();
 
-    // Check if bankAccountID column exists by trying to describe the table
     let query, params;
     try {
-        // Try to check if column exists
-        const [columns] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'bankAccountID'`);
-        if (columns.length > 0) {
-            // Column exists, use it
-            query = `
-                INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, bankAccountID)
-                VALUES (?, ?, ?, ?, ?, ?)
-            `;
+        const [colBank] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'bankAccountID'`);
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        const hasBank = colBank.length > 0;
+        const hasOrder = colOrder.length > 0;
+
+        if (hasOrder && hasBank) {
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, bankAccountID, orderID) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+            params = [txnID, uid, status, amount, type, bankAccountID, orderID];
+        } else if (hasOrder) {
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, orderID) VALUES (?, ?, ?, ?, ?, ?)`;
+            params = [txnID, uid, status, amount, type, orderID];
+        } else if (hasBank) {
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, bankAccountID) VALUES (?, ?, ?, ?, ?, ?)`;
             params = [txnID, uid, status, amount, type, bankAccountID];
         } else {
-            // Column doesn't exist yet, don't include it
-            query = `
-                INSERT INTO affiliateTransactions (txnID, uid, status, amount, type)
-                VALUES (?, ?, ?, ?, ?)
-            `;
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type) VALUES (?, ?, ?, ?, ?)`;
             params = [txnID, uid, status, amount, type];
         }
     } catch (error) {
-        // If check fails, use the safe version without bankAccountID
-        query = `
-            INSERT INTO affiliateTransactions (txnID, uid, status, amount, type)
-            VALUES (?, ?, ?, ?, ?)
-        `;
+        query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type) VALUES (?, ?, ?, ?, ?)`;
         params = [txnID, uid, status, amount, type];
     }
 
@@ -58,8 +72,111 @@ const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amou
     return result;
 };
 
+// Admin: Update affiliate transaction status (allowed values: all AFFILIATE_TXN_STATUS including m.*)
+const updateAffiliateTransactionStatus = async (txnID, newStatus) => {
+    if (!AFFILIATE_TXN_STATUS.includes(newStatus)) {
+        throw new Error(`Invalid status. Allowed: ${AFFILIATE_TXN_STATUS.join(', ')}`);
+    }
+    const [result] = await db.execute(
+        'UPDATE affiliateTransactions SET status = ?, updatedOn = NOW() WHERE txnID = ?',
+        [newStatus, txnID]
+    );
+    return result;
+};
+
+// Admin: Create manual affiliate transaction (deduction or increase) and adjust user pendingPayment
+const createManualAffiliateTransaction = async ({ uid, amount, type, comment }) => {
+    if (!uid || amount == null || Number(amount) <= 0) {
+        throw new Error('uid and positive amount are required');
+    }
+    if (!['incoming', 'outgoing'].includes(type)) {
+        throw new Error('type must be incoming or outgoing');
+    }
+    const txnID = randomUUID();
+    const amt = Number(amount);
+    const status = 'mCompleted';
+
+    if (type === 'outgoing') {
+        const [rows] = await db.execute(
+            'SELECT COALESCE(pendingPayment, 0) as pendingPayment FROM users WHERE uid = ?',
+            [uid]
+        );
+        if (!rows.length) throw new Error('User not found');
+        if (rows[0].pendingPayment < amt) {
+            throw new Error('Insufficient pending balance for deduction');
+        }
+    }
+
+    const [colComment] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'comment'`);
+    const hasComment = colComment.length > 0;
+    const commentVal = comment || (type === 'incoming' ? 'Manual credit by admin' : 'Manual deduction by admin');
+
+    if (hasComment) {
+        await db.execute(
+            `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, comment, updatedOn) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [txnID, uid, status, amt, type, commentVal]
+        );
+    } else {
+        await db.execute(
+            `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, updatedOn) VALUES (?, ?, ?, ?, ?, NOW())`,
+            [txnID, uid, status, amt, type]
+        );
+    }
+
+    if (type === 'incoming') {
+        await db.execute(
+            'UPDATE users SET pendingPayment = COALESCE(pendingPayment, 0) + ? WHERE uid = ?',
+            [amt, uid]
+        );
+    } else {
+        await db.execute(
+            'UPDATE users SET pendingPayment = GREATEST(0, COALESCE(pendingPayment, 0) - ?) WHERE uid = ?',
+            [amt, uid]
+        );
+    }
+
+    return { txnID, amount: amt, type, status };
+};
+
+// Admin: List users who are affiliates (pending or approved)
+async function getAffiliateList({ search, status, page = 1, limit = 10 } = {}) {
+    const where = ["(affiliate = 'pending' OR affiliate = 'approved')"];
+    const params = [];
+
+    if (status && status !== 'all') {
+        where.push('affiliate = ?');
+        params.push(status === 'pending' ? 'pending' : 'approved');
+    }
+    if (search) {
+        where.push('(username LIKE ? OR emailID LIKE ? OR phonenumber LIKE ? OR uid LIKE ?)');
+        const term = `%${search}%`;
+        params.push(term, term, term, term);
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const offset = (Math.max(1, Number(page)) - 1) * Math.max(1, Number(limit));
+    const limitNum = Math.max(1, Number(limit));
+
+    const listQuery = `
+        SELECT uid, username as name, emailID, phonenumber, affiliate as affiliateStatus, createdOn, lastLogin, balance
+        FROM users
+        ${whereClause}
+        ORDER BY createdOn DESC
+        LIMIT ? OFFSET ?
+    `;
+    const countQuery = `SELECT COUNT(*) as total FROM users ${whereClause}`;
+
+    const [rows] = await db.execute(listQuery, [...params, limitNum, offset]);
+    const [countRows] = await db.execute(countQuery, params);
+    const total = countRows && countRows[0] ? countRows[0].total : 0;
+
+    return { data: rows, page: Number(page) || 1, limit: limitNum, total };
+}
+
 module.exports = {
-    updateAffiliateStatus, approveAffiliateByUID, createAffiliateTransaction
+    updateAffiliateStatus, approveAffiliateByUID, rejectAffiliateByUID, createAffiliateTransaction, getAffiliateList,
+    updateAffiliateTransactionStatus, createManualAffiliateTransaction,
+    AFFILIATE_TXN_STATUS
 };
 
 // Fetch affiliate transactions for a user with optional filters and pagination
@@ -612,27 +729,44 @@ async function getAffiliateAnalytics(uid) {
         [uid]
     );
 
-    // Get total earnings from affiliateTransactions table where type = 'incoming'
+    // Total earnings: incoming, exclude returned (include m.* for manual-override rows)
     const [earningsResult] = await db.execute(
         `SELECT SUM(amount) AS totalEarnings 
          FROM affiliateTransactions 
-         WHERE uid = ? AND type = 'incoming'`,
+         WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_NOT_RETURNED}`,
         [uid]
     );
 
-    // Get pending earnings from affiliateTransactions table where type = 'incoming' and status = 'pending'
+    // Pending earnings: incoming, status = pending (order placed, not yet delivered)
     const [pendingEarningsResult] = await db.execute(
         `SELECT SUM(amount) AS totalPendingEarnings 
          FROM affiliateTransactions 
-         WHERE uid = ? AND type = 'incoming' AND status = 'pending'`,
+         WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_PENDING}`,
         [uid]
     );
+
+    // Locked amount: confirmed and still within return period (lockedUntil > now)
+    let lockedEarnings = 0;
+    try {
+        const [colLocked] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'lockedUntil'`);
+        if (colLocked.length > 0) {
+            const now = new Date();
+            const [lockedResult] = await db.execute(
+                `SELECT COALESCE(SUM(amount), 0) AS lockedEarnings 
+                 FROM affiliateTransactions 
+                 WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED} AND lockedUntil > ?`,
+                [uid, now]
+            );
+            lockedEarnings = lockedResult[0].lockedEarnings || 0;
+        }
+    } catch (e) { /* column may not exist */ }
 
     return {
         totalClicks: clicksResult[0].totalClicks || 0,
         totalOrders: ordersResult[0].totalOrders || 0,
         totalEarnings: earningsResult[0].totalEarnings || 0,
-        totalPendingEarnings: pendingEarningsResult[0].totalPendingEarnings || 0
+        totalPendingEarnings: pendingEarningsResult[0].totalPendingEarnings || 0,
+        lockedEarnings
     };
 }
 
@@ -665,7 +799,7 @@ const getRequestedPayoutAmount = async (uid) => {
         const query = `
             SELECT SUM(amount) as totalRequested
             FROM affiliateTransactions
-            WHERE uid = ? AND type = 'outgoing' AND status IN ('pending', 'completed')
+            WHERE uid = ? AND type = 'outgoing' AND ${AFFILIATE_TXN_STATUS_SQL_IN_PENDING_OR_COMPLETED}
         `;
 
         const [rows] = await db.execute(query, [uid]);
@@ -678,52 +812,80 @@ const getRequestedPayoutAmount = async (uid) => {
 
 const getPendingPayoutAvailable = async (uid) => {
     try {
-        // Get total earnings (all incoming transactions)
+        // Total earnings: incoming only, exclude returned (include m.*)
         const [totalEarningsResult] = await db.execute(
             `SELECT SUM(amount) as totalEarnings 
              FROM affiliateTransactions 
-             WHERE uid = ? AND type = 'incoming'`,
+             WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_NOT_RETURNED}`,
             [uid]
         );
 
-        // Get total paid (completed outgoing transactions)
+        // Total paid (completed outgoing)
         const [totalPaidResult] = await db.execute(
             `SELECT SUM(amount) as totalPaid 
              FROM affiliateTransactions 
-             WHERE uid = ? AND type = 'outgoing' AND status = 'completed'`,
+             WHERE uid = ? AND type = 'outgoing' AND ${AFFILIATE_TXN_STATUS_SQL_IN_COMPLETED}`,
             [uid]
         );
 
-        // Get requested payout (pending outgoing transactions)
+        // Requested payout (pending outgoing)
         const [requestedPayoutResult] = await db.execute(
             `SELECT SUM(amount) as requestedPayout 
              FROM affiliateTransactions 
-             WHERE uid = ? AND type = 'outgoing' AND status = 'pending'`,
+             WHERE uid = ? AND type = 'outgoing' AND ${AFFILIATE_TXN_STATUS_SQL_IN_PENDING}`,
             [uid]
         );
 
-        // Get completed incoming transactions (available for payout)
-        const [completedIncomingResult] = await db.execute(
-            `SELECT SUM(amount) as totalCompletedIncoming 
-             FROM affiliateTransactions 
-             WHERE uid = ? AND type = 'incoming' AND status = 'completed'`,
-            [uid]
-        );
+        // Available for payout: completed OR (confirmed and lockedUntil passed)
+        let availableIncomingResult;
+        let lockedAmountResult;
+        try {
+            const [colLocked] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'lockedUntil'`);
+            if (colLocked.length > 0) {
+                const now = new Date();
+                [availableIncomingResult] = await db.execute(
+                    `SELECT SUM(amount) as totalAvailable 
+                     FROM affiliateTransactions 
+                     WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_NOT_RETURNED}
+                     AND (${AFFILIATE_TXN_STATUS_SQL_IN_COMPLETED} OR (${AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED} AND (lockedUntil IS NULL OR lockedUntil <= ?)))`,
+                    [uid, now]
+                );
+                [lockedAmountResult] = await db.execute(
+                    `SELECT COALESCE(SUM(amount), 0) as lockedAmount 
+                     FROM affiliateTransactions 
+                     WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED} AND lockedUntil > ?`,
+                    [uid, now]
+                );
+            } else {
+                [availableIncomingResult] = await db.execute(
+                    `SELECT SUM(amount) as totalAvailable FROM affiliateTransactions 
+                     WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_COMPLETED}`,
+                    [uid]
+                );
+                lockedAmountResult = [{ lockedAmount: 0 }];
+            }
+        } catch (e) {
+            [availableIncomingResult] = await db.execute(
+                `SELECT SUM(amount) as totalAvailable FROM affiliateTransactions 
+                 WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_COMPLETED}`,
+                [uid]
+            );
+            lockedAmountResult = [{ lockedAmount: 0 }];
+        }
 
         const totalEarnings = totalEarningsResult[0].totalEarnings || 0;
         const totalPaid = totalPaidResult[0].totalPaid || 0;
         const requestedPayout = requestedPayoutResult[0].requestedPayout || 0;
-        const totalCompletedIncoming = completedIncomingResult[0].totalCompletedIncoming || 0;
-
-        // Available Payout = Completed Incoming Transactions (as per user requirement)
-        const pendingPayoutAvailable = totalCompletedIncoming;
+        const totalAvailableIncoming = availableIncomingResult[0].totalAvailable || 0;
+        const lockedAmount = (lockedAmountResult && lockedAmountResult[0]) ? (lockedAmountResult[0].lockedAmount || 0) : 0;
 
         return {
             totalEarnings,
             totalPaid,
             requestedPayout,
-            totalCompletedIncoming,
-            pendingPayoutAvailable: Math.max(0, pendingPayoutAvailable) // Ensure non-negative
+            totalCompletedIncoming: totalAvailableIncoming, // kept for backward compat
+            pendingPayoutAvailable: Math.max(0, totalAvailableIncoming),
+            lockedAmount: Math.max(0, lockedAmount)
         };
     } catch (error) {
         console.error('Error calculating pending payout available:', error);
@@ -740,6 +902,48 @@ const getRequestablePayouts = async (uid) => {
         };
     } catch (error) {
         console.error('Error fetching requestable payouts:', error);
+        throw error;
+    }
+};
+
+// Get locked affiliate amounts with unlock dates (for "Know more" on payout page)
+const getLockedAffiliateBreakdown = async (uid) => {
+    try {
+        const [colLocked] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'lockedUntil'`);
+        if (colLocked.length === 0) return { lockedAmount: 0, items: [] };
+        const now = new Date();
+        let rows = [];
+        try {
+            const [r] = await db.execute(
+                `SELECT amount, lockedUntil, orderID 
+                 FROM affiliateTransactions 
+                 WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED} AND lockedUntil > ?
+                 ORDER BY lockedUntil ASC`,
+                [uid, now]
+            );
+            rows = r;
+        } catch (e) {
+            if (e.message && e.message.includes('orderID')) {
+                const [r] = await db.execute(
+                    `SELECT amount, lockedUntil FROM affiliateTransactions 
+                     WHERE uid = ? AND type = 'incoming' AND ${AFFILIATE_TXN_STATUS_SQL_IN_CONFIRMED} AND lockedUntil > ?
+                     ORDER BY lockedUntil ASC`,
+                    [uid, now]
+                );
+                rows = r.map((x) => ({ ...x, orderID: null }));
+            } else throw e;
+        }
+        const total = rows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        return {
+            lockedAmount: total,
+            items: rows.map((r) => ({
+                amount: Number(r.amount || 0),
+                unlockedAt: r.lockedUntil,
+                orderID: r.orderID || null
+            }))
+        };
+    } catch (error) {
+        console.error('Error fetching locked affiliate breakdown:', error);
         throw error;
     }
 };
@@ -864,10 +1068,167 @@ const rejectPayout = async (txnID) => {
     }
 };
 
+// Confirm refer settlement on delivery: set status=confirmed, comment, lockedUntil (7-day return period)
+const confirmReferSettlementOnDelivery = async (orderID, deliveredAt = new Date()) => {
+    try {
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length === 0) return { updated: 0 };
+        const lockedUntil = new Date(deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const comment = 'Locked until return period';
+        const [result] = await db.execute(
+            `UPDATE affiliateTransactions SET status = 'confirmed', comment = ?, lockedUntil = ?, updatedOn = NOW()
+             WHERE orderID = ? AND type = 'incoming' AND status = 'pending'`,
+            [comment, lockedUntil, orderID]
+        );
+        return { updated: result.affectedRows || 0 };
+    } catch (error) {
+        console.error('Error confirming refer settlement on delivery:', error);
+        throw error;
+    }
+};
+
+// Revert refer settlement on return: set status=returned and deduct from user's pendingPayment
+const revertReferSettlementOnReturn = async (orderID) => {
+    try {
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length === 0) return { reverted: 0 };
+        const [rows] = await db.execute(
+            `SELECT txnID, uid, amount FROM affiliateTransactions
+             WHERE orderID = ? AND type = 'incoming' AND status IN ('pending', 'confirmed')`,
+            [orderID]
+        );
+        if (!rows || rows.length === 0) return { reverted: 0 };
+        for (const row of rows) {
+            await db.execute(
+                `UPDATE affiliateTransactions SET status = 'returned', updatedOn = NOW() WHERE txnID = ?`,
+                [row.txnID]
+            );
+            await db.execute(
+                'UPDATE users SET pendingPayment = GREATEST(0, COALESCE(pendingPayment, 0) - ?) WHERE uid = ?',
+                [row.amount, row.uid]
+            );
+        }
+        return { reverted: rows.length };
+    } catch (error) {
+        console.error('Error reverting refer settlement on return:', error);
+        throw error;
+    }
+};
+
+// Revert pending refer settlement when order cancelled before delivery (no delivery happened)
+const revertPendingReferSettlementOnCancel = async (orderID) => {
+    try {
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length === 0) return { reverted: 0 };
+        const [rows] = await db.execute(
+            `SELECT txnID, uid, amount FROM affiliateTransactions
+             WHERE orderID = ? AND type = 'incoming' AND status = 'pending'`,
+            [orderID]
+        );
+        if (!rows || rows.length === 0) return { reverted: 0 };
+        for (const row of rows) {
+            await db.execute(
+                `UPDATE affiliateTransactions SET status = 'returned', updatedOn = NOW() WHERE txnID = ?`,
+                [row.txnID]
+            );
+            await db.execute(
+                'UPDATE users SET pendingPayment = GREATEST(0, COALESCE(pendingPayment, 0) - ?) WHERE uid = ?',
+                [row.amount, row.uid]
+            );
+        }
+        return { reverted: rows.length };
+    } catch (error) {
+        console.error('Error reverting pending refer settlement on cancel:', error);
+        throw error;
+    }
+};
+
+// Re-apply refer settlement when order status is changed back from Returned/Cancelled to Delivered
+const reapplyReferSettlementOnDelivery = async (orderID, deliveredAt = new Date()) => {
+    try {
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length === 0) return { updated: 0 };
+        const [rows] = await db.execute(
+            `SELECT txnID, uid, amount FROM affiliateTransactions
+             WHERE orderID = ? AND type = 'incoming' AND status = 'returned'`,
+            [orderID]
+        );
+        if (!rows || rows.length === 0) return { updated: 0 };
+        const lockedUntil = new Date(deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const comment = 'Locked until return period';
+        const [colComment] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'comment'`);
+        const hasComment = colComment.length > 0;
+        for (const row of rows) {
+            if (hasComment) {
+                await db.execute(
+                    `UPDATE affiliateTransactions SET status = 'confirmed', comment = ?, lockedUntil = ?, updatedOn = NOW() WHERE txnID = ?`,
+                    [comment, lockedUntil, row.txnID]
+                );
+            } else {
+                await db.execute(
+                    `UPDATE affiliateTransactions SET status = 'confirmed', lockedUntil = ?, updatedOn = NOW() WHERE txnID = ?`,
+                    [lockedUntil, row.txnID]
+                );
+            }
+            await db.execute(
+                'UPDATE users SET pendingPayment = COALESCE(pendingPayment, 0) + ? WHERE uid = ?',
+                [row.amount, row.uid]
+            );
+        }
+        return { updated: rows.length };
+    } catch (error) {
+        console.error('Error re-applying refer settlement on delivery:', error);
+        throw error;
+    }
+};
+
+// Re-apply refer settlement to pending when order status is changed back from Returned/Cancelled to non-Delivered (e.g. Preparing, Shipped)
+const reapplyReferSettlementToPending = async (orderID) => {
+    try {
+        const [colOrder] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length === 0) return { updated: 0 };
+        const [rows] = await db.execute(
+            `SELECT txnID, uid, amount FROM affiliateTransactions
+             WHERE orderID = ? AND type = 'incoming' AND status = 'returned'`,
+            [orderID]
+        );
+        if (!rows || rows.length === 0) return { updated: 0 };
+        const [colComment] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'comment'`);
+        const hasComment = colComment.length > 0;
+        for (const row of rows) {
+            if (hasComment) {
+                await db.execute(
+                    `UPDATE affiliateTransactions SET status = 'pending', comment = NULL, lockedUntil = NULL, updatedOn = NOW() WHERE txnID = ?`,
+                    [row.txnID]
+                );
+            } else {
+                await db.execute(
+                    `UPDATE affiliateTransactions SET status = 'pending', lockedUntil = NULL, updatedOn = NOW() WHERE txnID = ?`,
+                    [row.txnID]
+                );
+            }
+            await db.execute(
+                'UPDATE users SET pendingPayment = COALESCE(pendingPayment, 0) + ? WHERE uid = ?',
+                [row.amount, row.uid]
+            );
+        }
+        return { updated: rows.length };
+    } catch (error) {
+        console.error('Error re-applying refer settlement to pending:', error);
+        throw error;
+    }
+};
+
 module.exports.getPayoutHistory = getPayoutHistory;
 module.exports.getRequestedPayoutAmount = getRequestedPayoutAmount;
 module.exports.getPendingPayoutAvailable = getPendingPayoutAvailable;
 module.exports.getRequestablePayouts = getRequestablePayouts;
+module.exports.getLockedAffiliateBreakdown = getLockedAffiliateBreakdown;
 module.exports.getPayoutRequests = getPayoutRequests;
 module.exports.approvePayout = approvePayout;
 module.exports.rejectPayout = rejectPayout;
+module.exports.confirmReferSettlementOnDelivery = confirmReferSettlementOnDelivery;
+module.exports.revertReferSettlementOnReturn = revertReferSettlementOnReturn;
+module.exports.revertPendingReferSettlementOnCancel = revertPendingReferSettlementOnCancel;
+module.exports.reapplyReferSettlementOnDelivery = reapplyReferSettlementOnDelivery;
+module.exports.reapplyReferSettlementToPending = reapplyReferSettlementToPending;

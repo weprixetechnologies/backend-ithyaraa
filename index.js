@@ -36,6 +36,8 @@ const adminDashboardRouter = require('./router/adminDashboardRouter')
 const brandAdminRouter = require('./router/admin/brandAdminRouter')
 const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
 const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter')
+const notificationAdminRouter = require('./router/admin/notificationAdminRouter')
+const notificationBrandRouter = require('./router/brand/notificationBrandRouter')
 const adminBrandOrdersRouter = require('./router/admin/adminBrandOrdersRouter')
 const presaleProductRouter = require('./router/admin/presaleProductRouter')
 const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
@@ -45,10 +47,32 @@ const homepageSectionsRouter = require('./router/homepageSectionsRouter')
 const newsletterRouter = require('./router/newsletterRouter')
 const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
 const newsletterController = require('./controllers/newsletterController')
+const sizeChartRouter = require('./router/sizeChartRouter')
+const faqAdminRouter = require('./router/admin/faqAdminRouter')
+const affiliateAdminRouter = require('./router/admin/affiliateAdminRouter')
+const publicFaqRouter = require('./router/publicFaqRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
-app.use(express.json({ limit: '10mb' }))
+
+// JSON body parser for all routes EXCEPT PhonePe webhooks,
+// which require the raw body for signature verification.
+const jsonParser = express.json({ limit: '10mb' });
+app.use((req, res, next) => {
+  const url = req.originalUrl || '';
+
+  // Skip JSON parsing for PhonePe webhook endpoints so that
+  // they can access the raw request body as a Buffer.
+  if (
+    url.startsWith('/api/phonepe/webhook/order') ||
+    url.startsWith('/api/phonepe/webhook/presale')
+  ) {
+    return next();
+  }
+
+  return jsonParser(req, res, next);
+});
+
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/api/', commonRouter)
@@ -74,6 +98,8 @@ app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
 app.use('/api/homepage-sections', homepageSectionsRouter)
 app.use('/api/newsletter', newsletterRouter)
+app.use('/api/size-charts', sizeChartRouter)
+app.use('/api/public', publicFaqRouter)
 // Alias for public newsletters feed: GET /api/newsletters
 app.get('/api/newsletters', newsletterController.listNewsletters)
 
@@ -82,12 +108,15 @@ app.use('/api/admin', adminDashboardRouter);
 app.use('/api/admin', brandAdminRouter);
 app.use('/api/admin', brandBankDetailsAdminRouter);
 app.use('/api/admin', adminBrandOrdersRouter);
+app.use('/api/admin', notificationAdminRouter);
 app.use('/api/admin/flash-sales', flashSaleAdminRouter);
 app.use('/api/admin/coins', coinsAdminRouter);
 app.use('/api/admin/presale-products', presaleProductRouter);
 app.use('/api/admin/presale-groups', presaleDetailsRouter);
 app.use('/api/admin/presale-bookings', presaleBookingRouter);
 app.use('/api/admin', newsletterAdminRouter);
+app.use('/api/admin', faqAdminRouter);
+app.use('/api/admin', affiliateAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 
 // BRAND AUTH ROUTE
@@ -95,6 +124,7 @@ app.use('/api/brand', brandAuthRouter)
 app.use('/api/brand', orderBrandRouter)
 app.use('/api/brand', productBrandRouter)
 app.use('/api/brand', brandBankDetailsRouter)
+app.use('/api/brand', notificationBrandRouter)
 app.use('/api/brand', profileBrandRouter)
 
 app.listen(process.env.PORT, () => {

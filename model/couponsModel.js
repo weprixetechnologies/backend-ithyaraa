@@ -8,6 +8,62 @@ const checkCouponExists = async (couponCode) => {
     return rows.length > 0;
 };
 
+const getCouponByCode = async (couponCode) => {
+    const [rows] = await db.query('SELECT * FROM coupons WHERE couponCode = ? LIMIT 1', [couponCode]);
+    return rows[0] || null;
+};
+
+const getCouponUsageCountByUser = async (couponID, uid) => {
+    const [rows] = await db.query(
+        'SELECT COUNT(*) AS cnt FROM coupon_user_usage WHERE couponID = ? AND uid = ?',
+        [couponID, uid]
+    );
+    return Number(rows[0]?.cnt ?? 0);
+};
+
+/**
+ * Record coupon usage for a successful order (idempotent per order).
+ * Inserts into coupon_user_usage and increments global couponUsage only if this order was not already recorded.
+ * Call only after order is successfully placed (COD) or payment is successful (PREPAID).
+ */
+const recordCouponUsageForOrder = async (couponCode, uid, orderID) => {
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [couponRows] = await connection.query(
+            'SELECT couponID FROM coupons WHERE couponCode = ? LIMIT 1',
+            [couponCode]
+        );
+        if (!couponRows || couponRows.length === 0) {
+            await connection.rollback();
+            return { recorded: false, reason: 'coupon_not_found' };
+        }
+        const couponID = couponRows[0].couponID;
+
+        const [insertResult] = await connection.query(
+            'INSERT IGNORE INTO coupon_user_usage (couponID, uid, orderID) VALUES (?, ?, ?)',
+            [couponID, uid, orderID]
+        );
+        if (insertResult.affectedRows === 0) {
+            await connection.rollback();
+            return { recorded: false, reason: 'already_recorded' };
+        }
+
+        await connection.query(
+            'UPDATE coupons SET couponUsage = couponUsage + 1 WHERE couponCode = ?',
+            [couponCode]
+        );
+        await connection.commit();
+        return { recorded: true };
+    } catch (err) {
+        await connection.rollback().catch(() => {});
+        console.error('Error in recordCouponUsageForOrder:', err);
+        throw err;
+    } finally {
+        connection.release();
+    }
+};
+
 const insertCoupon = async (couponData) => {
     const {
         couponID,
@@ -17,15 +73,29 @@ const insertCoupon = async (couponData) => {
         couponUsage,
         usageLimit,
         assignedUser,
+        maxUsagePerUser,
+        minOrderValue,
     } = couponData;
 
     try {
         const hasAssignedUser = assignedUser !== undefined && assignedUser !== null && assignedUser !== '';
+        const hasMaxUsagePerUser = maxUsagePerUser !== undefined && maxUsagePerUser !== null;
+        const hasMinOrderValue = minOrderValue !== undefined && minOrderValue !== null;
 
         const fields = ['couponID', 'couponCode', 'discountType', 'discountValue', 'couponUsage', 'usageLimit'];
         const placeholders = ['?', '?', '?', '?', '?', '?'];
         const values = [couponID, couponCode, discountType, discountValue, couponUsage, usageLimit];
 
+        if (hasMaxUsagePerUser) {
+            fields.push('maxUsagePerUser');
+            placeholders.push('?');
+            values.push(maxUsagePerUser);
+        }
+        if (hasMinOrderValue) {
+            fields.push('minOrderValue');
+            placeholders.push('?');
+            values.push(minOrderValue);
+        }
         if (hasAssignedUser) {
             fields.push('assignedUser');
             placeholders.push('?');
@@ -148,6 +218,13 @@ const incrementCouponUsage = async (couponCode) => {
 
 module.exports = {
     checkCouponExists,
+    getCouponByCode,
+    getCouponUsageCountByUser,
+    recordCouponUsageForOrder,
     insertCoupon,
-    getPaginatedCoupons, getCouponCount, getCouponByID, updateCoupon, incrementCouponUsage
+    getPaginatedCoupons,
+    getCouponCount,
+    getCouponByID,
+    updateCoupon,
+    incrementCouponUsage
 };

@@ -73,6 +73,10 @@ const getRequestablePayoutsService = async (uid) => {
     return await affiliateModel.getRequestablePayouts(uid);
 };
 
+const getLockedBreakdownService = async (uid) => {
+    return await affiliateModel.getLockedAffiliateBreakdown(uid);
+};
+
 const getPayoutRequestsService = async (filters) => {
     return await affiliateModel.getPayoutRequests(filters);
 };
@@ -122,6 +126,60 @@ const getDefaultBankAccountService = async (uid) => {
     return await affiliateModel.getDefaultBankAccount(uid);
 };
 
+// Admin: List affiliates with filters and pagination
+const getAffiliateListService = async (filters) => {
+    return await affiliateModel.getAffiliateList(filters);
+};
+
+// Admin: Get full affiliate detail by uid (user + analytics + transactions + orders + payout history + bank accounts)
+const getAffiliateDetailForAdminService = async (uid) => {
+    const [user, analytics, transactions, orders, payoutHistory, bankAccounts] = await Promise.all([
+        require('./usersService').getUserByuid(uid),
+        affiliateModel.getAffiliateAnalytics(uid),
+        affiliateModel.getAffiliateTransactions(uid, { page: 1, limit: 20 }),
+        affiliateModel.getAffiliateOrdersByReferrer(uid, { page: 1, limit: 20 }),
+        affiliateModel.getPayoutHistory(uid),
+        affiliateModel.getBankAccounts(uid, true)
+    ]);
+    return {
+        user,
+        analytics,
+        transactions: transactions?.data || [],
+        transactionsPagination: { total: transactions?.total, page: transactions?.page, limit: transactions?.limit },
+        orders: orders?.data || [],
+        ordersPagination: { total: orders?.total, page: orders?.page, limit: orders?.limit },
+        payoutHistory: payoutHistory || [],
+        bankAccounts: bankAccounts || []
+    };
+};
+
+// Admin: Approve affiliate by uid
+const adminApproveAffiliateService = async (uid) => {
+    const result = await affiliateModel.approveAffiliateByUID(uid);
+    return result;
+};
+
+// Admin: Reject affiliate by uid
+const adminRejectAffiliateService = async (uid) => {
+    const result = await affiliateModel.rejectAffiliateByUID(uid);
+    return result;
+};
+
+// Admin: Update affiliate transaction status
+const updateAffiliateTransactionStatusService = async (txnID, newStatus) => {
+    return await affiliateModel.updateAffiliateTransactionStatus(txnID, newStatus);
+};
+
+// Admin: Create manual affiliate transaction (deduction or increase)
+const createManualAffiliateTransactionService = async (payload) => {
+    return await affiliateModel.createManualAffiliateTransaction(payload);
+};
+
+// Get allowed transaction statuses for admin
+const getAffiliateTransactionStatusesService = () => {
+    return affiliateModel.AFFILIATE_TXN_STATUS || [];
+};
+
 module.exports = {
     applyAffiliateService,
     approveAffiliateService,
@@ -133,6 +191,7 @@ module.exports = {
     getRequestedPayoutAmountService,
     getPendingPayoutAvailableService,
     getRequestablePayoutsService,
+    getLockedBreakdownService,
     getPayoutRequestsService,
     approvePayoutService,
     rejectPayoutService,
@@ -144,5 +203,12 @@ module.exports = {
     getAllBankAccountRequestsService,
     approveBankAccountService,
     rejectBankAccountService,
-    getDefaultBankAccountService
+    getDefaultBankAccountService,
+    getAffiliateListService,
+    getAffiliateDetailForAdminService,
+    adminApproveAffiliateService,
+    adminRejectAffiliateService,
+    updateAffiliateTransactionStatusService,
+    createManualAffiliateTransactionService,
+    getAffiliateTransactionStatusesService
 };

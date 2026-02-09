@@ -2,6 +2,25 @@ const reviewService = require('../services/reviewService');
 const reviewModel = require('../model/reviewModel');
 const db = require('../utils/dbconnect');
 
+// Simple URL validator for image URLs
+const isValidImageUrl = (url) => {
+    try {
+        const parsed = new URL(url);
+        const allowedProtocols = ['http:', 'https:'];
+        if (!allowedProtocols.includes(parsed.protocol)) return false;
+
+        const pathname = parsed.pathname.toLowerCase();
+        return (
+            pathname.endsWith('.jpg') ||
+            pathname.endsWith('.jpeg') ||
+            pathname.endsWith('.png') ||
+            pathname.endsWith('.webp')
+        );
+    } catch {
+        return false;
+    }
+};
+
 // Add a review
 const addReviewController = async (req, res) => {
     try {
@@ -22,11 +41,41 @@ const addReviewController = async (req, res) => {
             });
         }
 
+        // Validate images (optional)
+        let normalizedImages = undefined;
+        if (typeof images !== 'undefined') {
+            if (!Array.isArray(images)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Images must be an array of URLs'
+                });
+            }
+
+            if (images.length > 5) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'A maximum of 5 images are allowed per review'
+                });
+            }
+
+            const cleaned = images.filter(Boolean).map(String);
+            for (const url of cleaned) {
+                if (!isValidImageUrl(url)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'One or more image URLs are invalid or use an unsupported format'
+                    });
+                }
+            }
+
+            normalizedImages = cleaned;
+        }
+
         const review = await reviewService.addReviewService(uid, {
             productID,
             rating,
             comment,
-            images,
+            images: normalizedImages,
             verifiedPurchase
         });
 
@@ -197,12 +246,33 @@ const getAllReviewsController = async (req, res) => {
             `SELECT r.*, u.username, u.emailID, u.profilePhoto,
                     p.name as productName, p.featuredImage as productImage
              FROM reviews r
-             INNER JOIN users u ON r.uid = u.uid COLLATE utf8mb4_unicode_ci
-             LEFT JOIN products p ON r.productID = p.productID COLLATE utf8mb4_unicode_ci
+             INNER JOIN users u ON r.uid = u.uid
+             LEFT JOIN products p ON r.productID = p.productID
              WHERE ${whereClause}
              ORDER BY r.createdAt DESC`,
             params
         );
+
+        // Fetch all images for these reviews from review_images
+        const reviewIDs = reviews.map((r) => r.reviewID).filter(Boolean);
+        let imagesByReviewID = {};
+
+        if (reviewIDs.length > 0) {
+            const [imageRows] = await db.query(
+                `SELECT reviewID, imageUrl
+                 FROM review_images
+                 WHERE reviewID IN (?)`,
+                [reviewIDs]
+            );
+
+            imagesByReviewID = imageRows.reduce((acc, row) => {
+                if (!acc[row.reviewID]) {
+                    acc[row.reviewID] = [];
+                }
+                acc[row.reviewID].push(row.imageUrl);
+                return acc;
+            }, {});
+        }
 
         // Parse JSON fields safely
         const safeParse = (value, fallback = null) => {
@@ -221,12 +291,21 @@ const getAllReviewsController = async (req, res) => {
             return value; // Already an object
         };
 
-        const processedReviews = reviews.map(review => ({
-            ...review,
-            images: safeParse(review.images, []),
-            profilePhoto: safeParse(review.profilePhoto, null),
-            productImage: safeParse(review.productImage, null)
-        }));
+        const processedReviews = reviews.map(review => {
+            const legacyImages = safeParse(review.images, []);
+            const newImages = imagesByReviewID[review.reviewID] || [];
+            const mergedImages = [
+                ...(Array.isArray(legacyImages) ? legacyImages : legacyImages ? [legacyImages] : []),
+                ...newImages
+            ];
+
+            return {
+                ...review,
+                images: mergedImages,
+                profilePhoto: safeParse(review.profilePhoto, null),
+                productImage: safeParse(review.productImage, null)
+            };
+        });
 
         res.status(200).json({
             success: true,

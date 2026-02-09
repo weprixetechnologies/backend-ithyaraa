@@ -1,27 +1,66 @@
 const db = require('../utils/dbconnect');
 
 // Add a new review
+// Note: images are now stored primarily in the review_images table.
+// The legacy reviews.images column is kept for backward compatibility but
+// is no longer written to for new reviews with images.
 async function addReview(reviewData) {
     const { productID, uid, orderID, rating, comment, images, verifiedPurchase } = reviewData;
 
-    const [result] = await db.query(
-        `INSERT INTO reviews (productID, uid, orderID, rating, comment, images, verified_purchase, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-            productID,
-            uid,
-            orderID || null,
-            rating,
-            comment || null,
-            images ? JSON.stringify(images) : null,
-            verifiedPurchase || false
-        ]
-    );
+    // Normalize images
+    const imageArray = Array.isArray(images) ? images : [];
 
-    return {
-        reviewID: result.insertId,
-        ...reviewData
-    };
+    // Use an explicit connection so we can wrap review + image inserts in a transaction
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        // For new reviews we do NOT persist images JSON into the reviews table.
+        // This keeps the legacy column intact for old data while moving new data
+        // into the dedicated review_images table.
+        const [result] = await connection.query(
+            `INSERT INTO reviews (productID, uid, orderID, rating, comment, images, verified_purchase, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+                productID,
+                uid,
+                orderID || null,
+                rating,
+                comment || null,
+                imageArray.length ? null : null,
+                verifiedPurchase || false
+            ]
+        );
+
+        const reviewID = result.insertId;
+
+        // Insert images into review_images (if any)
+        if (imageArray.length > 0) {
+            const values = imageArray.map((url) => [reviewID, url]);
+
+            await connection.query(
+                `INSERT INTO review_images (reviewID, imageUrl) VALUES ?`,
+                [values]
+            );
+        }
+
+        await connection.commit();
+
+        return {
+            reviewID,
+            ...reviewData
+        };
+    } catch (error) {
+        try {
+            await connection.rollback();
+        } catch (rollbackError) {
+            console.error('Rollback error in addReview:', rollbackError);
+        }
+        throw error;
+    } finally {
+        connection.release();
+    }
 }
 
 // Get reviews for a product with pagination and filters
@@ -61,7 +100,7 @@ async function getReviews(productID, options = {}) {
     const [reviews] = await db.query(
         `SELECT r.*, u.username, u.emailID, u.profilePhoto
          FROM reviews r
-         INNER JOIN users u ON r.uid = u.uid COLLATE utf8mb4_unicode_ci
+         INNER JOIN users u ON r.uid = u.uid
          WHERE ${whereClause}
          ORDER BY ${orderBy}
          LIMIT ? OFFSET ?`,
@@ -73,6 +112,27 @@ async function getReviews(productID, options = {}) {
         `SELECT COUNT(*) as total FROM reviews WHERE ${whereClause}`,
         params
     );
+
+    // Fetch images from the new review_images table for all loaded reviews
+    const reviewIDs = reviews.map((r) => r.reviewID).filter(Boolean);
+    let imagesByReviewID = {};
+
+    if (reviewIDs.length > 0) {
+        const [imageRows] = await db.query(
+            `SELECT reviewID, imageUrl
+             FROM review_images
+             WHERE reviewID IN (?)`,
+            [reviewIDs]
+        );
+
+        imagesByReviewID = imageRows.reduce((acc, row) => {
+            if (!acc[row.reviewID]) {
+                acc[row.reviewID] = [];
+            }
+            acc[row.reviewID].push(row.imageUrl);
+            return acc;
+        }, {});
+    }
 
     // Safe JSON parse function
     const safeParse = (value, fallback = null) => {
@@ -92,12 +152,21 @@ async function getReviews(productID, options = {}) {
         return value; // Already an object
     };
 
-    // Parse JSON fields
-    const processedReviews = reviews.map(review => ({
-        ...review,
-        images: safeParse(review.images, []),
-        profilePhoto: safeParse(review.profilePhoto, null)
-    }));
+    // Parse JSON fields and merge legacy images with images from review_images
+    const processedReviews = reviews.map(review => {
+        const legacyImages = safeParse(review.images, []);
+        const newImages = imagesByReviewID[review.reviewID] || [];
+        const mergedImages = [
+            ...(Array.isArray(legacyImages) ? legacyImages : legacyImages ? [legacyImages] : []),
+            ...newImages
+        ];
+
+        return {
+            ...review,
+            images: mergedImages,
+            profilePhoto: safeParse(review.profilePhoto, null)
+        };
+    });
 
     return {
         reviews: processedReviews,
@@ -185,12 +254,21 @@ async function getReviewById(reviewID) {
     const [reviews] = await db.query(
         `SELECT r.*, u.username, u.emailID, u.profilePhoto
          FROM reviews r
-         INNER JOIN users u ON r.uid = u.uid COLLATE utf8mb4_unicode_ci
+         INNER JOIN users u ON r.uid = u.uid
          WHERE r.reviewID = ?`,
         [reviewID]
     );
 
     if (reviews.length === 0) return null;
+
+    const review = reviews[0];
+
+    // Load images from review_images for this review
+    const [imageRows] = await db.query(
+        `SELECT imageUrl FROM review_images WHERE reviewID = ?`,
+        [reviewID]
+    );
+    const newImages = imageRows.map(row => row.imageUrl);
 
     // Safe JSON parse function
     const safeParse = (value, fallback = null) => {
@@ -210,10 +288,15 @@ async function getReviewById(reviewID) {
         return value; // Already an object
     };
 
-    const review = reviews[0];
+    const legacyImages = safeParse(review.images, []);
+    const mergedImages = [
+        ...(Array.isArray(legacyImages) ? legacyImages : legacyImages ? [legacyImages] : []),
+        ...newImages
+    ];
+
     return {
         ...review,
-        images: safeParse(review.images, []),
+        images: mergedImages,
         profilePhoto: safeParse(review.profilePhoto, null)
     };
 }
@@ -241,11 +324,32 @@ async function getUserReviews(uid) {
     const [reviews] = await db.query(
         `SELECT r.*, p.name as productName, p.featuredImage
          FROM reviews r
-         INNER JOIN products p ON r.productID = p.productID COLLATE utf8mb4_unicode_ci
+         INNER JOIN products p ON r.productID = p.productID
          WHERE r.uid = ?
          ORDER BY r.createdAt DESC`,
         [uid]
     );
+
+    // Fetch all images for these reviews
+    const reviewIDs = reviews.map((r) => r.reviewID).filter(Boolean);
+    let imagesByReviewID = {};
+
+    if (reviewIDs.length > 0) {
+        const [imageRows] = await db.query(
+            `SELECT reviewID, imageUrl
+             FROM review_images
+             WHERE reviewID IN (?)`,
+            [reviewIDs]
+        );
+
+        imagesByReviewID = imageRows.reduce((acc, row) => {
+            if (!acc[row.reviewID]) {
+                acc[row.reviewID] = [];
+            }
+            acc[row.reviewID].push(row.imageUrl);
+            return acc;
+        }, {});
+    }
 
     // Safe JSON parse function
     const safeParse = (value, fallback = null) => {
@@ -265,11 +369,20 @@ async function getUserReviews(uid) {
         return value; // Already an object
     };
 
-    return reviews.map(review => ({
-        ...review,
-        images: safeParse(review.images, []),
-        featuredImage: safeParse(review.featuredImage, [])
-    }));
+    return reviews.map(review => {
+        const legacyImages = safeParse(review.images, []);
+        const newImages = imagesByReviewID[review.reviewID] || [];
+        const mergedImages = [
+            ...(Array.isArray(legacyImages) ? legacyImages : legacyImages ? [legacyImages] : []),
+            ...newImages
+        ];
+
+        return {
+            ...review,
+            images: mergedImages,
+            featuredImage: safeParse(review.featuredImage, [])
+        };
+    });
 }
 
 module.exports = {

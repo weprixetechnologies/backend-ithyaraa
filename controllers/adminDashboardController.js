@@ -35,7 +35,7 @@ const getDashboardStatsController = async (req, res) => {
             `SELECT od.orderID, od.uid, od.total as totalAmount, od.orderStatus, od.paymentStatus, od.createdAt,
                     u.username
              FROM orderDetail od
-             LEFT JOIN users u ON od.uid = u.uid COLLATE utf8mb4_unicode_ci
+             LEFT JOIN users u ON od.uid = u.uid
              ORDER BY od.createdAt DESC
              LIMIT 10`
         );

@@ -153,19 +153,15 @@ const requestPayout = async (req, res) => {
             return res.status(400).json({ error: 'OTP is required for payout verification' });
         }
 
-        // Check if user has enough pending balance
-        const [userResult] = await db.execute(
-            'SELECT pendingPayment FROM users WHERE uid = ?',
-            [uid]
-        );
-
-        if (userResult.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
-        const currentPending = userResult[0].pendingPayment || 0;
-        if (amount > currentPending) {
-            return res.status(400).json({ error: 'Insufficient pending balance' });
+        // Check available for payout (unlocked: completed or confirmed past return period only)
+        const payoutData = await affiliateService.getPendingPayoutAvailableService(uid);
+        const availableForPayout = payoutData.pendingPayoutAvailable ?? 0;
+        if (amount > availableForPayout) {
+            return res.status(400).json({
+                error: availableForPayout <= 0
+                    ? 'No amount available for payout. Amounts are locked until 7 days after delivery.'
+                    : `Insufficient available balance. You have ₹${availableForPayout} available (locked amounts excluded).`
+            });
         }
 
         // Check minimum payout amount
@@ -274,10 +270,25 @@ const getRequestablePayouts = async (req, res) => {
     }
 };
 
+const getLockedBreakdown = async (req, res) => {
+    try {
+        const { uid } = req.user;
+        if (!uid) {
+            return res.status(400).json({ error: 'UID not found in token/user' });
+        }
+        const data = await affiliateService.getLockedBreakdownService(uid);
+        return res.status(200).json({ success: true, data });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
 module.exports.requestPayout = requestPayout;
 module.exports.getPayoutHistory = getPayoutHistory;
 module.exports.getPendingPayoutAvailable = getPendingPayoutAvailable;
 module.exports.getRequestablePayouts = getRequestablePayouts;
+module.exports.getLockedBreakdown = getLockedBreakdown;
 
 // Cancel a pending payout request
 const cancelPayout = async (req, res) => {

@@ -34,6 +34,17 @@ router.get('/balance', async (req, res) => {
     }
 });
 
+router.get('/locked-breakdown', async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const data = await coinModel.getLockedCoinsBreakdown(uid);
+        return res.json({ success: true, ...data });
+    } catch (e) {
+        console.error('coin locked-breakdown error', e);
+        return res.status(500).json({ success: false, message: 'Failed to fetch locked breakdown' });
+    }
+});
+
 router.get('/history', async (req, res) => {
     try {
         const uid = req.user.uid;

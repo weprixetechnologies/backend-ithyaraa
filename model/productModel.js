@@ -30,7 +30,8 @@ const uploadProduct = async ({
     galleryImage,
     brandID,
     custom_inputs,
-    allowCustomerImageUpload
+    allowCustomerImageUpload,
+    sizeChartUrl // optional, only used for variable products
 }) => {
     const safeString = (str) => {
         if (str === null || str === undefined) return '';
@@ -60,7 +61,8 @@ const uploadProduct = async ({
             galleryImage,
             brandID,
             custom_inputs,
-            allowCustomerImageUpload
+            allowCustomerImageUpload,
+            sizeChartUrl
         ) VALUES (
             '${safeString(name)}',
             '${safeString(description)}',
@@ -83,7 +85,8 @@ const uploadProduct = async ({
             '${safeString(JSON.stringify(galleryImage))}',
             ${brandID === null || brandID === undefined ? 'NULL' : `'${safeString(brandID)}'`},
             ${custom_inputs === null || custom_inputs === undefined ? 'NULL' : `'${safeString(JSON.stringify(custom_inputs))}'`},
-            ${allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0}
+            ${allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0},
+            ${sizeChartUrl ? `'${safeString(sizeChartUrl)}'` : 'NULL'}
         );
     `;
 
@@ -123,7 +126,7 @@ const editProductModel = async (product) => {
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, allowCustomerImageUpload = ?
+            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, allowCustomerImageUpload = ?, sizeChartUrl = ?
         WHERE productID = ?
     `;
 
@@ -139,6 +142,7 @@ const editProductModel = async (product) => {
         JSON.stringify(galleryImage),
         custom_inputs ? JSON.stringify(custom_inputs) : null,
         allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0,
+        product.sizeChartUrl || null,
         productID,
     ];
 
@@ -259,14 +263,14 @@ const getVariationsByProductID = async (productID) => {
             `SELECT * FROM variations WHERE productID = ?`,
             [productID]
         );
-        
+
         // Parse variationValues JSON for each variation
         return rows.map(v => {
             try {
                 return {
                     ...v,
-                    variationValues: typeof v.variationValues === 'string' 
-                        ? JSON.parse(v.variationValues) 
+                    variationValues: typeof v.variationValues === 'string'
+                        ? JSON.parse(v.variationValues)
                         : v.variationValues
                 };
             } catch {
@@ -288,18 +292,18 @@ const getVariationBySlug = async (productID, variationSlug) => {
             `SELECT * FROM variations WHERE productID = ? AND variationSlug = ? LIMIT 1`,
             [productID, variationSlug]
         );
-        
+
         if (rows.length === 0) return null;
-        
+
         const variation = rows[0];
         try {
-            variation.variationValues = typeof variation.variationValues === 'string' 
-                ? JSON.parse(variation.variationValues) 
+            variation.variationValues = typeof variation.variationValues === 'string'
+                ? JSON.parse(variation.variationValues)
                 : variation.variationValues;
         } catch {
             // Keep as is if parsing fails
         }
-        
+
         return variation;
     } catch (error) {
         console.error('Error fetching variation by slug:', error);
@@ -414,19 +418,19 @@ const deleteProduct = async (productID) => {
 
 
 
-module.exports = { 
-    deleteVariationsByProductID, 
-    uploadVariations, 
+module.exports = {
+    deleteVariationsByProductID,
+    uploadVariations,
     updateVariation,
     getVariationsByProductID,
     getVariationBySlug,
     deleteVariationByID,
-    uploadProduct, 
-    checkIfVariationIDExists, 
-    getFilteredProductQuery, 
-    getProductWithVariations, 
-    getProductByID, 
-    editProductModel, 
-    deleteAttributesByProductID, 
-    deleteProduct 
+    uploadProduct,
+    checkIfVariationIDExists,
+    getFilteredProductQuery,
+    getProductWithVariations,
+    getProductByID,
+    editProductModel,
+    deleteAttributesByProductID,
+    deleteProduct
 }

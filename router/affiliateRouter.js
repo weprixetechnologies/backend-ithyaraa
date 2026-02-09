@@ -11,6 +11,7 @@ affiliateRouter.get('/analytics', authAdminMiddleware.verifyAccessToken, affilia
 affiliateRouter.get('/payout-history', authAdminMiddleware.verifyAccessToken, affiliateController.getPayoutHistory);
 affiliateRouter.get('/pending-payout-available', authAdminMiddleware.verifyAccessToken, affiliateController.getPendingPayoutAvailable);
 affiliateRouter.get('/requestable-payouts', authAdminMiddleware.verifyAccessToken, affiliateController.getRequestablePayouts);
+affiliateRouter.get('/locked-breakdown', authAdminMiddleware.verifyAccessToken, affiliateController.getLockedBreakdown);
 affiliateRouter.post('/request-payout', authAdminMiddleware.verifyAccessToken, affiliateController.requestPayout);
 affiliateRouter.post('/cancel-payout', authAdminMiddleware.verifyAccessToken, affiliateController.cancelPayout);
 

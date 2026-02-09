@@ -224,6 +224,56 @@ async function reverseEarnedCoins(uid, orderID, refType = 'order') {
     }
 }
 
+// Re-apply coins when order status is changed back from Returned/Cancelled to Delivered
+async function reapplyCoinsForOrder(uid, orderID, coins, refType = 'order') {
+    if (!coins || coins <= 0) return { success: false, message: 'No coins to reapply' };
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [lots] = await connection.query(
+            `SELECT lotID, coinsTotal, coinsUsed, coinsExpired FROM coin_lots 
+             WHERE uid = ? AND orderID = ? FOR UPDATE`,
+            [uid, String(orderID)]
+        );
+        if (lots && lots.length > 0 && lots[0].coinsExpired > 0) {
+            const lot = lots[0];
+            const toRestore = Math.min(coins, lot.coinsExpired);
+            await connection.query(
+                `UPDATE coin_lots SET coinsExpired = coinsExpired - ? WHERE lotID = ?`,
+                [toRestore, lot.lotID]
+            );
+            await connection.query(
+                `INSERT INTO coin_transactions (uid, type, coins, refType, refID) VALUES (?, 'earn', ?, ?, ?)`,
+                [uid, toRestore, refType, String(orderID)]
+            );
+            await connection.query(`UPDATE coin_balance SET balance = balance + ? WHERE uid = ?`, [toRestore, uid]);
+            await connection.commit();
+            return { success: true, coinsReapplied: toRestore, source: 'earned' };
+        }
+        await connection.commit();
+    } catch (e) {
+        await connection.rollback();
+        throw e;
+    } finally {
+        connection.release();
+    }
+    // No lot or lot had no expired coins: was reversed from pending → create new pending and complete
+    await createPendingCoins(uid, orderID, coins, refType);
+    const completeResult = await completePendingCoins(uid, orderID, refType);
+    return completeResult.success ? { success: true, coinsReapplied: coins, source: 'pending' } : completeResult;
+}
+
+// Re-apply coins as pending when order status is changed back from Returned/Cancelled to non-Delivered
+async function reapplyCoinsToPending(uid, orderID, coins, refType = 'order') {
+    if (!coins || coins <= 0) return { success: false, message: 'No coins to reapply' };
+    await ensureBalanceRow(uid);
+    await db.query(
+        `INSERT INTO coin_transactions (uid, type, coins, refType, refID) VALUES (?, 'pending', ?, ?, ?)`,
+        [uid, coins, refType, String(orderID)]
+    );
+    return { success: true };
+}
+
 async function createEarnLot(uid, orderID, coins, earnedAt, expiresAt) {
     await ensureBalanceRow(uid);
     // Coins are credited instantly but become redeemable after 7 days (return period)
@@ -386,6 +436,35 @@ async function redeemCoinsToWallet(uid, coins) {
     }
 }
 
+// Get locked coins breakdown (lots that are not yet redeemable) for "Know more" on coins page
+async function getLockedCoinsBreakdown(uid) {
+    await ensureBalanceRow(uid);
+    try {
+        const now = new Date();
+        const [rows] = await db.query(
+            `SELECT (coinsTotal - coinsUsed - coinsExpired) as coins, redeemableAt, orderID
+             FROM coin_lots
+             WHERE uid = ? AND (coinsTotal - coinsUsed - coinsExpired) > 0 AND redeemableAt > ?
+             ORDER BY redeemableAt ASC`,
+            [uid, now]
+        );
+        const total = rows.reduce((sum, r) => sum + Number(r.coins || 0), 0);
+        return {
+            lockedBalance: total,
+            items: rows.map((r) => ({
+                coins: Number(r.coins || 0),
+                redeemableAt: r.redeemableAt,
+                orderID: r.orderID || null
+            }))
+        };
+    } catch (error) {
+        if (error.message && error.message.includes('redeemableAt')) {
+            return { lockedBalance: 0, items: [] };
+        }
+        throw error;
+    }
+}
+
 async function expireDueLots(now = new Date()) {
     const connection = await db.getConnection();
     try {
@@ -419,8 +498,11 @@ module.exports = {
     cancelPendingCoins,
     reversePendingCoins,
     reverseEarnedCoins,
+    reapplyCoinsForOrder,
+    reapplyCoinsToPending,
     getBalance,
     getRedeemableBalance,
+    getLockedCoinsBreakdown,
     getHistory,
     redeemCoinsToWallet,
     expireDueLots

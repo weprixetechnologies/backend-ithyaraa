@@ -2,7 +2,7 @@ const db = require('./../utils/dbconnect');
 
 async function getCartWithItems(cartID) {
   const [rows] = await db.query(`
-    SELECT c.cartID, ci.cartItemID, ci.productID, ci.quantity, 
+    SELECT c.cartID, ci.cartItemID, ci.productID, ci.quantity, ci.selected,
            p.name, p.salePrice, p.regularPrice, p.offerID, p.type
     FROM cartDetail c
     JOIN cart_items ci ON c.cartID = ci.cartID

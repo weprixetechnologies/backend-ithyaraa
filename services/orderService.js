@@ -56,7 +56,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 
     if (couponCode) {
         try {
-            const couponResult = await validateAndApplyCoupon(couponCode, cartData);
+            const couponResult = await validateAndApplyCoupon(couponCode, cartData, uid);
             if (couponResult.success) {
                 couponDiscount = couponResult.discount;
                 finalSummary.totalDiscount = (finalSummary.totalDiscount || 0) + couponDiscount;
@@ -128,13 +128,13 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         handFeeRate: isCOD ? HANDLING_FEE_RATE : 0
     });
 
-    // Step 5: Increment coupon usage if coupon was applied
-    if (couponCode && couponDiscount > 0) {
+    // Step 5: Record coupon usage only after successful order (COD = successful at place order; PREPAID = recorded in webhook on payment success)
+    if (couponCode && couponDiscount > 0 && (paymentMode === 'COD' || paymentMode === 'cod' || paymentMode === 'FULL_COIN')) {
         try {
-            await couponsModel.incrementCouponUsage(couponCode);
+            await couponsModel.recordCouponUsageForOrder(couponCode, uid, newOrder.orderID);
         } catch (error) {
-            console.error('Failed to increment coupon usage:', error);
-            // Don't throw error - order is already created successfully
+            console.error('Failed to record coupon usage:', error);
+            // Don't throw - order is already created
         }
     }
 
@@ -147,6 +147,10 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         try {
             const referByUid = cartData.items[0].referBy; // All items have same referBy from cartDetail
 
+            // Self-referral not allowed: ordering person must not be the referrer
+            if (referByUid === uid) {
+                console.log('[Refer] Skipping refer commission: self-referral not allowed');
+            } else {
             // Fetch referrer user
             const referrerUsers = await batchFetchUsers([referByUid]);
             const referrerUser = referrerUsers[0];
@@ -163,7 +167,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                     totalCommission = Math.round(totalCommission * 100) / 100;
                     creditedUsers.add(referrerUser.uid);
 
-                    // Execute both operations in parallel
+                    // Execute both operations in parallel (link to order for delivery/return handling)
                     await Promise.all([
                         usersModel.incrementPendingPayment(referrerUser.uid, totalCommission),
                         affiliateModel.createAffiliateTransaction({
@@ -171,10 +175,12 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                             uid: referrerUser.uid,
                             status: 'pending',
                             amount: totalCommission,
-                            type: 'incoming'
+                            type: 'incoming',
+                            orderID: newOrder.orderID
                         })
                     ]);
                 }
+            }
             }
         } catch (referByError) {
             console.error('ReferBy processing error:', referByError);
@@ -213,7 +219,8 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                                 uid: assignedUser.uid,
                                 status: 'pending',
                                 amount: commission,
-                                type: 'incoming'
+                                type: 'incoming',
+                                orderID: newOrder.orderID
                             })
                         ]);
                     }
@@ -243,51 +250,49 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 }
 
 
-// Coupon validation and discount calculation
-async function validateAndApplyCoupon(couponCode, cartData) {
+// Coupon validation and discount calculation (uid required for per-user usage limit)
+async function validateAndApplyCoupon(couponCode, cartData, uid) {
     try {
         console.log('=== ORDER COUPON VALIDATION ===');
         console.log('Coupon code:', couponCode);
         console.log('Coupon code type:', typeof couponCode);
         console.log('Coupon code length:', couponCode ? couponCode.length : 'null');
 
-        // Get coupon details by code
         const db = require('./../utils/dbconnect');
 
-        // First, let's check if the coupon exists at all
-        const [allCoupons] = await db.query(
-            'SELECT * FROM coupons WHERE couponCode = ?',
-            [couponCode]
-        );
-        console.log('All coupons with this code:', allCoupons);
-
-        // Then check with usage limit
+        // Global usage limit check
         const [couponRows] = await db.query(
             'SELECT * FROM coupons WHERE couponCode = ? AND (usageLimit IS NULL OR couponUsage < usageLimit)',
             [couponCode]
         );
 
-        console.log('Coupon query result (with usage limit):', couponRows);
-        console.log('Number of rows found:', couponRows ? couponRows.length : 'null');
-
         if (!couponRows || couponRows.length === 0) {
-            console.log('Coupon validation failed - no rows found');
+            console.log('Coupon validation failed - no rows or usage limit reached');
             return { success: false, message: 'Invalid or expired coupon code' };
         }
 
         const coupon = couponRows[0];
 
-        // Calculate subtotal for products with NO OFFER only
+        // Per-user usage limit (maxUsagePerUser: NULL = unlimited, 1 = single use, N = N times)
+        if (uid && coupon.maxUsagePerUser != null && Number(coupon.maxUsagePerUser) >= 0) {
+            const usedByUser = await couponsModel.getCouponUsageCountByUser(coupon.couponID, uid);
+            if (usedByUser >= Number(coupon.maxUsagePerUser)) {
+                return {
+                    success: false,
+                    message: 'You have already used this coupon the maximum number of times.'
+                };
+            }
+        }
+
+        // Calculate subtotal for eligible products (no offer, not combo)
         let subtotal = 0;
         cartData.items.forEach(item => {
-            // Only apply coupon to products that have NO OFFER (no offerID and not combo type)
             if (!item.offerID && item.type !== 'combo') {
                 const price = item.salePrice || item.regularPrice || 0;
                 subtotal += price * item.quantity;
             }
         });
 
-        // Check if there are any eligible products for coupon
         if (subtotal === 0) {
             return {
                 success: false,
@@ -295,31 +300,24 @@ async function validateAndApplyCoupon(couponCode, cartData) {
             };
         }
 
-        // Calculate discount based on coupon type
+        // Minimum order value (minOrderValue: NULL = no minimum)
+        const minOrder = coupon.minOrderValue != null ? Number(coupon.minOrderValue) : null;
+        if (minOrder != null && minOrder > 0 && subtotal < minOrder) {
+            return {
+                success: false,
+                message: `Minimum order value of ₹${minOrder} required for this coupon`
+            };
+        }
+
+        // Calculate discount
         let discount = 0;
         if (coupon.discountType === 'percentage') {
             discount = subtotal * (Number(coupon.discountValue) / 100);
         } else if (coupon.discountType === 'flat') {
             discount = Number(coupon.discountValue);
         }
-
-        // Ensure discount is a valid number
-        if (isNaN(discount)) {
-            discount = 0;
-        }
-
-        // Ensure discount does not exceed subtotal
-        if (discount > subtotal) {
-            discount = subtotal;
-        }
-
-        // Check if there's a minimum order value requirement (if such field exists)
-        if (coupon.minimumOrderValue && subtotal < coupon.minimumOrderValue) {
-            return {
-                success: false,
-                message: `Minimum order value of ₹${coupon.minimumOrderValue} required for this coupon`
-            };
-        }
+        if (isNaN(discount)) discount = 0;
+        if (discount > subtotal) discount = subtotal;
 
         return {
             success: true,
@@ -684,16 +682,24 @@ async function updateOrderStatus(orderId, orderStatus) {
         }
 
         // Handle coin state transitions based on status change
-        if (hasPendingCoins) {
+        const coinsAmount = order.coinsEarned || 0;
+        const wasReturnedOrCancelled = (oldStatus === 'Cancelled' || oldStatus === 'Returned');
+        const isNowReturnedOrCancelled = (orderStatus === 'Cancelled' || orderStatus === 'Returned');
+
+        if (hasPendingCoins || coinsAmount > 0) {
             try {
                 if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
-                    // Complete pending coins (award them)
-                    await coinModel.completePendingCoins(uid, orderId);
-                    console.log(`[Coins] Completed pending coins for order ${orderId}`);
-                } else if ((orderStatus === 'Cancelled' || orderStatus === 'Returned') && oldStatus !== 'Cancelled' && oldStatus !== 'Returned') {
-                    // Check if coins were already earned (order was delivered) or still pending
+                    if (wasReturnedOrCancelled && coinsAmount > 0) {
+                        const reapplyResult = await coinModel.reapplyCoinsForOrder(uid, orderId, coinsAmount, 'order');
+                        if (reapplyResult.success) {
+                            console.log(`[Coins] Re-applied ${reapplyResult.coinsReapplied} coins for order ${orderId} (status back to Delivered, source: ${reapplyResult.source})`);
+                        }
+                    } else {
+                        await coinModel.completePendingCoins(uid, orderId);
+                        console.log(`[Coins] Completed pending coins for order ${orderId}`);
+                    }
+                } else if (isNowReturnedOrCancelled && !wasReturnedOrCancelled) {
                     if (oldStatus === 'Delivered') {
-                        // Reverse earned coins (coins were already awarded)
                         const result = await coinModel.reverseEarnedCoins(uid, orderId);
                         if (result.success) {
                             console.log(`[Coins] Reversed ${result.coinsReversed} earned coins for ${orderStatus.toLowerCase()} order ${orderId}`);
@@ -701,15 +707,59 @@ async function updateOrderStatus(orderId, orderStatus) {
                             console.log(`[Coins] ${result.message} for order ${orderId}`);
                         }
                     } else {
-                        // Reverse pending coins (order was not yet delivered)
                         await coinModel.reversePendingCoins(uid, orderId);
                         console.log(`[Coins] Reversed pending coins for ${orderStatus.toLowerCase()} order ${orderId}`);
+                    }
+                } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && orderStatus !== 'Delivered' && coinsAmount > 0) {
+                    const reapplyResult = await coinModel.reapplyCoinsToPending(uid, orderId, coinsAmount, 'order');
+                    if (reapplyResult.success) {
+                        console.log(`[Coins] Re-applied ${coinsAmount} coins as pending for order ${orderId} (status back to ${orderStatus})`);
                     }
                 }
             } catch (coinErr) {
                 console.error('[Coins] Error processing coin state change:', coinErr);
                 // Don't fail the order status update if coin processing fails
             }
+        }
+
+        // Handle affiliate refer settlement: on delivery confirm (lock until return period); on return/cancel revert; on revert back from return/cancel re-apply
+        try {
+            const wasReturnedOrCancelled = (oldStatus === 'Cancelled' || oldStatus === 'Returned');
+            const isNowReturnedOrCancelled = (orderStatus === 'Cancelled' || orderStatus === 'Returned');
+
+            if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
+                if (wasReturnedOrCancelled) {
+                    const reapplyResult = await affiliateModel.reapplyReferSettlementOnDelivery(orderId, new Date());
+                    if (reapplyResult.updated > 0) {
+                        console.log(`[Affiliate] Re-applied ${reapplyResult.updated} refer settlement(s) for order ${orderId} (status back to Delivered)`);
+                    }
+                } else {
+                    const confirmResult = await affiliateModel.confirmReferSettlementOnDelivery(orderId, new Date());
+                    if (confirmResult.updated > 0) {
+                        console.log(`[Affiliate] Confirmed ${confirmResult.updated} refer settlement(s) for order ${orderId} (locked until return period)`);
+                    }
+                }
+            } else if (isNowReturnedOrCancelled && !wasReturnedOrCancelled) {
+                if (oldStatus === 'Delivered') {
+                    const revertResult = await affiliateModel.revertReferSettlementOnReturn(orderId);
+                    if (revertResult.reverted > 0) {
+                        console.log(`[Affiliate] Reverted ${revertResult.reverted} refer settlement(s) for ${orderStatus.toLowerCase()} order ${orderId}`);
+                    }
+                } else {
+                    const cancelResult = await affiliateModel.revertPendingReferSettlementOnCancel(orderId);
+                    if (cancelResult.reverted > 0) {
+                        console.log(`[Affiliate] Reverted ${cancelResult.reverted} pending refer settlement(s) for cancelled order ${orderId}`);
+                    }
+                }
+            } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && orderStatus !== 'Delivered') {
+                const reapplyPendingResult = await affiliateModel.reapplyReferSettlementToPending(orderId);
+                if (reapplyPendingResult.updated > 0) {
+                    console.log(`[Affiliate] Re-applied ${reapplyPendingResult.updated} refer settlement(s) to pending for order ${orderId} (status back to ${orderStatus})`);
+                }
+            }
+        } catch (affiliateErr) {
+            console.error('[Affiliate] Error processing refer settlement on order status change:', affiliateErr);
+            // Don't fail the order status update
         }
 
         // Return updated order

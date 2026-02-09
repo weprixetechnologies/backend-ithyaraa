@@ -67,7 +67,7 @@ async function addVariationsToDummyProducts() {
         const products = [];
         for (const product of allProducts) {
             const [variations] = await db.query(
-                'SELECT variationID FROM variations WHERE productID = ? COLLATE utf8mb4_unicode_ci LIMIT 1',
+                'SELECT variationID FROM variations WHERE productID = ? LIMIT 1',
                 [product.presaleProductID]
             );
             if (variations.length === 0) {

@@ -64,7 +64,15 @@ const handleOrderWebhookController = async (req, res) => {
         // ====================================================================
         const signature = req.headers['x-verify'] || req.headers['X-VERIFY'];
 
-        // req.body is a Buffer when using express.raw()
+        // req.body MUST be a Buffer when using express.raw()
+        if (!Buffer.isBuffer(req.body)) {
+            console.error('[WEBHOOK-ORDER] Expected raw Buffer body but received:', typeof req.body);
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid webhook body format'
+            });
+        }
+
         // Convert to string for signature verification
         const rawBodyString = req.body.toString('utf8');
 
@@ -74,9 +82,10 @@ const handleOrderWebhookController = async (req, res) => {
         if (!signature) {
             console.error('[WEBHOOK-ORDER] Missing X-VERIFY header');
             console.error('[WEBHOOK-ORDER] All headers:', Object.keys(req.headers));
-            console.error('[WEBHOOK-ORDER] Raw body:', rawBodyString);
-            // Still try to process if no signature (for testing)
-            console.warn('[WEBHOOK-ORDER] Proceeding without signature verification');
+            return res.status(401).json({
+                success: false,
+                message: 'Missing X-VERIFY signature header'
+            });
         }
 
         // Verify webhook signature using raw body string
@@ -87,12 +96,14 @@ const handleOrderWebhookController = async (req, res) => {
             console.error('[WEBHOOK] Received signature:', signature);
             console.error('[WEBHOOK] Raw body length:', rawBodyString.length);
             console.error('[WEBHOOK] Raw body (first 500 chars):', rawBodyString.substring(0, 500));
-            // Still process the webhook but log the issue
-            // PhonePe might use different signature format in some cases
-            console.warn('[WEBHOOK] Proceeding with webhook processing despite signature mismatch');
-        } else {
-            console.log('[WEBHOOK] Signature verified successfully');
+            // SECURITY: Do not process webhook if signature is invalid
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid webhook signature'
+            });
         }
+
+        console.log('[WEBHOOK] Signature verified successfully');
 
         // ====================================================================
         // STEP 2: EXTRACT WEBHOOK DATA
@@ -221,7 +232,15 @@ const handlePresaleWebhookController = async (req, res) => {
         // ====================================================================
         const signature = req.headers['x-verify'] || req.headers['X-VERIFY'];
 
-        // req.body is a Buffer when using express.raw()
+        // req.body MUST be a Buffer when using express.raw()
+        if (!Buffer.isBuffer(req.body)) {
+            console.error('[WEBHOOK-PRESALE] Expected raw Buffer body but received:', typeof req.body);
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid webhook body format'
+            });
+        }
+
         // Convert to string for signature verification
         const rawBodyString = req.body.toString('utf8');
 
@@ -231,9 +250,10 @@ const handlePresaleWebhookController = async (req, res) => {
         if (!signature) {
             console.error('[WEBHOOK-PRESALE] Missing X-VERIFY header');
             console.error('[WEBHOOK-PRESALE] All headers:', Object.keys(req.headers));
-            console.error('[WEBHOOK-PRESALE] Raw body:', rawBodyString);
-            // Still try to process if no signature (for testing)
-            console.warn('[WEBHOOK-PRESALE] Proceeding without signature verification');
+            return res.status(401).json({
+                success: false,
+                message: 'Missing X-VERIFY signature header'
+            });
         }
 
         // Verify webhook signature using raw body string
@@ -244,12 +264,14 @@ const handlePresaleWebhookController = async (req, res) => {
             console.error('[WEBHOOK-PRESALE] Received signature:', signature);
             console.error('[WEBHOOK-PRESALE] Raw body length:', rawBodyString.length);
             console.error('[WEBHOOK-PRESALE] Raw body (first 500 chars):', rawBodyString.substring(0, 500));
-            // Still process the webhook but log the issue
-            // PhonePe might use different signature format in some cases
-            console.warn('[WEBHOOK-PRESALE] Proceeding with webhook processing despite signature mismatch');
-        } else {
-            console.log('[WEBHOOK-PRESALE] Signature verified successfully');
+            // SECURITY: Do not process webhook if signature is invalid
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid webhook signature'
+            });
         }
+
+        console.log('[WEBHOOK-PRESALE] Signature verified successfully');
 
         // ====================================================================
         // STEP 2: EXTRACT WEBHOOK DATA
@@ -473,6 +495,17 @@ async function handleRegularOrderWebhook(
         if (processedStatus.isSuccess) {
             await sendOrderConfirmationAndNotifications(merchantID);
             console.log(`[WEBHOOK-ORDER] Confirmation emails sent for order ${order.orderID}`);
+
+            // Record coupon usage for PREPAID orders (idempotent; COD is recorded in placeOrder)
+            if (order.couponCode && Number(order.couponDiscount || 0) > 0 && order.uid) {
+                try {
+                    const couponsModel = require('../model/couponsModel');
+                    await couponsModel.recordCouponUsageForOrder(order.couponCode, order.uid, order.orderID);
+                    console.log(`[WEBHOOK-ORDER] Coupon usage recorded for order ${order.orderID}`);
+                } catch (couponErr) {
+                    console.error('[WEBHOOK-ORDER] Failed to record coupon usage:', couponErr);
+                }
+            }
         } else {
             console.log(`[WEBHOOK-ORDER] Payment not successful - skipping email notifications`);
         }

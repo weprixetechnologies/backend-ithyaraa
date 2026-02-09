@@ -57,7 +57,7 @@ const getPendingBankDetails = async () => {
     const [rows] = await db.query(
         `SELECT bbd.*, u.name as brandName, u.emailID as brandEmail, u.username
          FROM brand_bank_details bbd
-         LEFT JOIN users u ON bbd.brandID = u.uid COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users u ON bbd.brandID = u.uid
          WHERE bbd.status = 'pending'
          ORDER BY bbd.createdAt ASC`
     );
@@ -69,7 +69,7 @@ const getAllBankDetails = async () => {
     const [rows] = await db.query(
         `SELECT bbd.*, u.name as brandName, u.emailID as brandEmail, u.username
          FROM brand_bank_details bbd
-         LEFT JOIN users u ON bbd.brandID = u.uid COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users u ON bbd.brandID = u.uid
          ORDER BY 
              CASE bbd.status 
                  WHEN 'active' THEN 1 
