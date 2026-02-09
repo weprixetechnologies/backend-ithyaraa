@@ -194,18 +194,63 @@ async function checkPaymentStatus(merchantID) {
 /**
  * Verify webhook signature
  * @param {string} signature - X-VERIFY header from webhook
- * @param {string} payload - Raw request body
+ * @param {string} payload - Raw request body (JSON string)
  * @returns {boolean} - Whether signature is valid
+ *
+ * PhonePe server-to-server callbacks send a body like:
+ *   { "response": "<base64_encoded_json>" }
+ *
+ * And X-VERIFY is:
+ *   sha256(base64_response + salt_key) + "###" + salt_index
  */
 function verifyWebhookSignature(signature, payload) {
     try {
-        // For webhooks, PhonePe uses a different signature format
-        // The signature should be: sha256(payload + salt) + "###" + saltIndex
-        const raw = payload + key;
-        const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
-        const expectedSignature = `${sha256}###${keyIndex}`;
+        if (!signature || typeof signature !== 'string') {
+            console.error('Webhook signature verification error: missing or invalid signature header');
+            return false;
+        }
 
-        return signature === expectedSignature;
+        // Split received signature into hash and index parts
+        const [receivedHash, receivedIndex] = signature.split('###');
+        if (!receivedHash || !receivedIndex) {
+            console.error('Webhook signature verification error: malformed X-VERIFY header');
+            return false;
+        }
+
+        // Optional: enforce expected key index
+        if (String(receivedIndex) !== String(keyIndex)) {
+            console.error(
+                `Webhook signature verification error: unexpected key index. Expected=${keyIndex}, received=${receivedIndex}`
+            );
+            return false;
+        }
+
+        // Parse payload to extract base64-encoded "response" field
+        let base64Response;
+        try {
+            const parsed = JSON.parse(payload);
+            base64Response = parsed?.response;
+        } catch (e) {
+            console.error('Webhook signature verification error: failed to parse payload JSON for response field', e);
+            return false;
+        }
+
+        if (!base64Response || typeof base64Response !== 'string') {
+            console.error('Webhook signature verification error: missing or invalid response field in payload');
+            return false;
+        }
+
+        // Compute expected hash as per PhonePe docs: SHA256(base64_response + salt_key)
+        const computedHash = crypto
+            .createHash('sha256')
+            .update(base64Response + key)
+            .digest('hex');
+
+        const isValid = computedHash === receivedHash;
+        if (!isValid) {
+            console.error('Webhook signature verification error: hash mismatch');
+        }
+        return isValid;
     } catch (error) {
         console.error('Webhook signature verification error:', error);
         return false;
