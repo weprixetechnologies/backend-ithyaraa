@@ -1,5 +1,5 @@
 // Load environment variables
-require('dotenv').config();
+// require('dotenv').config();
 
 // Core modules
 const fs = require('fs');

@@ -2,6 +2,8 @@ const model = require('./../model/productModel');
 const attributeModel = require('./../model/attributesModel');
 const crossSellModel = require('./../model/crossSellModel');
 const db = require('./../utils/dbconnect');
+const { getCache, setCache } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
 const { get } = require('../router/admin/productRouter');
 
 const generateRandomID = () => {
@@ -761,15 +763,195 @@ const getProductDetails = async (productID) => {
 
 
 // Public shop products with filters: multiple categories, price range, stock, pagination
-async function getShopProductsPublic(query) {
-    let page = Math.max(1, parseInt(query.page) || 1);
-    let limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
-    let type = query.type || 'variable';
+// async function getShopProductsPublic(query) {
+//     let page = Math.max(1, parseInt(query.page) || 1);
+//     let limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
+//     let type = query.type || 'variable';
 
+//     const filters = [];
+//     const values = [];
+
+
+//     // Category filter: categoryID can be comma-separated IDs
+//     if (query.categoryID) {
+//         const ids = String(query.categoryID)
+//             .split(',')
+//             .map(s => s.trim())
+//             .filter(Boolean)
+//             .map(Number)
+//             .filter(n => !Number.isNaN(n));
+//         if (ids.length > 0) {
+//             const orConds = ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+//             filters.push(`(${orConds.join(' OR ')})`);
+//             values.push(...ids);
+//         }
+//     }
+
+//     // Section filter: sectionid can be a single value or comma-separated list
+//     if (query.sectionid) {
+//         const sectionIds = String(query.sectionid)
+//             .split(',')
+//             .map(s => s.trim())
+//             .filter(Boolean);
+//         if (sectionIds.length > 0) {
+//             const orConds = sectionIds.map(() => `sectionid = ?`);
+//             filters.push(`(${orConds.join(' OR ')})`);
+//             values.push(...sectionIds);
+//         }
+//     }
+
+//     // Type filter: default to 'variable' unless explicitly provided otherwise
+//     if (type && String(type).toLowerCase() !== 'all') {
+//         filters.push(`type = ?`);
+//         values.push(type);
+//     }
+
+//     // Price range (single min/max) or multiple bands via priceBands param
+//     const priceBands = typeof query.priceBands === 'string'
+//         ? query.priceBands.split(',').map(s => s.trim()).filter(Boolean)
+//         : [];
+
+//     if (priceBands.length > 0) {
+//         const bandConds = [];
+//         for (const band of priceBands) {
+//             if (band === 'u500') bandConds.push(`(salePrice >= 0 AND salePrice <= 499)`);
+//             else if (band === '500-999') bandConds.push(`(salePrice >= 500 AND salePrice <= 999)`);
+//             else if (band === '1000-1999') bandConds.push(`(salePrice >= 1000 AND salePrice <= 1999)`);
+//             else if (band === '2000+') bandConds.push(`(salePrice >= 2000)`);
+//         }
+//         if (bandConds.length > 0) filters.push(`(${bandConds.join(' OR ')})`);
+//     } else {
+//         const minPrice = query.minPrice !== undefined && query.minPrice !== '' ? Number(query.minPrice) : null;
+//         const maxPrice = query.maxPrice !== undefined && query.maxPrice !== '' ? Number(query.maxPrice) : null;
+//         if (minPrice !== null && !Number.isNaN(minPrice)) { filters.push(`salePrice >= ?`); values.push(minPrice); }
+//         if (maxPrice !== null && !Number.isNaN(maxPrice)) { filters.push(`salePrice <= ?`); values.push(maxPrice); }
+//     }
+
+//     // Stock filter (optional): stock=in|out maps to status field values
+//     if (query.stock) {
+//         const stock = String(query.stock).toLowerCase();
+//         if (stock === 'in') {
+//             // Treat NULL as In Stock as well
+//             filters.push(`(status = ? OR status IS NULL)`);
+//             values.push('In Stock');
+//         } else if (stock === 'out') {
+//             filters.push(`status = ?`);
+//             values.push('Out of Stock');
+//         }
+//     }
+
+//     // Optional search by name
+//     if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
+
+//     // Offer filter
+//     if (query.offerID) {
+//         filters.push(`offerID = ?`);
+//         values.push(query.offerID);
+//     }
+
+//     // Sorting
+//     const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
+//     const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
+//     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+//     // Base query
+//     let baseQuery = `SELECT productID, name, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
+//     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
+//     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
+
+//     // Count query
+//     let countQuery = `SELECT COUNT(*) AS total FROM products`;
+//     if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
+
+//     const offset = (page - 1) * limit;
+//     const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+
+//     // Parse JSON fields
+//     rows.forEach(row => {
+//         try {
+//             if (row.featuredImage && typeof row.featuredImage === 'string') {
+//                 row.featuredImage = JSON.parse(row.featuredImage);
+//             }
+//             if (row.categories && typeof row.categories === 'string') {
+//                 row.categories = JSON.parse(row.categories);
+//             }
+//         } catch (e) {
+//             console.error('Error parsing JSON fields for product:', row.productID, e);
+//         }
+//     });
+//     // build cache key
+//     const cacheKey = SCOPE.PRODUCTS_PAGE(page, limit, filters);
+
+//     // 1️⃣ check cache
+//     const cached = await getCache(cacheKey);
+//     if (cached) {
+//         return cached;
+//     }
+//     const [countRows] = await db.query(countQuery, values);
+//     const total = countRows?.[0]?.total || 0;
+
+//     const data = {
+//         success: true,
+//         data: rows,
+//         pagination: {
+//             currentPage: page,
+//             totalItems: total,
+//             totalPages: Math.ceil(total / limit),
+//             itemsPerPage: limit,
+//             hasPrevPage: page > 1,
+//             hasNextPage: page < Math.ceil(total / limit)
+//         }
+//     };
+//     await setCache(cacheKey, data, 24400);
+//     return data;
+// }
+
+async function getShopProductsPublic(query) {
+    // =========================
+    // Pagination & base params
+    // =========================
+    const page = Math.max(1, parseInt(query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
+    const type = query.type || 'variable';
+
+    // =========================
+    // 🔑 CACHE FILTERS (REQUEST INTENT)
+    // =========================
+    // IMPORTANT:
+    // - Use placeholders so presence/absence changes cache key
+    // - Do NOT use SQL filters here
+    const cacheFilters = {
+        categoryID: query.categoryID ?? '__none__',
+        sectionid: query.sectionid ?? '__none__',
+        type: type !== 'all' ? type : '__all__',
+        priceBands: query.priceBands ?? '__none__',
+        minPrice: query.minPrice ?? '__none__',
+        maxPrice: query.maxPrice ?? '__none__',
+        stock: query.stock ?? '__none__',
+        search: query.search ?? '__none__',
+        offerID: query.offerID ?? '__none__',
+        sortBy: query.sortBy ?? 'createdAt',
+        sortOrder: query.sortOrder ?? 'DESC',
+    };
+
+    // Build cache key
+    const cacheKey = SCOPE.PRODUCTS_PAGE(page, limit, cacheFilters);
+
+    // =========================
+    // 🚀 CACHE CHECK (BEFORE DB)
+    // =========================
+    const cached = await getCache(cacheKey);
+    if (cached) {
+        return cached;
+    }
+
+    // =========================
+    // SQL FILTERS (IMPLEMENTATION)
+    // =========================
     const filters = [];
     const values = [];
 
-    // Category filter: categoryID can be comma-separated IDs
+    // Category filter
     if (query.categoryID) {
         const ids = String(query.categoryID)
             .split(',')
@@ -777,19 +959,23 @@ async function getShopProductsPublic(query) {
             .filter(Boolean)
             .map(Number)
             .filter(n => !Number.isNaN(n));
+
         if (ids.length > 0) {
-            const orConds = ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+            const orConds = ids.map(
+                () => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`
+            );
             filters.push(`(${orConds.join(' OR ')})`);
             values.push(...ids);
         }
     }
 
-    // Section filter: sectionid can be a single value or comma-separated list
+    // Section filter
     if (query.sectionid) {
         const sectionIds = String(query.sectionid)
             .split(',')
             .map(s => s.trim())
             .filter(Boolean);
+
         if (sectionIds.length > 0) {
             const orConds = sectionIds.map(() => `sectionid = ?`);
             filters.push(`(${orConds.join(' OR ')})`);
@@ -797,13 +983,13 @@ async function getShopProductsPublic(query) {
         }
     }
 
-    // Type filter: default to 'variable' unless explicitly provided otherwise
+    // Type filter
     if (type && String(type).toLowerCase() !== 'all') {
         filters.push(`type = ?`);
         values.push(type);
     }
 
-    // Price range (single min/max) or multiple bands via priceBands param
+    // Price bands OR min/max
     const priceBands = typeof query.priceBands === 'string'
         ? query.priceBands.split(',').map(s => s.trim()).filter(Boolean)
         : [];
@@ -811,24 +997,34 @@ async function getShopProductsPublic(query) {
     if (priceBands.length > 0) {
         const bandConds = [];
         for (const band of priceBands) {
-            if (band === 'u500') bandConds.push(`(salePrice >= 0 AND salePrice <= 499)`);
-            else if (band === '500-999') bandConds.push(`(salePrice >= 500 AND salePrice <= 999)`);
-            else if (band === '1000-1999') bandConds.push(`(salePrice >= 1000 AND salePrice <= 1999)`);
+            if (band === 'u500') bandConds.push(`(salePrice BETWEEN 0 AND 499)`);
+            else if (band === '500-999') bandConds.push(`(salePrice BETWEEN 500 AND 999)`);
+            else if (band === '1000-1999') bandConds.push(`(salePrice BETWEEN 1000 AND 1999)`);
             else if (band === '2000+') bandConds.push(`(salePrice >= 2000)`);
         }
         if (bandConds.length > 0) filters.push(`(${bandConds.join(' OR ')})`);
     } else {
-        const minPrice = query.minPrice !== undefined && query.minPrice !== '' ? Number(query.minPrice) : null;
-        const maxPrice = query.maxPrice !== undefined && query.maxPrice !== '' ? Number(query.maxPrice) : null;
-        if (minPrice !== null && !Number.isNaN(minPrice)) { filters.push(`salePrice >= ?`); values.push(minPrice); }
-        if (maxPrice !== null && !Number.isNaN(maxPrice)) { filters.push(`salePrice <= ?`); values.push(maxPrice); }
+        const minPrice = query.minPrice !== undefined && query.minPrice !== ''
+            ? Number(query.minPrice)
+            : null;
+        const maxPrice = query.maxPrice !== undefined && query.maxPrice !== ''
+            ? Number(query.maxPrice)
+            : null;
+
+        if (minPrice !== null && !Number.isNaN(minPrice)) {
+            filters.push(`salePrice >= ?`);
+            values.push(minPrice);
+        }
+        if (maxPrice !== null && !Number.isNaN(maxPrice)) {
+            filters.push(`salePrice <= ?`);
+            values.push(maxPrice);
+        }
     }
 
-    // Stock filter (optional): stock=in|out maps to status field values
+    // Stock filter
     if (query.stock) {
         const stock = String(query.stock).toLowerCase();
         if (stock === 'in') {
-            // Treat NULL as In Stock as well
             filters.push(`(status = ? OR status IS NULL)`);
             values.push('In Stock');
         } else if (stock === 'out') {
@@ -837,8 +1033,11 @@ async function getShopProductsPublic(query) {
         }
     }
 
-    // Optional search by name
-    if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
+    // Search
+    if (query.search) {
+        filters.push(`name LIKE ?`);
+        values.push(`%${query.search}%`);
+    }
 
     // Offer filter
     if (query.offerID) {
@@ -851,35 +1050,47 @@ async function getShopProductsPublic(query) {
     const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-    // Base query
-    let baseQuery = `SELECT productID, name, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
+    // =========================
+    // SQL QUERIES
+    // =========================
+    let baseQuery = `
+        SELECT productID, name, regularPrice, salePrice,
+               discountType, discountValue, type, status,
+               brand, featuredImage, categories, sectionid, createdAt
+        FROM products
+    `;
+
     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
-    // Count query
     let countQuery = `SELECT COUNT(*) AS total FROM products`;
     if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
 
     const offset = (page - 1) * limit;
-    const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+
+    const [rows] = await db.query(
+        `${baseQuery} LIMIT ? OFFSET ?`,
+        [...values, limit, offset]
+    );
 
     // Parse JSON fields
     rows.forEach(row => {
         try {
-            if (row.featuredImage && typeof row.featuredImage === 'string') {
+            if (typeof row.featuredImage === 'string') {
                 row.featuredImage = JSON.parse(row.featuredImage);
             }
-            if (row.categories && typeof row.categories === 'string') {
+            if (typeof row.categories === 'string') {
                 row.categories = JSON.parse(row.categories);
             }
         } catch (e) {
-            console.error('Error parsing JSON fields for product:', row.productID, e);
+            console.error('JSON parse error for product:', row.productID, e);
         }
     });
+
     const [countRows] = await db.query(countQuery, values);
     const total = countRows?.[0]?.total || 0;
 
-    return {
+    const data = {
         success: true,
         data: rows,
         pagination: {
@@ -888,10 +1099,22 @@ async function getShopProductsPublic(query) {
             totalPages: Math.ceil(total / limit),
             itemsPerPage: limit,
             hasPrevPage: page > 1,
-            hasNextPage: page < Math.ceil(total / limit)
-        }
+            hasNextPage: page < Math.ceil(total / limit),
+        },
     };
+
+    // =========================
+    // 💾 SAVE CACHE
+    // =========================
+    await setCache(cacheKey, data, 300); // 5 minutes TTL
+
+    return data;
 }
+
+module.exports = {
+    getShopProductsPublic,
+};
+
 
 const deleteProduct = async (productID) => {
     try {

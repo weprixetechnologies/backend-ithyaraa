@@ -254,7 +254,8 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 async function validateAndApplyCoupon(couponCode, cartData, uid) {
     try {
         console.log('=== ORDER COUPON VALIDATION ===');
-        console.log('Coupon code:', couponCode);
+        console.log('UID:', uid);
+        console.log('Coupon code (raw):', couponCode);
         console.log('Coupon code type:', typeof couponCode);
         console.log('Coupon code length:', couponCode ? couponCode.length : 'null');
 
@@ -266,17 +267,22 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
             [couponCode]
         );
 
+        console.log('Order coupon query result:', couponRows);
+
         if (!couponRows || couponRows.length === 0) {
             console.log('Coupon validation failed - no rows or usage limit reached');
             return { success: false, message: 'Invalid or expired coupon code' };
         }
 
         const coupon = couponRows[0];
+        console.log('Order coupon row:', coupon);
 
         // Per-user usage limit (maxUsagePerUser: NULL = unlimited, 1 = single use, N = N times)
         if (uid && coupon.maxUsagePerUser != null && Number(coupon.maxUsagePerUser) >= 0) {
             const usedByUser = await couponsModel.getCouponUsageCountByUser(coupon.couponID, uid);
+            console.log('Order maxUsagePerUser:', coupon.maxUsagePerUser, 'usedByUser:', usedByUser);
             if (usedByUser >= Number(coupon.maxUsagePerUser)) {
+                console.log('Order coupon rejected due to per-user usage limit.');
                 return {
                     success: false,
                     message: 'You have already used this coupon the maximum number of times.'
@@ -284,25 +290,47 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
             }
         }
 
-        // Calculate subtotal for eligible products (no offer, not combo)
+        // Calculate subtotal for eligible products (variable only, no offer) using lineTotalBefore
         let subtotal = 0;
+
         cartData.items.forEach(item => {
-            if (!item.offerID && item.type !== 'combo') {
-                const price = item.salePrice || item.regularPrice || 0;
-                subtotal += price * item.quantity;
+            const lineBefore = item.lineTotalBefore != null
+                ? Number(item.lineTotalBefore)
+                : (Number(item.salePrice) || Number(item.regularPrice) || 0) * (item.quantity || 1);
+
+            const hasNoOffer =
+                item.offerID === null ||
+                item.offerID === undefined ||
+                item.offerID === '';
+
+            // Eligible only when:
+            // - Variable product
+            // - Not under any offer (offerID === null/undefined/"")
+            if (hasNoOffer && item.type === 'variable') {
+                subtotal += lineBefore;
             }
         });
+
+        // Order-level subtotal for min-order check (all selected items) from cart summary
+        const orderSubtotal = cartData.summary && cartData.summary.subtotal != null
+            ? Number(cartData.summary.subtotal)
+            : subtotal;
+
+        console.log('Order orderSubtotal (before coupon, summary.subtotal):', orderSubtotal);
+        console.log('Order eligible subtotal (before coupon, lineTotalBefore eligible):', subtotal);
 
         if (subtotal === 0) {
             return {
                 success: false,
-                message: 'No eligible products found for this coupon. Coupons can only be applied to products without offers.'
+                message: 'No eligible products found for this coupon. Coupons can only be applied to variable products without offers.'
             };
         }
 
-        // Minimum order value (minOrderValue: NULL = no minimum)
+        // Minimum order value (minOrderValue: NULL = no minimum) - based on eligible subtotal only
         const minOrder = coupon.minOrderValue != null ? Number(coupon.minOrderValue) : null;
+        console.log('Order minOrderValue from DB:', minOrder);
         if (minOrder != null && minOrder > 0 && subtotal < minOrder) {
+            console.log('Order coupon rejected due to minOrderValue. eligible subtotal:', subtotal);
             return {
                 success: false,
                 message: `Minimum order value of ₹${minOrder} required for this coupon`
@@ -318,6 +346,8 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
         }
         if (isNaN(discount)) discount = 0;
         if (discount > subtotal) discount = subtotal;
+
+        console.log('Order coupon discount computed:', discount);
 
         return {
             success: true,

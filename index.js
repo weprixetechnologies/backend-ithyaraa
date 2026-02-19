@@ -44,6 +44,7 @@ const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleBookingRouter = require('./router/admin/presaleBookingRouter')
 const presaleRouter = require('./router/presaleRouter')
 const homepageSectionsRouter = require('./router/homepageSectionsRouter')
+const productGroupsRouter = require('./router/productGroupsRouter')
 const newsletterRouter = require('./router/newsletterRouter')
 const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
 const newsletterController = require('./controllers/newsletterController')
@@ -118,6 +119,11 @@ app.use('/api/admin', newsletterAdminRouter);
 app.use('/api/admin', faqAdminRouter);
 app.use('/api/admin', affiliateAdminRouter);
 app.use('/api/admin', adminAuthRouter);
+// Product groups (homepage grouping) - admin endpoints
+app.use('/api/admin/product-groups', productGroupsRouter);
+// Custom image sections
+const customImageSectionsRouter = require('./router/customImageSectionsRouter');
+app.use('/api/admin/custom-image-sections', customImageSectionsRouter);
 
 // BRAND AUTH ROUTE
 app.use('/api/brand', brandAuthRouter)
