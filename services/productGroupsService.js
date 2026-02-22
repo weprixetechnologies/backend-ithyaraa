@@ -13,6 +13,7 @@ const createGroupService = async (groupData) => {
 
     const payload = {
       sectionID,
+      title: groupData.title !== undefined ? (groupData.title === null ? null : String(groupData.title)) : undefined,
       orderIndex: groupData.orderIndex !== undefined ? parseInt(groupData.orderIndex, 10) : 0,
       imageUrl: groupData.imageUrl || null,
       isBannerised: !!groupData.isBannerised
@@ -73,6 +74,7 @@ const updateGroupService = async (groupID, data) => {
 
     const payload = {};
     if (data.sectionID !== undefined) payload.sectionID = parseInt(data.sectionID, 10);
+    if (data.title !== undefined) payload.title = data.title === null ? null : String(data.title);
     if (data.orderIndex !== undefined) payload.orderIndex = parseInt(data.orderIndex, 10);
     if (data.imageUrl !== undefined) payload.imageUrl = data.imageUrl;
     if (data.isBannerised !== undefined) payload.isBannerised = !!data.isBannerised;

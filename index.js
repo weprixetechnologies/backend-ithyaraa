@@ -124,6 +124,10 @@ app.use('/api/admin/product-groups', productGroupsRouter);
 // Custom image sections
 const customImageSectionsRouter = require('./router/customImageSectionsRouter');
 app.use('/api/admin/custom-image-sections', customImageSectionsRouter);
+// Section items (order mapping for homepage sections)
+const sectionItemsRouter = require('./router/sectionItemsRouter');
+app.use('/api/section-items', sectionItemsRouter);
+app.use('/api/admin/section-items', sectionItemsRouter);
 
 // BRAND AUTH ROUTE
 app.use('/api/brand', brandAuthRouter)

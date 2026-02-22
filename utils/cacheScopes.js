@@ -31,6 +31,8 @@ const SCOPE = {
 
   // ========== HOMEPAGE ==========
   HOMEPAGE: 'homepage:data',
+  // Top-level home data (used by section-items/home API)
+  HOME_DATA: 'home:data',
 };
 
 module.exports = { SCOPE };
