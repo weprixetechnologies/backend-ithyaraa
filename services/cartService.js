@@ -217,98 +217,298 @@ async function addCartCombo(uid, quantity, mainProductID, products) {
 
 
 async function getCart(uid) {
+    async function recomputeItemBaseWithFlash(item, variationMap) {
+        if (!item || item.productType === 'combo') return;
+
+        const quantity = Number(item.quantity) || 0;
+        if (item.overridePrice != null) item.overridePrice = Number(item.overridePrice);
+        if (item.regularPrice != null) item.regularPrice = Number(item.regularPrice);
+        if (item.salePrice != null) item.salePrice = Number(item.salePrice);
+
+        // 1) Determine regular & sale bases
+        let regularBase = null;
+        let saleBase = null;
+
+        if (item.variationID && variationMap) {
+            const v = variationMap.get(item.variationID) || null;
+            if (v) {
+                if (v.variationPrice != null) {
+                    regularBase = Number(v.variationPrice);
+                }
+                if (v.variationSalePrice != null) {
+                    saleBase = Number(v.variationSalePrice);
+                }
+            }
+        }
+
+        if (regularBase === null || Number.isNaN(regularBase)) {
+            regularBase = Number(item.regularPrice);
+        }
+        if (saleBase === null || Number.isNaN(saleBase)) {
+            saleBase = Number(item.salePrice);
+        }
+
+        // 2) Flash: always check current flash status from DB
+        const flash = await flashSaleModel.getActiveFlashForProduct(item.productID);
+
+        let flashUnit = null;
+        if (!flash) {
+            item.isFlashSale = 0;
+        } else {
+            const dtype = String(flash.discountType || '').toLowerCase();
+            const dval = Number(flash.discountValue || 0);
+
+            if (dval > 0 && (dtype === 'percentage' || dtype === 'fixed' || dtype === 'flat') && !Number.isNaN(regularBase)) {
+                flashUnit = regularBase;
+                if (dtype === 'percentage') {
+                    flashUnit = Math.max(0, +(regularBase * (1 - dval / 100)).toFixed(2));
+                } else {
+                    // fixed/flat
+                    flashUnit = Math.max(0, +(regularBase - dval).toFixed(2));
+                }
+                item.isFlashSale = 1;
+            } else {
+                item.isFlashSale = 0;
+            }
+        }
+
+        // 3) Compute before/after prices
+        if (item.isFlashSale && flashUnit != null) {
+            // Before = regular (no flash), After = flash price (or override)
+            const unitBefore = Number.isNaN(regularBase) ? 0 : regularBase;
+            const override = (item.overridePrice != null && !Number.isNaN(item.overridePrice))
+                ? item.overridePrice
+                : null;
+
+            const unitAfterBase = flashUnit;
+            const unitAfter = override != null ? override : unitAfterBase;
+
+            item.salePrice = unitAfterBase; // per-unit flash price
+
+            item.unitPriceBefore = unitBefore;
+            item.unitPriceAfter = unitAfter;
+            item.lineTotalBefore = Number((unitBefore * quantity).toFixed(2));
+            item.lineTotalAfter = Number((unitAfter * quantity).toFixed(2));
+        } else {
+            // No flash → use existing sale/regular + override; before/after the same
+            let base = !Number.isNaN(saleBase) ? saleBase : regularBase;
+            if (Number.isNaN(base)) base = 0;
+
+            const override = (item.overridePrice != null && !Number.isNaN(item.overridePrice))
+                ? item.overridePrice
+                : null;
+
+            const unit = override != null ? override : base;
+            item.unitPriceBefore = unit;
+            item.unitPriceAfter = unit;
+            item.lineTotalBefore = Number((unit * quantity).toFixed(2));
+            item.lineTotalAfter = item.lineTotalBefore;
+        }
+    }
+
+    // Batch helpers for variations and combo items so we avoid N+1
+    async function buildVariationMap(items) {
+        const ids = [...new Set(items.map(i => i.variationID).filter(Boolean))];
+        if (ids.length === 0) return new Map();
+
+        const placeholders = ids.map(() => '?').join(',');
+        const [rows] = await db.query(
+            `SELECT * FROM variations WHERE variationID IN (${placeholders})`,
+            ids
+        );
+
+        const map = new Map();
+        for (const row of rows) {
+            map.set(row.variationID, row);
+        }
+        return map;
+    }
+
+    async function buildComboMap(items) {
+        const comboIDs = [...new Set(items.map(i => i.comboID).filter(Boolean))];
+        if (comboIDs.length === 0) return new Map();
+
+        const placeholders = comboIDs.map(() => '?').join(',');
+        const query = `
+            SELECT 
+                oci.comboID,
+                oci.productID, 
+                oci.variationID, 
+                p.name, 
+                p.featuredImage, 
+                p.brandID,
+                p.brand,
+                v.variationSlug AS variationName,
+                v.variationValues
+            FROM order_combo_items oci
+            JOIN products p ON oci.productID = p.productID
+            LEFT JOIN variations v ON oci.variationID = v.variationID
+            WHERE oci.comboID IN (${placeholders})
+        `;
+        const [rows] = await db.query(query, comboIDs);
+
+        const map = new Map();
+        for (const row of rows) {
+            let variationValues = [];
+            try {
+                if (row.variationValues) {
+                    variationValues = JSON.parse(row.variationValues);
+                }
+            } catch (err) {
+                variationValues = [];
+            }
+            const entry = {
+                productID: row.productID,
+                variationID: row.variationID,
+                name: row.name,
+                featuredImage: row.featuredImage,
+                brandID: row.brandID,
+                brand: row.brand,
+                variationName: row.variationName,
+                variationValues,
+            };
+            const list = map.get(row.comboID) || [];
+            list.push(entry);
+            map.set(row.comboID, list);
+        }
+        return map;
+    }
+
     const modified = await cartModel.getCartModifiedFlag(uid);
 
     if (modified === 1) {
         const items = await cartModel.getCartItems(uid);
+        const [variationMap, comboMap] = await Promise.all([
+            buildVariationMap(items),
+            buildComboMap(items),
+        ]);
 
-        // Re-verify flash sale items, reset if expired. Also normalize base price per variation
+        // Normalize pricing for each item from current DB state (including flash)
         for (const item of items) {
-            // Preserve combo parent pricing entirely
             if (item.productType === 'combo') {
-                const comboItems = await cartModel.getComboItems(item.comboID);
+                const comboItems = item.comboID ? (comboMap.get(item.comboID) || []) : [];
                 item.comboItems = comboItems;
+                // Preserve combo parent pricing as stored
+                if (item.unitPriceBefore != null && item.quantity != null) {
+                    const before = Number(item.unitPriceBefore);
+                    const after = (item.unitPriceAfter != null) ? Number(item.unitPriceAfter) : before;
+                    item.lineTotalBefore = Number((before * item.quantity).toFixed(2));
+                    item.lineTotalAfter = Number((after * item.quantity).toFixed(2));
+                }
                 continue;
             }
-            let base = null;
-            if (item.variationID) {
-                const v = await cartModel.getVariationByID(item.variationID);
-                if (v) base = Number(v.variationSalePrice ?? v.variationPrice);
-            }
-            if (base === null || Number.isNaN(base)) base = Number(item.salePrice ?? item.regularPrice);
 
-            if (item.isFlashSale) {
-                const flash = await require('../model/flashSaleModel').getActiveFlashForProduct(item.productID);
-                if (!flash) {
-                    // expired → reset to variation/base
-                    await cartModel.resetFlashForCartItem(item.cartItemID, base, item.quantity);
-                    item.salePrice = null;
-                    item.isFlashSale = 0;
-                } else {
-                    // active → compute flash price on top of variationPrice (not sale)
-                    const v = item.variationID ? await cartModel.getVariationByID(item.variationID) : null;
-                    const baseForFlash = v ? Number(v.variationPrice) : Number(item.regularPrice);
-                    const dtype = String(flash.discountType || '').toLowerCase();
-                    const dval = Number(flash.discountValue || 0);
-                    if (!Number.isNaN(baseForFlash) && dval > 0) {
-                        if (dtype === 'percentage') base = Math.max(0, +(baseForFlash * (1 - dval / 100)).toFixed(2));
-                        else if (dtype === 'fixed') base = Math.max(0, +(baseForFlash - dval).toFixed(2));
-                    } else {
-                        base = baseForFlash;
-                    }
-                }
-            }
+            await recomputeItemBaseWithFlash(item, variationMap);
 
-            // set per-item base unit for totals
-            item.unitPriceBefore = base;
-            item.unitPriceAfter = base;
-            item.lineTotalBefore = base * item.quantity;
-            item.lineTotalAfter = base * item.quantity;
-
-            const comboItems = await cartModel.getComboItems(item.comboID);
+            const comboItems = item.comboID ? (comboMap.get(item.comboID) || []) : [];
             item.comboItems = comboItems;
         }
 
-        // Decide caching behavior based on presence of flash sale items
+        // Sanitize: segregate flash-sale items from offers (null offerID so they are not eligible)
+        for (const item of items) {
+            if (item.isFlashSale) {
+                item.offerID = null;
+                item.offerApplied = false;
+                item.offerStatus = 'none';
+            } else if (item.offerID) {
+                item.offerApplied = false;
+                item.offerStatus = 'none';
+            }
+        }
+
+        // Offer application: only items with offerID are eligible (flash items have null offerID)
+        const processedOfferIDsFast = new Set();
+        for (const item of items) {
+            const comboItems = item.comboID ? (comboMap.get(item.comboID) || []) : [];
+            item.comboItems = comboItems;
+
+            if (!item.offerID || processedOfferIDsFast.has(item.offerID)) continue;
+
+            const offer = await cartModel.getActiveOfferByID(item.offerID);
+            const affectedItems = items.filter(i =>
+                i.offerID === item.offerID &&
+                i.productType !== 'combo' &&
+                (i.selected === true || i.selected === 1 || i.selected === null)
+            );
+
+            if (!offer) {
+                affectedItems.forEach(i => { i.offerStatus = 'expired'; });
+                continue;
+            }
+            if (!offer.buyCount || offer.buyCount <= 0) {
+                affectedItems.forEach(i => { i.offerStatus = 'missing'; });
+                continue;
+            }
+            affectedItems.forEach(i => {
+                if (i.unitPriceBefore === undefined || i.unitPriceBefore === null) {
+                    i.unitPriceBefore = i.overridePrice ?? i.salePrice ?? i.regularPrice;
+                }
+            });
+            if (offer.offerType === 'buy_x_get_y') {
+                applyBuyXGetY(affectedItems, offer);
+            } else if (offer.offerType === 'buy_x_at_x') {
+                applyBuyXAtXxx(affectedItems, offer);
+            }
+            processedOfferIDsFast.add(item.offerID);
+        }
+
+        // Build per-item totals
+        items.forEach(item => {
+            if (item.unitPriceBefore === undefined || item.unitPriceBefore === null) {
+                item.unitPriceBefore = Number(item.overridePrice ?? item.salePrice ?? item.regularPrice);
+            }
+            if (item.unitPriceAfter === undefined || item.unitPriceAfter === null) {
+                item.unitPriceAfter = item.unitPriceBefore;
+            }
+            item.lineTotalBefore = Number((item.unitPriceBefore * item.quantity).toFixed(2));
+            item.lineTotalAfter = Number((item.unitPriceAfter * item.quantity).toFixed(2));
+        });
+
+        // Write recomputed pricing (flash + offers) to DB
+        await cartModel.updateCartItems(items);
+
+        // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
+        const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
+        const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
+        const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
+        const totalDiscount = Number((subtotal - total).toFixed(2));
+        const summary = { subtotal, total, totalDiscount, anyModifications: items.some(it => it.isFlashSale) };
+
+        // Write to cartDetail table
+        await cartModel.updateCartDetail(uid, summary);
+
         const cart = await cartModel.getOrCreateCart(uid);
         const anyFlash = items.some(it => it.isFlashSale);
-        let summary;
         if (anyFlash) {
-            summary = await cartModel.updateCartTotals(cart.cartID);
             await cartModel.setCartModified(cart.cartID, true);
         } else {
-            // No flash sale items → keep cart cached, set modified=0 and avoid recalculation
             await cartModel.setCartModified(cart.cartID, false);
-            summary = await cartModel.getCartSummaryFromDB(uid);
         }
-        
-        // Recalculate summary based on selected items only
-        const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-        const subtotal = selectedItems.reduce((sum, i) => sum + (i.lineTotalBefore || 0), 0);
-        const total = selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0);
-        const totalDiscount = subtotal - total;
-        summary = { ...summary, subtotal, total, totalDiscount };
-        
+
         if (cart && cart.referBy) items.forEach(i => { i.referBy = cart.referBy; });
         console.log('Fast path - returning cached cart');
         return { items, summary, cartID: cart.cartID };
     }
 
     let items = await cartModel.getCartItems(uid);
+    const [variationMap, comboMap] = await Promise.all([
+        buildVariationMap(items),
+        buildComboMap(items),
+    ]);
     let anyModifications = false;
     const processedOfferIDs = new Set();
 
-    // Initialize item flags and parse prices; set base from variationSalePrice/variationPrice
+    // Initialize item flags and parse prices; recompute base/flash from current DB state
     for (const item of items) {
         item.offerApplied = false;
         item.offerStatus = 'none';
-        item.salePrice = Number(item.salePrice);
-        item.regularPrice = Number(item.regularPrice);
+        if (item.salePrice != null) item.salePrice = Number(item.salePrice);
+        if (item.regularPrice != null) item.regularPrice = Number(item.regularPrice);
         if (item.overridePrice != null) item.overridePrice = Number(item.overridePrice);
 
         // Skip recalculation for combo parent items
         if (item.productType === 'combo') {
-            const comboItems = await cartModel.getComboItems(item.comboID);
+            const comboItems = item.comboID ? (comboMap.get(item.comboID) || []) : [];
             item.comboItems = comboItems;
             // Ensure totals reflect stored unit prices
             if (item.unitPriceBefore != null && item.quantity != null) {
@@ -321,78 +521,29 @@ async function getCart(uid) {
             continue;
         }
 
-        let base = null;
-        if (item.variationID) {
-            const v = await cartModel.getVariationByID(item.variationID);
-            if (v) base = Number(v.variationSalePrice ?? v.variationPrice);
-        }
-        if (base === null || Number.isNaN(base)) base = Number(item.salePrice ?? item.regularPrice);
-
-        // If flash sale flagged and active, recompute base from variationPrice with flash discount
-        if (item.isFlashSale) {
-            const flash = await require('../model/flashSaleModel').getActiveFlashForProduct(item.productID);
-            if (!flash) {
-                await cartModel.resetFlashForCartItem(item.cartItemID, base, item.quantity);
-                item.salePrice = null;
-                item.isFlashSale = 0;
-            } else {
-                const v = item.variationID ? await cartModel.getVariationByID(item.variationID) : null;
-                const baseForFlash = v ? Number(v.variationPrice) : Number(item.regularPrice);
-                const dtype = String(flash.discountType || '').toLowerCase();
-                const dval = Number(flash.discountValue || 0);
-                if (!Number.isNaN(baseForFlash) && dval > 0) {
-                    if (dtype === 'percentage') base = Math.max(0, +(baseForFlash * (1 - dval / 100)).toFixed(2));
-                    else if (dtype === 'fixed') base = Math.max(0, +(baseForFlash - dval).toFixed(2));
-                } else {
-                    base = baseForFlash;
-                }
-            }
-        }
-
-        item.unitPriceBefore = item.overridePrice ?? base;
-        item.unitPriceAfter = item.unitPriceBefore;
-        item.lineTotalBefore = item.unitPriceBefore * item.quantity;
-        item.lineTotalAfter = item.unitPriceAfter * item.quantity;
-        console.log(`[INIT] Item ${item.cartItemID}: base=${base}, unitPriceBefore=${item.unitPriceBefore}`);
+        await recomputeItemBaseWithFlash(item, variationMap);
+        console.log(`[INIT] Item ${item.cartItemID}: unitPriceBefore=${item.unitPriceBefore}`);
     }
 
-    // Re-verify flash sale items, reset if expired (slow path)
-    // Note: This is redundant with the initialization loop above, but kept for safety
+    // Sanitize: segregate flash-sale items from offers — null offerID so they are not eligible for offer application
     for (const item of items) {
         if (item.isFlashSale) {
-            const flash = await require('../model/flashSaleModel').getActiveFlashForProduct(item.productID);
-            if (!flash) {
-                // Get base from variation if available
-                let base = null;
-                if (item.variationID) {
-                    const v = await cartModel.getVariationByID(item.variationID);
-                    if (v) base = Number(v.variationSalePrice ?? v.variationPrice);
-                }
-                if (base === null || Number.isNaN(base)) base = Number(item.salePrice ?? item.regularPrice);
-
-                await cartModel.resetFlashForCartItem(item.cartItemID, base, item.quantity);
-                // Reflect reset in-memory so downstream totals and persistence update correctly
-                item.salePrice = null;
-                item.isFlashSale = 0;
-                item.unitPriceBefore = base;
-                item.unitPriceAfter = base;
-                item.lineTotalBefore = base * item.quantity;
-                item.lineTotalAfter = base * item.quantity;
-            }
+            item.offerID = null;
+            item.offerApplied = false;
+            item.offerStatus = 'none';
         }
     }
 
-    // Offer processing - only process selected items
+    // Offer application: only items with offerID (non-flash, selected, non-combo) are eligible
     for (const item of items) {
-        const comboItems = await cartModel.getComboItems(item.comboID);
+        const comboItems = item.comboID ? (comboMap.get(item.comboID) || []) : [];
         item.comboItems = comboItems;
 
         if (!item.offerID || processedOfferIDs.has(item.offerID)) continue;
 
         const offer = await cartModel.getActiveOfferByID(item.offerID);
-        // Only include selected items for offer processing
-        const affectedItems = items.filter(i => 
-            i.offerID === item.offerID && 
+        const affectedItems = items.filter(i =>
+            i.offerID === item.offerID &&
             i.productType !== 'combo' &&
             (i.selected === true || i.selected === 1 || i.selected === null)
         );
@@ -445,16 +596,16 @@ async function getCart(uid) {
     });
 
 
-    // Calculate totals only for selected items (selected = TRUE or NULL for backward compatibility)
+    // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
     const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-    const subtotal = selectedItems.reduce((sum, i) => sum + i.lineTotalBefore, 0);
-    const total = selectedItems.reduce((sum, i) => sum + i.lineTotalAfter, 0);
-    const totalDiscount = subtotal - total;
+    const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
+    const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
+    const totalDiscount = Number((subtotal - total).toFixed(2));
 
     const summary = { subtotal, total, totalDiscount, anyModifications };
     console.log(`[SUMMARY] subtotal=${subtotal}, total=${total}, totalDiscount=${totalDiscount}`);
 
-    // Update DB
+    // Update DB: cart_items and cartDetail
     await cartModel.updateCartItems(items);
     await cartModel.updateCartDetail(uid, summary);
 

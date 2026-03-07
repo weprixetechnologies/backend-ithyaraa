@@ -1,4 +1,6 @@
 const db = require('../utils/dbconnect'); // your DB connection
+const { getCache, setCache } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
 
 let hasIsFlashSaleColumn = null;
 async function ensureCartItemsSchema() {
@@ -149,10 +151,10 @@ async function getCartItemWithVariation(cartID, productID, variationID) {
     return rows[0] || null;
 }
 async function updateCartTotals(cartID) {
-    // 1) sum of before/after - only include selected items
+    // 1) subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter) - only selected items
     const [sumRows] = await db.query(
         `SELECT
-       COALESCE(ROUND(SUM(lineTotalBefore), 2), 0.00) AS subtotal,
+       COALESCE(ROUND(SUM(regularPrice * quantity), 2), 0.00) AS subtotal,
        COALESCE(ROUND(SUM(lineTotalAfter), 2), 0.00) AS total
      FROM cart_items
      WHERE cartID = ? AND (selected = TRUE OR selected IS NULL)`,
@@ -231,40 +233,95 @@ async function getOfferByID(offerID) {
     return rows[0] || null;
 }
 
-// Prefer this for offer validation: checks active status and date window when such columns exist
 async function getActiveOfferByID(offerID) {
-    // Try common column names for status and date ranges; fallback to simple fetch
-    const attempts = [
-        // status + startDate/endDate
-        `SELECT * FROM offers WHERE offerID = ? AND (status = 'active' OR status IS NULL) AND NOW() BETWEEN startDate AND endDate LIMIT 1`,
-        // status + startAt/endAt
-        `SELECT * FROM offers WHERE offerID = ? AND (status = 'active' OR status IS NULL) AND NOW() BETWEEN startAt AND endAt LIMIT 1`,
-        // only startDate/endDate
-        `SELECT * FROM offers WHERE offerID = ? AND NOW() BETWEEN startDate AND endDate LIMIT 1`,
-        // only startAt/endAt
-        `SELECT * FROM offers WHERE offerID = ? AND NOW() BETWEEN startAt AND endAt LIMIT 1`,
-    ];
-    for (const sql of attempts) {
+    if (!offerID) return null;
+
+    const cacheKey = SCOPE.OFFER_ACTIVE(offerID);
+
+    // Try cache first
+    try {
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            return cached;
+        }
+    } catch (err) {
+        console.error('offer cache get error', err);
+        // fall through to DB
+    }
+
+    // Schema currently has no status/start/end columns, so we just fetch by ID
+    const [rows] = await db.query(
+        `SELECT * FROM offers WHERE offerID = ? LIMIT 1`,
+        [offerID]
+    );
+    const offer = rows[0] || null;
+
+    if (offer) {
         try {
-            const [rows] = await db.query(sql, [offerID]);
-            if (rows && rows.length > 0) return rows[0];
-        } catch (_) {
-            // ignore and try next shape
+            await setCache(cacheKey, offer, 300); // 5 minutes
+        } catch (err) {
+            console.error('offer cache set error', err);
         }
     }
-    // Fallback to base fetch; treat as active if present
-    return await getOfferByID(offerID);
+
+    return offer;
 }
 
 async function updateCartItems(items) {
-    const queries = items.map(item =>
-        db.query(
+    const hasFlash = await ensureCartItemsSchema();
+    const queries = items.map(item => {
+        if (hasFlash) {
+            return db.query(
+                `UPDATE cart_items 
+         SET salePrice = ?, 
+             unitPriceBefore = ?, 
+             unitPriceAfter = ?, 
+             lineTotalBefore = ?, 
+             lineTotalAfter = ?, 
+             isFlashSale = ?, 
+             offerID = ?, 
+             offerApplied = ?, 
+             offerStatus = ? 
+         WHERE cartItemID = ?`,
+                [
+                    item.salePrice,
+                    item.unitPriceBefore,
+                    item.unitPriceAfter,
+                    item.lineTotalBefore,
+                    item.lineTotalAfter,
+                    item.isFlashSale ? 1 : 0,
+                    item.offerID ?? null,
+                    item.offerApplied ? 1 : 0,
+                    item.offerStatus,
+                    item.cartItemID
+                ]
+            );
+        }
+
+        return db.query(
             `UPDATE cart_items 
-      SET unitPriceAfter=?, lineTotalAfter=?, offerApplied=?, offerStatus=? 
-       WHERE cartItemID=?`,
-            [item.unitPriceAfter, item.lineTotalAfter, item.offerApplied ? 1 : 0, item.offerStatus, item.cartItemID]
-        )
-    );
+     SET salePrice = ?, 
+         unitPriceBefore = ?, 
+         unitPriceAfter = ?, 
+         lineTotalBefore = ?, 
+         lineTotalAfter = ?, 
+         offerID = ?, 
+         offerApplied = ?, 
+         offerStatus = ? 
+     WHERE cartItemID = ?`,
+            [
+                item.salePrice,
+                item.unitPriceBefore,
+                item.unitPriceAfter,
+                item.lineTotalBefore,
+                item.lineTotalAfter,
+                item.offerID ?? null,
+                item.offerApplied ? 1 : 0,
+                item.offerStatus,
+                item.cartItemID
+            ]
+        );
+    });
     await Promise.all(queries);
 }
 

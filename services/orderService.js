@@ -29,10 +29,10 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         throw new Error('No selected items in cart. Please select items to checkout.');
     }
 
-    // Recalculate summary for selected items only
-    const subtotal = selectedItems.reduce((sum, i) => sum + (i.lineTotalBefore || 0), 0);
-    const total = selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0);
-    const totalDiscount = subtotal - total;
+    // Recalculate summary for selected items only (same as cart: subtotal = sum(regularPrice * quantity))
+    const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
+    const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
+    const totalDiscount = Number((subtotal - total).toFixed(2));
     cartData.summary = { ...cartData.summary, subtotal, total, totalDiscount };
     cartData.items = selectedItems;
 

@@ -3,8 +3,25 @@ const router = express.Router();
 const db = require('../../utils/dbconnect');
 const { detectFlashSaleSchema } = require('../../utils/flashSaleSchema');
 const authAdminMiddleware = require('../../middleware/authAdminMiddleware');
+const { deleteCache } = require('../../utils/cacheHelper');
+const { SCOPE } = require('../../utils/cacheScopes');
 
 router.use(authAdminMiddleware.verifyAccessToken);
+
+async function invalidateFlashCacheForProducts(productIDs = []) {
+  if (!Array.isArray(productIDs) || productIDs.length === 0) return;
+  const unique = [...new Set(productIDs.filter(Boolean))];
+  if (unique.length === 0) return;
+  await Promise.all(
+    unique.map(async (pid) => {
+      try {
+        await deleteCache(SCOPE.FLASH_ACTIVE(pid));
+      } catch (err) {
+        console.error('flash sale cache delete error for product', pid, err);
+      }
+    })
+  );
+}
 
 // List flash sale details
 router.get('/', async (req, res) => {
@@ -127,6 +144,16 @@ router.put('/:saleID', async (req, res) => {
     const sql = `UPDATE ${schema.tables.details} SET ${updatePairs.join(', ')} WHERE ${d.saleID} = ?`;
     values.push(saleID);
     await db.query(sql, values);
+
+    // Invalidate flash cache for all products in this sale
+    const i = schema.items;
+    const [rows] = await db.query(
+      `SELECT ${i.productID} AS productID FROM ${schema.tables.items} WHERE ${i.saleID} = ?`,
+      [saleID]
+    );
+    const productIDs = (rows || []).map(r => r.productID);
+    await invalidateFlashCacheForProducts(productIDs);
+
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message || 'Failed to update flash sale' });
@@ -206,6 +233,12 @@ router.post('/:saleID/items', async (req, res) => {
       }
     }
     if (conn) await conn.commit();
+
+    const affectedProductIDs = items.length > 0
+      ? items.map(it => it?.productID).filter(Boolean)
+      : (Array.isArray(req.body?.productIDs) ? req.body.productIDs : []);
+    await invalidateFlashCacheForProducts(affectedProductIDs);
+
     res.json({ success: true, count });
   } catch (e) {
     if (conn) await conn.rollback();
@@ -222,6 +255,9 @@ router.delete('/:saleID/items/:productID', async (req, res) => {
     const schema = await detectFlashSaleSchema();
     const i = schema.items;
     await db.query(`DELETE FROM ${schema.tables.items} WHERE ${i.saleID} = ? AND ${i.productID} = ?`, [saleID, productID]);
+
+    await invalidateFlashCacheForProducts([productID]);
+
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message || 'Failed to remove item' });

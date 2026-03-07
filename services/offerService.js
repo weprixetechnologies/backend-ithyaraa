@@ -1,5 +1,7 @@
 const offerModel = require('../model/offersModel');
 const { v4: uuidv4 } = require('uuid');
+const { deleteCache } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
 
 const generateUniqueOfferID = async () => {
     let unique = false;
@@ -42,6 +44,13 @@ const createOffer = async (offerData) => {
             await offerModel.updateProductOfferID(productID, offerID);
             console.log('Updated product:', productID);
         }
+    }
+
+    // Invalidate offer cache
+    try {
+        await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+    } catch (err) {
+        console.error('createOffer cache delete error', err);
     }
 
     return {
@@ -135,6 +144,13 @@ const updateOffer = async (offerID, updatedData) => {
             }
         }
 
+        // Invalidate offer cache
+        try {
+            await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+        } catch (err) {
+            console.error('updateOffer cache delete error', err);
+        }
+
         return {
             success: true,
             data: result,
@@ -172,6 +188,13 @@ const deleteOffer = async (offerID) => {
                 success: false,
                 message: 'Offer not found'
             };
+        }
+
+        // Invalidate offer cache
+        try {
+            await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+        } catch (err) {
+            console.error('deleteOffer cache delete error', err);
         }
 
         return {

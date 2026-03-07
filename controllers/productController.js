@@ -2,6 +2,8 @@ const model = require('./../model/productModel');
 const imageModel = require('./../model/imagesModel')
 const imageService = require('./../services/imageService')
 const service = require('./../services/productServices');
+const { getCache, setCache, deleteCache } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
 
 const addProduct = async (req, res) => {
     try {
@@ -303,13 +305,20 @@ const editProduct = async (req, res) => {
             }
         }
 
+        // Invalidate cached product details
+        try {
+            await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
+        } catch (e) {
+            console.error('editProduct cache delete error', e);
+        }
+
         // ✅ 7. Final Success Response
-       return res.status(200).json({
-    success: true,
-    message: 'Product updated successfully',
-    productID,
-    timestamp: new Date().toISOString() // e.g., "2025-08-13T12:34:56.789Z"
-});
+        return res.status(200).json({
+            success: true,
+            message: 'Product updated successfully',
+            productID,
+            timestamp: new Date().toISOString()
+        });
 
 
     } catch (err) {
@@ -354,10 +363,26 @@ const getProductDetails = async (req, res) => {
     }
 
     try {
+        const cacheKey = SCOPE.PRODUCT_DETAIL(productID);
+        try {
+            const cached = await getCache(cacheKey);
+            if (cached) {
+                return res.status(200).json({ success: true, product: cached, cached: true });
+            }
+        } catch (e) {
+            console.error('getProductDetails cache get error', e);
+        }
+
         const product = await service.getProductDetails(productID);
 
         if (!product) {
             return res.status(404).json({ message: 'Product not found' });
+        }
+
+        try {
+            await setCache(cacheKey, product);
+        } catch (e) {
+            console.error('getProductDetails cache set error', e);
         }
 
         return res.status(200).json({ success: true, product });
@@ -382,6 +407,11 @@ const deleteProduct = async (req, res) => {
         const result = await service.deleteProduct(productID);
         
         if (result.success) {
+            try {
+                await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
+            } catch (e) {
+                console.error('deleteProduct cache delete error', e);
+            }
             return res.status(200).json({
                 success: true,
                 message: result.message,

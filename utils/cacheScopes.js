@@ -28,6 +28,10 @@ const SCOPE = {
 
   // ========== OFFERS ==========
   OFFERS_ALL: 'offers:all',
+  OFFER_ACTIVE: (offerID) => `offers:active:${offerID}`,
+
+  // ========== FLASH SALES ==========
+  FLASH_ACTIVE: (productID) => `flash:active:${productID}`,
 
   // ========== HOMEPAGE ==========
   HOMEPAGE: 'homepage:data',
