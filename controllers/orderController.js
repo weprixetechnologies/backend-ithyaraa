@@ -6,6 +6,7 @@ const fetch = require('node-fetch');
 const { addSendEmailJob } = require('../queue/emailProducer');
 const usersModel = require('../model/usersModel');
 const db = require('../utils/dbconnect');
+const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
 
 // Load from environment only
 const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
@@ -428,11 +429,65 @@ const getOrderDetailsByOrderIDController = async (req, res) => {
     }
 };
 
+const safeParseFeaturedImage = (value) => {
+    try {
+        let parsed = value;
+        while (typeof parsed === 'string') parsed = JSON.parse(parsed);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const getMyReturnsController = async (req, res) => {
+    try {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ success: false, message: 'Unauthorized' });
+        const orderModel = require('../model/orderModel');
+        const rows = await orderModel.getMyReturns(uid);
+        const grouped = {};
+        for (const row of rows) {
+            const id = row.orderID;
+            if (!grouped[id]) {
+                grouped[id] = {
+                    orderID: id,
+                    orderCreatedAt: row.orderCreatedAt,
+                    deliveredAt: row.deliveredAt,
+                    orderStatus: row.orderStatus,
+                    items: []
+                };
+            }
+            grouped[id].items.push({
+                orderItemID: row.orderItemID,
+                productID: row.productID,
+                name: row.name,
+                featuredImage: safeParseFeaturedImage(row.featuredImage),
+                quantity: row.quantity,
+                variationName: row.variationName,
+                lineTotalAfter: row.lineTotalAfter,
+                returnStatus: row.returnStatus,
+                returnRequestedAt: row.returnRequestedAt,
+                returnTrackingCode: row.returnTrackingCode,
+                returnDeliveryCompany: row.returnDeliveryCompany,
+                returnTrackingUrl: row.returnTrackingUrl,
+                replacementOrderID: row.replacementOrderID,
+                refundQueryID: row.refundQueryID
+            });
+        }
+        const returns = Object.values(grouped).sort((a, b) => new Date(b.orderCreatedAt) - new Date(a.orderCreatedAt));
+        return res.status(200).json({ success: true, returns });
+    } catch (error) {
+        console.error('Get my returns error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     placeOrderController,
     getOrderItemsByUidController,
     getOrderSummariesController,
-    getOrderDetailsByOrderIDController
+    getOrderDetailsByOrderIDController,
+    getMyReturnsController
 };
 
 const updateOrderController = async (req, res) => {
@@ -523,6 +578,52 @@ const getAllOrdersController = async (req, res) => {
     } catch (error) {
         console.error('Get all orders error:', error);
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Admin: list refund queries (GET ?page=&limit=&status=)
+const getRefundQueriesController = async (req, res) => {
+    try {
+        const refundQueryModel = require('../model/refundQueryModel');
+        const { page = 1, limit = 20, status } = req.query;
+        const result = await refundQueryModel.getRefundQueriesList({ page, limit, status: status || null });
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error('Get refund queries error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Admin: update refund query status (PUT body { status })
+const updateRefundQueryStatusController = async (req, res) => {
+    try {
+        const refundQueryModel = require('../model/refundQueryModel');
+        const { refundQueryID } = req.params;
+        const { status } = req.body || {};
+        if (!refundQueryID || !status) return res.status(400).json({ success: false, message: 'refundQueryID and status required' });
+        const valid = ['pending', 'contacting_customer', 'resolved'];
+        if (!valid.includes(status)) return res.status(400).json({ success: false, message: 'Invalid status' });
+        const updated = await refundQueryModel.updateRefundQueryStatus(refundQueryID, status);
+        if (!updated) return res.status(404).json({ success: false, message: 'Refund query not found' });
+        return res.status(200).json({ success: true, message: 'Status updated' });
+    } catch (error) {
+        console.error('Update refund query status error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Partial return: POST body { orderID, orderItemID? (optional), reason? }
+const returnOrderController = async (req, res) => {
+    try {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ success: false, message: 'Unauthorized' });
+        const { orderID, orderItemID, reason } = req.body || {};
+        if (!orderID) return res.status(400).json({ success: false, message: 'orderID is required' });
+        const result = await orderService.returnOrder(uid, { orderID, orderItemID: orderItemID || null, reason: reason || null });
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Return order error:', error);
+        return res.status(400).json({ success: false, message: error.message || 'Return request failed' });
     }
 };
 
@@ -701,13 +802,11 @@ const emailInvoiceController = async (req, res) => {
     }
 };
 
-// Update order items tracking (for admin)
+// Update order items tracking (for admin): shipment AWB and/or return AWB; match by orderItemID or name+variationName
 const updateOrderItemsTrackingController = async (req, res) => {
     try {
         const { orderId } = req.params;
-        const { items } = req.body; // [{name, variationName, trackingCode, deliveryCompany, itemStatus}]
-        const db = require('../utils/dbconnect');
-
+        const { items } = req.body; // [{ orderItemID?, name?, variationName?, trackingCode?, deliveryCompany?, returnTrackingCode?, returnDeliveryCompany?, itemStatus? }]
         if (!Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: 'Items array is required' });
         }
@@ -716,7 +815,6 @@ const updateOrderItemsTrackingController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'orderId is required' });
         }
 
-        // Verify the order exists
         const [verify] = await db.query(
             `SELECT 1 FROM orderDetail WHERE orderID = ? LIMIT 1`,
             [orderId]
@@ -725,45 +823,74 @@ const updateOrderItemsTrackingController = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
 
-        // Update matching items by name and variationName
         let updated = 0;
+        let anyDelivered = false;
         for (const it of items) {
             if (!it) continue;
-            let setClause = 'trackingCode = ?, deliveryCompany = ?';
-            const params = [it.trackingCode || null, it.deliveryCompany || null];
-            if (it.itemStatus) {
-                setClause += ', itemStatus = ?';
-                params.push(String(it.itemStatus).toLowerCase());
-            } else if (it.trackingCode) {
-                setClause += ', itemStatus = ?';
+            const updates = [];
+            const params = [];
+            if (it.trackingCode !== undefined || it.deliveryCompany !== undefined) {
+                updates.push('trackingCode = ?, deliveryCompany = ?');
+                params.push(it.trackingCode ?? null, it.deliveryCompany ?? null);
+            }
+            if (it.returnTrackingCode !== undefined || it.returnDeliveryCompany !== undefined) {
+                updates.push('returnTrackingCode = ?, returnDeliveryCompany = ?');
+                params.push(it.returnTrackingCode ?? null, it.returnDeliveryCompany ?? null);
+            }
+            if (it.returnTrackingUrl !== undefined) {
+                updates.push('returnTrackingUrl = ?');
+                params.push(it.returnTrackingUrl ?? null);
+            }
+            if (it.itemStatus !== undefined) {
+                updates.push('itemStatus = ?');
+                const statusLower = String(it.itemStatus).toLowerCase();
+                if (statusLower === 'delivered') {
+                    anyDelivered = true;
+                }
+                params.push(statusLower);
+            } else if (it.trackingCode && updates.length > 0) {
+                updates.push('itemStatus = ?');
                 params.push('shipped');
             }
+            if (updates.length === 0) continue;
+
+            const setClause = updates.join(', ');
             params.push(orderId);
-            let whereClause = 'name = ?';
-            const whereParams = [it.name];
-            if (it.variationName) {
-                whereClause += ' AND variationName = ?';
-                whereParams.push(it.variationName);
+            let whereClause;
+            const whereParams = [];
+            if (it.orderItemID != null) {
+                whereClause = 'orderItemID = ?';
+                whereParams.push(it.orderItemID);
             } else {
-                whereClause += ' AND (variationName IS NULL OR variationName = "")';
+                whereClause = 'name = ?';
+                whereParams.push(it.name);
+                if (it.variationName) {
+                    whereClause += ' AND variationName = ?';
+                    whereParams.push(it.variationName);
+                } else {
+                    whereClause += ' AND (variationName IS NULL OR variationName = "")';
+                }
             }
 
-            console.log('Updating tracking with query:', {
-                setClause,
-                params: [...params, ...whereParams],
-                whereClause
-            });
-
             const [result] = await db.query(
-                `UPDATE order_items 
-                 SET ${setClause}
-                 WHERE orderID = ? AND ${whereClause}
-                 LIMIT 1`,
+                `UPDATE order_items SET ${setClause} WHERE orderID = ? AND ${whereClause} LIMIT 1`,
                 [...params, ...whereParams]
             );
-
-            console.log('Update result:', result);
             updated += result.affectedRows || 0;
+        }
+
+        // If any item was marked as delivered via tracking, ensure deliveredAt and coinLockUntil are populated
+        if (anyDelivered) {
+            const now = new Date();
+            await db.query(
+                `UPDATE orderDetail SET deliveredAt = ? WHERE orderID = ? AND deliveredAt IS NULL`,
+                [now, orderId]
+            );
+            const lockUntil = new Date(now.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+            await db.query(
+                `UPDATE order_items SET coinLockUntil = ? WHERE orderID = ? AND coinLockUntil IS NULL AND itemStatus = 'delivered'`,
+                [lockUntil, orderId]
+            );
         }
 
         return res.json({ success: true, message: 'Tracking info updated', updatedCount: updated });
@@ -804,6 +931,9 @@ module.exports.updateOrderController = updateOrderController;
 module.exports.getOrderDetailsController = getOrderDetailsController;
 module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
 module.exports.getAllOrdersController = getAllOrdersController;
+module.exports.returnOrderController = returnOrderController;
+module.exports.getRefundQueriesController = getRefundQueriesController;
+module.exports.updateRefundQueryStatusController = updateRefundQueryStatusController;
 module.exports.updateOrderStatusController = updateOrderStatusController;
 module.exports.updatePaymentStatusController = updatePaymentStatusController;
 module.exports.generateInvoiceController = generateInvoiceController;

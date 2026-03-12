@@ -111,7 +111,7 @@ const updateSessionRefreshToken = async (email, newRefreshToken) => {
 // Get all brands
 const getAllBrands = async () => {
     const [rows] = await db.query(
-        `SELECT uid, username, emailID, name, role, joinedOn, verifiedEmail, createdOn, gstin, profilePhoto
+        `SELECT uid, username, emailID, name, role, joinedOn, verifiedEmail, createdOn, gstin, profilePhoto, commissionPercentage
          FROM users 
          WHERE role = 'brand'
          ORDER BY createdOn DESC`
@@ -125,7 +125,9 @@ const updateBrand = async (uid, updateData) => {
     const values = [];
 
     // Define allowed fields for brand updates
-    const allowedFields = ['name', 'emailID', 'gstin', 'profilePhoto'];
+    // NOTE: include 'password' so admin reset password works.
+    // Other flows shouldn't update password via this generic method.
+    const allowedFields = ['name', 'emailID', 'gstin', 'profilePhoto', 'commissionPercentage', 'password'];
 
     Object.keys(updateData).forEach(key => {
         if (updateData[key] !== undefined && key !== 'uid' && allowedFields.includes(key)) {

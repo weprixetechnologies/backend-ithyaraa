@@ -1115,6 +1115,46 @@ const revertReferSettlementOnReturn = async (orderID) => {
     }
 };
 
+// Deduct affiliate earnings proportionally for a returned order item.
+// Reduces the locked amount (original incoming transaction amount) and pendingPayment; also logs affiliate_return_deduction for history.
+const deductAffiliateEarningsForReturnedItem = async (orderID, orderItemID, itemLineTotal, orderTotal, referrerUid) => {
+    try {
+        const [colOrderItem] = await db.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderItemID'`);
+        if (colOrderItem.length === 0) return { success: false, message: 'orderItemID column not found' };
+        const [rows] = await db.execute(
+            `SELECT txnID, uid, amount FROM affiliateTransactions WHERE orderID = ? AND type = 'incoming' AND status IN ('pending','confirmed')`,
+            [orderID]
+        );
+        if (!rows || rows.length === 0) return { success: true, deducted: 0 };
+        const totalCommission = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+        if (orderTotal <= 0 || totalCommission <= 0) return { success: true, deducted: 0 };
+        const deduction = Math.round((itemLineTotal / orderTotal) * totalCommission * 100) / 100;
+        if (deduction <= 0) return { success: true, deducted: 0 };
+        const uid = rows[0].uid;
+        if (uid !== referrerUid) return { success: false, message: 'Referrer mismatch' };
+        // Reduce locked amount: update the original incoming transaction(s) so locked commission is reduced
+        await db.execute(
+            `UPDATE affiliateTransactions SET amount = GREATEST(0, amount - ?), updatedOn = NOW() WHERE orderID = ? AND type = 'incoming' AND status IN ('pending','confirmed')`,
+            [deduction, orderID]
+        );
+        // Reduce pendingPayment to match (locked amount was part of balance)
+        await db.execute(
+            'UPDATE users SET pendingPayment = GREATEST(0, COALESCE(pendingPayment, 0) - ?) WHERE uid = ?',
+            [deduction, uid]
+        );
+        // Log for transaction history
+        const txnID = randomUUID();
+        await db.execute(
+            `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, orderID, orderItemID) VALUES (?, ?, 'completed', ?, 'affiliate_return_deduction', ?, ?)`,
+            [txnID, uid, -deduction, orderID, orderItemID]
+        );
+        return { success: true, deducted: deduction };
+    } catch (error) {
+        console.error('Error deducting affiliate earnings for returned item:', error);
+        throw error;
+    }
+};
+
 // Revert pending refer settlement when order cancelled before delivery (no delivery happened)
 const revertPendingReferSettlementOnCancel = async (orderID) => {
     try {
@@ -1230,5 +1270,6 @@ module.exports.rejectPayout = rejectPayout;
 module.exports.confirmReferSettlementOnDelivery = confirmReferSettlementOnDelivery;
 module.exports.revertReferSettlementOnReturn = revertReferSettlementOnReturn;
 module.exports.revertPendingReferSettlementOnCancel = revertPendingReferSettlementOnCancel;
+module.exports.deductAffiliateEarningsForReturnedItem = deductAffiliateEarningsForReturnedItem;
 module.exports.reapplyReferSettlementOnDelivery = reapplyReferSettlementOnDelivery;
 module.exports.reapplyReferSettlementToPending = reapplyReferSettlementToPending;

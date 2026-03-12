@@ -1,6 +1,8 @@
 const db = require('./../utils/dbconnect')
 const { randomUUID } = require('crypto');
 
+const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
+
 
 async function createOrder(orderData) {
     const connection = await db.getConnection();
@@ -40,8 +42,28 @@ async function createOrder(orderData) {
         );
         const orderID = detailResult.insertId;
 
+        // Per-item earned coins (1 coin per ₹100 of order total, distributed by line total)
+        const orderTotal = Number(orderData.summary.total) || 0;
+        const orderCoins = orderTotal > 0 ? Math.floor(orderTotal / 100) : 0;
+        const itemCoinsList = [];
+        if (orderCoins > 0 && orderData.items && orderData.items.length > 0) {
+            let assigned = 0;
+            for (let i = 0; i < orderData.items.length; i++) {
+                const it = orderData.items[i];
+                const lineAfter = Number(it.lineTotalAfter) || 0;
+                const pct = orderTotal > 0 ? lineAfter / orderTotal : 0;
+                const coins = i === orderData.items.length - 1
+                    ? orderCoins - assigned
+                    : Math.floor(orderCoins * pct);
+                itemCoinsList.push(Math.max(0, coins));
+                assigned += Math.max(0, coins);
+            }
+        }
+
         // 2. Insert order_items and deduct stock
-        for (const item of orderData.items) {
+        for (let idx = 0; idx < orderData.items.length; idx++) {
+            const item = orderData.items[idx];
+            const earnedCoins = (itemCoinsList[idx] != null) ? itemCoinsList[idx] : 0;
             await connection.query(
                 `INSERT INTO order_items (
                     orderID, uid, productID, quantity,
@@ -50,8 +72,8 @@ async function createOrder(orderData) {
                     unitPriceBefore, unitPriceAfter,
                     lineTotalBefore, lineTotalAfter,
                     offerID, offerApplied, offerStatus, appliedOfferID,
-                    name, featuredImage, comboID, brandID, referBy, custom_inputs, createdAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+                    name, featuredImage, comboID, brandID, referBy, custom_inputs, earnedCoins, createdAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
                 [
                     orderID,
                     orderData.uid,
@@ -75,7 +97,8 @@ async function createOrder(orderData) {
                     item.comboID || null,
                     item.brandID,
                     (item.referBy !== undefined && item.referBy !== null) ? item.referBy : '',
-                    item.custom_inputs ? JSON.stringify(item.custom_inputs) : null
+                    item.custom_inputs ? JSON.stringify(item.custom_inputs) : null,
+                    earnedCoins
                 ]
             );
 
@@ -212,17 +235,18 @@ async function getOrderItemsByUid(uid) {
     try {
         // Efficient single query using proper indexes on uid and orderID
         const [rows] = await connection.query(
-            `SELECT oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName,
+            `SELECT oi.orderItemID, oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName,
                     oi.overridePrice, oi.salePrice, oi.regularPrice,
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
+                    oi.returnStatus, oi.returnRequestedAt, oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.itemStatus,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
                     od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt,
-                    od.addressID, u.username, u.emailID as email, u.phoneNumber as contactNumber
+                    od.addressID, od.deliveredAt, od.isReplacement, u.username, u.emailID as email, u.phoneNumber as contactNumber
              FROM order_items oi
              INNER JOIN orderDetail od ON oi.orderID = od.orderID
              LEFT JOIN products p ON oi.productID = p.productID
@@ -363,7 +387,7 @@ async function getOrderSummaries(uid, page = 1, limit = 10, searchOrderID = null
 
         // Add status filter with exact match (if provided)
         // Validate against allowed enum values
-        const allowedStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
+        const allowedStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned', 'partially_returned'];
         if (status && allowedStatuses.includes(String(status).toLowerCase())) {
             whereClause += ' AND od.orderStatus = ?';
             params.push(String(status).toLowerCase());
@@ -442,18 +466,22 @@ async function getOrderDetailsByOrderID(orderID, uid) {
     try {
         // Get order items for specific order
         const [rows] = await connection.query(
-            `SELECT oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName AS storedVariationName,
+            `SELECT oi.orderItemID, oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName AS storedVariationName,
                     oi.overridePrice, oi.salePrice, oi.regularPrice,
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
+                    oi.returnStatus, oi.returnRequestedAt, oi.replacementOrderItemID, oi.replacementOrderID, oi.refundQueryID,
+                    oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
+                    oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
                     od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt,
-                    od.addressID, od.total, u.username, u.emailID as email, u.phoneNumber as contactNumber
+                    od.addressID, od.total, od.deliveredAt, od.uid AS orderUid,
+                    u.username, u.emailID as email, u.phoneNumber as contactNumber
              FROM order_items oi
              INNER JOIN orderDetail od ON oi.orderID = od.orderID
              LEFT JOIN products p ON oi.productID = p.productID
@@ -675,4 +703,168 @@ async function updateOrderByID(orderID, updateData = {}) {
     }
 }
 
+// --- Partial returns support ---
+async function getOrderDetailForReturn(orderID, uid) {
+    const [rows] = await db.query(
+        'SELECT orderID, uid, orderStatus, total, deliveredAt, addressID FROM orderDetail WHERE orderID = ? AND uid = ?',
+        [orderID, uid]
+    );
+    return rows[0] || null;
+}
+
+async function getOrderItemsForReturn(orderID, uid) {
+    const [rows] = await db.query(
+        `SELECT oi.orderItemID, oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName,
+                oi.lineTotalAfter, oi.name, oi.featuredImage, oi.brandID, oi.referBy,
+                oi.returnStatus, oi.earnedCoins, oi.coinsReversed, oi.itemStatus
+         FROM order_items oi
+         INNER JOIN orderDetail od ON oi.orderID = od.orderID
+         WHERE oi.orderID = ? AND od.uid = ?
+         ORDER BY oi.orderItemID ASC`,
+        [orderID, uid]
+    );
+    return rows;
+}
+
+// Get all return items for a user (orders that have at least one item with return initiated/processing/etc.)
+async function getMyReturns(uid) {
+    const [rows] = await db.query(
+        `SELECT od.orderID, od.createdAt AS orderCreatedAt, od.deliveredAt, od.orderStatus,
+                oi.orderItemID, oi.productID, oi.name, oi.featuredImage, oi.quantity, oi.variationName, oi.lineTotalAfter,
+                oi.returnStatus, oi.returnRequestedAt, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
+                oi.replacementOrderID, oi.refundQueryID
+         FROM order_items oi
+         INNER JOIN orderDetail od ON oi.orderID = od.orderID
+         WHERE od.uid = ? AND oi.returnStatus IS NOT NULL AND oi.returnStatus != 'none'
+         ORDER BY oi.returnRequestedAt DESC, od.orderID DESC, oi.orderItemID ASC`,
+        [uid]
+    );
+    return rows;
+}
+
+async function getOrderItemById(orderItemID, orderID, uid) {
+    const [rows] = await db.query(
+        `SELECT oi.* FROM order_items oi
+         INNER JOIN orderDetail od ON oi.orderID = od.orderID
+         WHERE oi.orderItemID = ? AND oi.orderID = ? AND od.uid = ?`,
+        [orderItemID, orderID, uid]
+    );
+    return rows[0] || null;
+}
+
+async function updateOrderItemReturnStatus(orderItemID, { returnStatus, returnRequestedAt, replacementOrderItemID, replacementOrderID, refundQueryID }, connection = null) {
+    const fields = ['returnStatus = ?'];
+    const values = [returnStatus];
+    if (returnRequestedAt != null) { fields.push('returnRequestedAt = ?'); values.push(returnRequestedAt); }
+    if (replacementOrderItemID != null) { fields.push('replacementOrderItemID = ?'); values.push(replacementOrderItemID); }
+    if (replacementOrderID != null) { fields.push('replacementOrderID = ?'); values.push(replacementOrderID); }
+    if (refundQueryID != null) { fields.push('refundQueryID = ?'); values.push(refundQueryID); }
+    values.push(orderItemID);
+    const conn = connection || db;
+    const [result] = await conn.query(
+        `UPDATE order_items SET ${fields.join(', ')} WHERE orderItemID = ?`,
+        values
+    );
+    return result.affectedRows > 0;
+}
+
+async function getVariationStock(variationID) {
+    if (!variationID) return null;
+    const [rows] = await db.query('SELECT variationStock FROM variations WHERE variationID = ?', [variationID]);
+    return rows[0] ? Number(rows[0].variationStock) : null;
+}
+
+// Create a new replacement order (0 Rs) with same uid and addressID; behaves like normal order for brand shipping
+async function createReplacementOrder(connection, { uid, addressID, items }) {
+    const txnID = require('crypto').randomUUID();
+    const [detailResult] = await connection.query(
+        `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate, isReplacement)
+         VALUES (?, 0, 0, 0, 0, ?, NOW(), ?, 'REPLACEMENT', 'successful', NULL, 0, NULL, 0, 0, 0, 0, 1)`,
+        [uid, txnID, addressID]
+    );
+    const orderID = detailResult.insertId;
+    for (const it of items) {
+        const qty = Number(it.quantity) || 1;
+        await connection.query(
+            `INSERT INTO order_items (orderID, uid, productID, quantity, variationID, variationName, salePrice, regularPrice, unitPriceBefore, unitPriceAfter, lineTotalBefore, lineTotalAfter, name, featuredImage, brandID, referBy, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, '', NOW())`,
+            [
+                orderID,
+                uid,
+                it.productID,
+                qty,
+                it.variationID || null,
+                it.variationName || null,
+                it.name || null,
+                it.featuredImage ? (typeof it.featuredImage === 'string' ? it.featuredImage : JSON.stringify(it.featuredImage)) : null,
+                it.brandID || null
+            ]
+        );
+        if (it.variationID) {
+            await connection.query(
+                'UPDATE variations SET variationStock = variationStock - ? WHERE variationID = ?',
+                [qty, it.variationID]
+            );
+        }
+    }
+    return orderID;
+}
+
+async function getOrderItemsByOrderID(orderID) {
+    const [rows] = await db.query(
+        'SELECT orderItemID, orderID, returnStatus, earnedCoins, coinsReversed FROM order_items WHERE orderID = ?',
+        [orderID]
+    );
+    return rows;
+}
+
+async function recomputeOrderStatusFromReturnItems(orderID) {
+    const items = await getOrderItemsByOrderID(orderID);
+    const returned = items.filter(i => ['returned', 'refund_completed', 'replacement_shipped', 'replacement_complete', 'return_initiated'].includes(String(i.returnStatus || 'none')));
+    const allReturned = items.length > 0 && returned.length === items.length;
+    const someReturned = returned.length > 0;
+    let newStatus = null;
+    if (allReturned) newStatus = 'returned';
+    else if (someReturned) newStatus = 'partially_returned';
+    if (newStatus) {
+        await db.query('UPDATE orderDetail SET orderStatus = ? WHERE orderID = ?', [newStatus, orderID]);
+    }
+    return newStatus;
+}
+
+async function setDeliveredAt(orderID, deliveredAt) {
+    const [result] = await db.query(
+        'UPDATE orderDetail SET deliveredAt = ? WHERE orderID = ?',
+        [deliveredAt, orderID]
+    );
+    if (result.affectedRows === 0) return false;
+    const d = deliveredAt instanceof Date ? deliveredAt : new Date(deliveredAt);
+    const lockUntil = new Date(d.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+    // Set return window lock for all items on this order (normal or replacement)
+    await db.query(
+        'UPDATE order_items SET coinLockUntil = ? WHERE orderID = ?',
+        [lockUntil, orderID]
+    );
+
+    // If this is a replacement order, also refresh the lock window
+    // on the original items that point to this replacement order.
+    await db.query(
+        'UPDATE order_items SET coinLockUntil = ? WHERE replacementOrderID = ?',
+        [lockUntil, orderID]
+    );
+
+    return true;
+}
+
 module.exports.updateOrderByID = updateOrderByID;
+module.exports.getOrderDetailForReturn = getOrderDetailForReturn;
+module.exports.getOrderItemsForReturn = getOrderItemsForReturn;
+module.exports.getMyReturns = getMyReturns;
+module.exports.getOrderItemById = getOrderItemById;
+module.exports.updateOrderItemReturnStatus = updateOrderItemReturnStatus;
+module.exports.getVariationStock = getVariationStock;
+module.exports.createReplacementOrder = createReplacementOrder;
+module.exports.getOrderItemsByOrderID = getOrderItemsByOrderID;
+module.exports.recomputeOrderStatusFromReturnItems = recomputeOrderStatusFromReturnItems;
+module.exports.setDeliveredAt = setDeliveredAt;

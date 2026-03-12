@@ -224,6 +224,39 @@ async function reverseEarnedCoins(uid, orderID, refType = 'order') {
     }
 }
 
+// Reverse earned coins for a single returned order item (partial return).
+// Deducts from balance and logs transaction with refType 'order_item', refID = orderItemID.
+async function reverseEarnedCoinsForItem(uid, orderID, orderItemID, coins) {
+    if (!coins || coins <= 0) return { success: false, message: 'No coins to reverse' };
+    await ensureBalanceRow(uid);
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [balRows] = await connection.query('SELECT balance FROM coin_balance WHERE uid = ? FOR UPDATE', [uid]);
+        const current = balRows[0] ? Number(balRows[0].balance) : 0;
+        const deduct = Math.min(coins, Math.max(0, current));
+        if (deduct <= 0) {
+            await connection.rollback();
+            return { success: false, message: 'Insufficient coin balance to reverse' };
+        }
+        await connection.query(
+            'UPDATE coin_balance SET balance = balance - ? WHERE uid = ?',
+            [deduct, uid]
+        );
+        await connection.query(
+            `INSERT INTO coin_transactions (uid, type, coins, refType, refID) VALUES (?, 'reversal', ?, 'order_item', ?)`,
+            [uid, deduct, String(orderItemID)]
+        );
+        await connection.commit();
+        return { success: true, coinsReversed: deduct };
+    } catch (e) {
+        await connection.rollback();
+        throw e;
+    } finally {
+        connection.release();
+    }
+}
+
 // Re-apply coins when order status is changed back from Returned/Cancelled to Delivered
 async function reapplyCoinsForOrder(uid, orderID, coins, refType = 'order') {
     if (!coins || coins <= 0) return { success: false, message: 'No coins to reapply' };
@@ -498,6 +531,7 @@ module.exports = {
     cancelPendingCoins,
     reversePendingCoins,
     reverseEarnedCoins,
+    reverseEarnedCoinsForItem,
     reapplyCoinsForOrder,
     reapplyCoinsToPending,
     getBalance,

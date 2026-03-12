@@ -15,6 +15,8 @@ const brandAuthRouter = require('./router/brand/authBrandRouter')
 const orderBrandRouter = require('./router/brand/orderBrandRouter')
 const productBrandRouter = require('./router/brand/productBrandRouter')
 const profileBrandRouter = require('./router/brand/profileBrandRouter')
+const settlementAdminRouter = require('./router/admin/settlementAdminRouter')
+const settlementBrandRouter = require('./router/brand/settlementBrandRouter')
 const offerRouter = require('./router/admin/offerAdminRouter')
 const categoryRouter = require('./router/admin/categoryRouter')
 const commonRouter = require('./router/commonRouter')
@@ -118,6 +120,7 @@ app.use('/api/admin/presale-bookings', presaleBookingRouter);
 app.use('/api/admin', newsletterAdminRouter);
 app.use('/api/admin', faqAdminRouter);
 app.use('/api/admin', affiliateAdminRouter);
+app.use('/api/admin', settlementAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 // Product groups (homepage grouping) - admin endpoints
 app.use('/api/admin/product-groups', productGroupsRouter);
@@ -136,6 +139,7 @@ app.use('/api/brand', productBrandRouter)
 app.use('/api/brand', brandBankDetailsRouter)
 app.use('/api/brand', notificationBrandRouter)
 app.use('/api/brand', profileBrandRouter)
+app.use('/api/brand', settlementBrandRouter)
 
 app.listen(process.env.PORT, () => {
   console.log('Server Started');

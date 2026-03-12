@@ -439,6 +439,17 @@ async function handlePresaleBookingWebhook(
     webhookData
 ) {
     try {
+        // --------------------------------------------------------------------
+        // DETAILED LOG: PRESALE BOOKING WEBHOOK BEFORE DB UPDATE
+        // --------------------------------------------------------------------
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] --------------------------------');
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] preBookingID:', presaleBooking.preBookingID);
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] merchantID (txn):', merchantID);
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] previousPaymentStatus:', presaleBooking.paymentStatus);
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] newPaymentStatus (from PhonePe):', paymentStatus);
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] processedStatus:', JSON.stringify(processedStatus, null, 2));
+        console.log('[WEBHOOK-PRESALE][DB-BEFORE-UPDATE] rawWebhookData (truncated):', JSON.stringify(webhookData, null, 2).substring(0, 1500));
+
         // Extract merchant ID from webhook or environment
         const merchantId = process.env.MERCHANT_ID
             || webhookData?.merchantId
@@ -514,6 +525,16 @@ async function handleRegularOrderWebhook(
     processedStatus
 ) {
     try {
+        // --------------------------------------------------------------------
+        // DETAILED LOG: REGULAR ORDER WEBHOOK BEFORE DB UPDATE
+        // --------------------------------------------------------------------
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] ----------------------------------');
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] orderID:', order.orderID);
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] merchantID (txn):', merchantID);
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] previousPaymentStatus:', order.paymentStatus);
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] newPaymentStatus (from PhonePe):', paymentStatus);
+        console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] processedStatus:', JSON.stringify(processedStatus, null, 2));
+
         // Update regular order payment status
         const updated = await orderModel.updateOrderPaymentStatus(
             merchantID,

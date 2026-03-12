@@ -2,6 +2,573 @@ const express = require('express')
 const orderBrandRouter = express.Router()
 const authBrandMiddleware = require('../../middleware/authBrandMiddleware')
 const db = require('../../utils/dbconnect')
+const { queueOrderStatusEmail } = require('../../services/orderStatusEmailService')
+
+const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
+
+// GET /api/brand/analytics - Brand-level payments & orders analytics
+orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        let { startDate, endDate, period = '30d' } = req.query;
+
+        const parseDate = (value) => {
+            if (!value) return null;
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? null : d;
+        };
+
+        const now = new Date();
+        let start, end;
+
+        const toLocalDateOnly = (d) => {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        if (period === 'custom') {
+            start = parseDate(startDate);
+            end = parseDate(endDate);
+            if (!start || !end) {
+                return res.status(400).json({ success: false, message: 'Invalid startDate or endDate for custom period' });
+            }
+            if (start > end) {
+                return res.status(400).json({ success: false, message: 'startDate cannot be after endDate' });
+            }
+        } else {
+            const daysMap = { '7d': 7, '30d': 30, '90d': 90 };
+            const days = daysMap[period] || 30;
+            end = now;
+            start = new Date(now);
+            start.setDate(start.getDate() - (days - 1));
+        }
+
+        const startStr = (startDate || toLocalDateOnly(start));
+        const endStr = (endDate || toLocalDateOnly(end));
+
+        const dateDiffMs = new Date(endStr).getTime() - new Date(startStr).getTime();
+        const dateDiffDays = Math.floor(dateDiffMs / (1000 * 60 * 60 * 24)) + 1;
+        const groupByWeek = dateDiffDays > 90;
+
+        // Get commission percentage for this brand
+        const [brandRows] = await db.query(
+            `SELECT commissionPercentage 
+             FROM users 
+             WHERE uid = ? AND role = 'brand' 
+             LIMIT 1`,
+            [brandID]
+        );
+        const commissionPercentage = brandRows && brandRows[0] && brandRows[0].commissionPercentage != null
+            ? Number(brandRows[0].commissionPercentage)
+            : null;
+
+        // Summary metrics with on-hold breakdown and gross/net payments.
+        // IMPORTANT: These are based on CURRENT state of all items for this brand (not limited by date range),
+        // so the timeline selector does not affect ON HOLD and AVAILABLE amounts.
+        const [summaryRows] = await db.query(
+            `SELECT 
+                COUNT(DISTINCT oi.orderID) AS totalOrders,
+                SUM(CASE WHEN oi.itemStatus = 'shipped' THEN 1 ELSE 0 END) AS shippedItems,
+                SUM(CASE WHEN oi.itemStatus = 'delivered' THEN 1 ELSE 0 END) AS deliveredItems,
+                SUM(CASE WHEN oi.itemStatus = 'pending' THEN 1 ELSE 0 END) AS pendingItems,
+                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed') THEN 1 ELSE 0 END) AS returnItems,
+                SUM(CASE WHEN oi.returnStatus IN ('replacement_processing', 'replacement_shipped', 'replacement_complete') THEN 1 ELSE 0 END) AS replacementItems,
+                SUM(CASE WHEN oi.returnStatus = 'returnRejected' THEN 1 ELSE 0 END) AS returnRejectedCount,
+                SUM(CASE WHEN LOWER(od.paymentMode) = 'cod' THEN oi.lineTotalAfter ELSE 0 END) AS codAmount,
+                SUM(CASE WHEN LOWER(od.paymentMode) <> 'cod' THEN oi.lineTotalAfter ELSE 0 END) AS prepaidAmount,
+
+                -- ON HOLD bucket 1: shipped, no return raised
+                SUM(
+                    CASE 
+                        WHEN oi.itemStatus = 'shipped'
+                             AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                             AND oi.settlementStatus = 'unsettled'
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS shippedPendingDeliveryAmount,
+
+                -- ON HOLD bucket 2: delivered, within return window, no active refund
+                SUM(
+                    CASE 
+                        WHEN oi.itemStatus = 'delivered' 
+                             AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none', 'returnRejected', 'replacement_complete'))
+                             AND (
+                                 (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil > NOW())
+                                 OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                                     AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) > NOW())
+                             )
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                             AND oi.settlementStatus = 'unsettled'
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS deliveredWithinWindowAmount,
+
+                -- GROSS AVAILABLE: payable to brand now (no active refund path).
+                -- Includes normal delivered items (including replacement_complete) 
+                -- only after the return window has expired.
+                SUM(
+                    CASE
+                        WHEN oi.itemStatus = 'delivered'
+                             AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none', 'returnRejected', 'replacement_complete'))
+                             AND (
+                                 (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+                                 OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                                     AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) <= NOW())
+                                  OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
+                             )
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                             AND oi.settlementStatus = 'unsettled'
+                             AND NOT (
+                                 LOWER(od.paymentMode) = 'cod' 
+                                 AND od.paymentStatus NOT IN ('successful', 'paid')
+                             )
+                        THEN oi.lineTotalAfter
+
+                        ELSE 0
+                    END
+                ) AS grossAvailablePayment,
+
+                -- ON HOLD bucket 3: replacement in progress (original item being replaced, not yet complete)
+                SUM(
+                    CASE 
+                        WHEN oi.returnStatus IN ('replacement_processing','replacement_shipped')
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS replacementInProgressAmount,
+
+                -- TOTAL RETURNS: any item where a return/refund/replacement path exists
+                SUM(
+                    CASE 
+                        WHEN oi.returnStatus IN (
+                            'return_initiated','return_picked',
+                            'replacement_processing','replacement_shipped','replacement_complete',
+                            'returned','refund_pending','refund_completed'
+                        )
+                        AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS totalReturnsAmount,
+
+                -- REPLACEMENT AMOUNT: items going through replacement flow (any stage)
+                SUM(
+                    CASE 
+                        WHEN oi.returnStatus IN ('replacement_processing','replacement_shipped','replacement_complete')
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS replacementAmount,
+
+                SUM(
+                    CASE
+                        WHEN oi.settlementStatus = 'carried_forward'
+                             AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+                             AND oi.itemStatus = 'delivered'
+                             AND (
+                                (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+                                OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                                    AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) <= NOW())
+                             )
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0
+                    END
+                ) AS carriedForwardAmount
+
+            FROM order_items oi
+            INNER JOIN orderDetail od ON od.orderID = oi.orderID
+            WHERE oi.brandID = ?
+              AND DATE(oi.createdAt) BETWEEN ? AND ?`,
+            [RETURN_WINDOW_DAYS, RETURN_WINDOW_DAYS, RETURN_WINDOW_DAYS, brandID, startStr, endStr]
+        );
+
+        const s = summaryRows && summaryRows[0] ? summaryRows[0] : {};
+
+        const codAmount = Number(s.codAmount || 0);
+        const prepaidAmount = Number(s.prepaidAmount || 0);
+
+        const shippedPendingDeliveryAmount = Number(s.shippedPendingDeliveryAmount || 0);
+        const deliveredWithinWindowAmount = Number(s.deliveredWithinWindowAmount || 0);
+        const replacementInProgressAmount = Number(s.replacementInProgressAmount || 0);
+        const totalReturnsAmount = Number(s.totalReturnsAmount || 0);
+        const replacementAmount = Number(s.replacementAmount || 0);
+        const carriedForwardAmount = Number(s.carriedForwardAmount || 0);
+        const returnRejectedCount = Number(s.returnRejectedCount || 0);
+
+        // ON HOLD: shipped (no return) + delivered within window (no return) + replacement in progress
+        const onHoldAmount = shippedPendingDeliveryAmount
+            + deliveredWithinWindowAmount
+            + replacementInProgressAmount;
+
+        // DEDUCTED: net impact of returns = TOTAL RETURNS - REPLACEMENT (even if shipped).
+        // Example: 1000 INR return → deducted = 1000; after replacement flow (any stage) → deducted = 0.
+        const deductedAmount = Math.max(0, totalReturnsAmount - replacementAmount);
+
+        const grossAvailablePayment = Number(s.grossAvailablePayment || 0);
+        const appliedCommission = commissionPercentage != null ? commissionPercentage : 0;
+        const commissionAmount = Math.round(grossAvailablePayment * (appliedCommission / 100) * 100) / 100;
+        const netAvailablePayment = Math.round((grossAvailablePayment - commissionAmount) * 100) / 100;
+
+        // Time-series (daily <= 90d, weekly for longer)
+        let dateExpr;
+        if (groupByWeek) {
+            // Week commencing date (start of week for each createdAt)
+            dateExpr = `DATE(DATE_SUB(oi.createdAt, INTERVAL WEEKDAY(oi.createdAt) DAY))`;
+        } else {
+            dateExpr = `DATE(oi.createdAt)`;
+        }
+
+        const [timeRows] = await db.query(
+            `SELECT 
+                ${dateExpr} AS dateKey,
+                COUNT(DISTINCT oi.orderID) AS orders,
+                COALESCE(SUM(oi.lineTotalAfter), 0) AS revenue,
+                SUM(CASE WHEN oi.itemStatus = 'shipped' THEN 1 ELSE 0 END) AS shipped,
+                SUM(CASE WHEN oi.itemStatus = 'delivered' THEN 1 ELSE 0 END) AS delivered,
+                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed') THEN 1 ELSE 0 END) AS returns
+             FROM order_items oi
+             INNER JOIN orderDetail od ON od.orderID = oi.orderID
+             WHERE oi.brandID = ?
+               AND DATE(oi.createdAt) BETWEEN ? AND ?
+             GROUP BY dateKey
+             ORDER BY dateKey ASC`,
+            [brandID, startStr, endStr]
+        );
+
+        const timeSeries = (timeRows || []).map(row => ({
+            date: row.dateKey,
+            orders: Number(row.orders || 0),
+            revenue: Number(row.revenue || 0),
+            shipped: Number(row.shipped || 0),
+            delivered: Number(row.delivered || 0),
+            returns: Number(row.returns || 0)
+        }));
+
+        return res.json({
+            success: true,
+            data: {
+                summary: {
+                    totalOrders: Number(s.totalOrders || 0),
+                    shipped: Number(s.shippedItems || 0),
+                    delivered: Number(s.deliveredItems || 0),
+                    pendingOrders: Number(s.pendingItems || 0),
+                    returns: Number(s.returnItems || 0),
+                    replacements: Number(s.replacementItems || 0),
+                    returnRejectedCount,
+                    codAmount,
+                    prepaidAmount,
+                    onHoldAmount,
+                    onHoldBreakdown: {
+                        shippedPendingDelivery: shippedPendingDeliveryAmount,
+                        deliveredWithinReturnWindow: deliveredWithinWindowAmount,
+                        replacementInProgress: replacementInProgressAmount
+                    },
+                    deductedAmount,
+                    deductedBreakdown: {
+                        totalReturns: totalReturnsAmount,
+                        replacementAmount: replacementAmount
+                    },
+                    carriedForwardAmount,
+                    grossAvailablePayment,
+                    commissionPercentage: commissionPercentage,
+                    commissionAmount,
+                    netAvailablePayment
+                },
+                timeSeries,
+                meta: {
+                    startDate: startStr,
+                    endDate: endStr,
+                    period: period === 'custom' ? 'custom' : (period || '30d'),
+                    groupBy: groupByWeek ? 'week' : 'day'
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching brand analytics:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch analytics', error: error.message });
+    }
+});
+
+// GET /api/brand/analytics/breakdown - Detailed breakdown for settlement and order buckets
+orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const {
+            bucket,
+            page = 1,
+            limit = 20,
+            startDate,
+            endDate
+        } = req.query;
+
+        const bucketConditions = {
+            grossAvailable: `
+                oi.itemStatus = 'delivered'
+                AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none','returnRejected','replacement_complete'))
+                AND (
+                    (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                        AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
+                )
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                AND oi.settlementStatus = 'unsettled'
+                AND NOT (
+                    LOWER(od.paymentMode) = 'cod'
+                    AND od.paymentStatus NOT IN ('successful','paid')
+                )
+            `,
+            onHold_shipped: `
+                oi.itemStatus = 'shipped'
+                AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                AND oi.settlementStatus = 'unsettled'
+            `,
+            onHold_delivered: `
+                oi.itemStatus = 'delivered'
+                AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none','returnRejected','replacement_complete'))
+                AND (
+                    (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil > NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                        AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) > NOW())
+                )
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                AND oi.settlementStatus = 'unsettled'
+            `,
+            deducted_returnInProgress: `
+                oi.returnStatus IN ('return_initiated','return_picked')
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+            `,
+            deducted_replacementInProgress: `
+                oi.returnStatus IN ('replacement_processing','replacement_shipped')
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+            `,
+            deducted_refunded: `
+                oi.returnStatus IN ('returned','refund_pending','refund_completed')
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+            `,
+            // Period-scoped buckets: bucketCondition only expresses the category;
+            // DATE(oi.createdAt) BETWEEN ? AND ? is applied separately.
+            totalOrders: `1=1`,
+            shipped: `oi.itemStatus = 'shipped'`,
+            delivered: `oi.itemStatus = 'delivered'`,
+            pending: `oi.itemStatus = 'pending'`,
+            returns: `oi.returnStatus IN ('returned','refund_completed')`,
+            replacements: `oi.returnStatus IN ('replacement_processing','replacement_shipped','replacement_complete')`,
+            cod: `LOWER(od.paymentMode) = 'cod'`,
+            prepaid: `LOWER(od.paymentMode) <> 'cod'`,
+            commissionDue: `
+                oi.itemStatus = 'delivered'
+                AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none','returnRejected','replacement_complete'))
+                AND (
+                    (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                        AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
+                )
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                AND oi.settlementStatus = 'unsettled'
+                AND NOT (
+                    LOWER(od.paymentMode) = 'cod'
+                    AND od.paymentStatus NOT IN ('successful','paid')
+                )
+            `,
+            netAvailable: `
+                oi.itemStatus = 'delivered'
+                AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none','returnRejected','replacement_complete'))
+                AND (
+                    (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
+                        AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
+                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
+                )
+                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                AND oi.settlementStatus = 'unsettled'
+                AND NOT (
+                    LOWER(od.paymentMode) = 'cod'
+                    AND od.paymentStatus NOT IN ('successful','paid')
+                )
+            `,
+        };
+
+        const financialBuckets = new Set(['grossAvailable', 'commissionDue', 'netAvailable']);
+
+        const bucketLabels = {
+            grossAvailable: 'Available for Settlement',
+            commissionDue: 'Commission to Be Deducted',
+            netAvailable: 'Net Payable After Commission',
+            onHold_shipped: 'On Hold — Shipped (Awaiting Delivery)',
+            onHold_delivered: 'On Hold — Delivered (Within Return Window)',
+            deducted_returnInProgress: 'Deducted — Return In Progress',
+            deducted_replacementInProgress: 'Deducted — Replacement In Progress',
+            deducted_refunded: 'Deducted — Refunded',
+            totalOrders: 'All Orders',
+            shipped: 'Shipped Orders',
+            delivered: 'Delivered Orders',
+            pending: 'Pending Orders',
+            returns: 'Returned Orders',
+            replacements: 'Replacement Orders',
+            cod: 'COD Orders',
+            prepaid: 'Prepaid Orders',
+        };
+
+        if (!bucket || !bucketConditions[bucket]) {
+            return res.status(400).json({ success: false, message: 'Invalid or missing bucket parameter' });
+        }
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+        const offset = (pageNum - 1) * limitNum;
+
+        const whereParts = ['oi.brandID = ?'];
+        const whereParams = [brandID];
+
+        const bucketCondition = bucketConditions[bucket];
+        whereParts.push(bucketCondition);
+
+        // If a date range is provided, always filter by it so that
+        // modal results match the visible period in the header.
+        if (startDate && endDate) {
+            whereParts.push('DATE(oi.createdAt) BETWEEN ? AND ?');
+            whereParams.push(startDate, endDate);
+        }
+
+        const whereClause = whereParts.join(' AND ');
+
+        const countSql = `
+            SELECT 
+                COUNT(*) AS totalItems,
+                COALESCE(SUM(oi.lineTotalAfter), 0) AS totalAmount
+            FROM order_items oi
+            INNER JOIN orderDetail od ON od.orderID = oi.orderID
+            LEFT JOIN users u ON u.uid = od.uid
+            WHERE ${whereClause}
+        `;
+
+        const [countRows] = await db.query(countSql, whereParams);
+        const totalItems = Number(countRows[0]?.totalItems || 0);
+        const totalAmount = Number(countRows[0]?.totalAmount || 0);
+
+        const selectSql = `
+            SELECT 
+              oi.orderItemID            AS itemID,
+              oi.orderID,
+              oi.name                   AS productName,
+              oi.variationName,
+              oi.featuredImage,
+              oi.quantity,
+              oi.lineTotalAfter         AS amount,
+              oi.itemStatus,
+              oi.returnStatus,
+              oi.settlementStatus,
+              oi.coinLockUntil,
+              od.orderStatus,
+              od.paymentMode,
+              od.paymentStatus,
+              od.deliveredAt,
+              od.createdAt              AS orderDate,
+              u.name                    AS customerName,
+              CONCAT('XXXXXX', RIGHT(u.phonenumber, 4)) AS customerPhone,
+              CASE 
+                WHEN oi.coinLockUntil IS NOT NULL THEN oi.coinLockUntil
+                WHEN od.deliveredAt IS NOT NULL THEN DATE_ADD(od.deliveredAt, INTERVAL ? DAY)
+                ELSE NULL
+              END AS returnWindowExpiry
+            FROM order_items oi
+            INNER JOIN orderDetail od ON od.orderID = oi.orderID
+            LEFT JOIN orderDetail rod ON rod.orderID = oi.replacementOrderID
+            LEFT JOIN users u ON u.uid = od.uid
+            WHERE ${whereClause}
+            ORDER BY od.createdAt DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const selectParams = [RETURN_WINDOW_DAYS, ...whereParams, limitNum, offset];
+        const [rows] = await db.query(selectSql, selectParams);
+
+        let commissionPercentage = null;
+        let commissionAmount = null;
+        let netAmount = null;
+        if (financialBuckets.has(bucket)) {
+            const [brandRows] = await db.query(
+                `SELECT commissionPercentage 
+                 FROM users 
+                 WHERE uid = ? AND role = 'brand' 
+                 LIMIT 1`,
+                [brandID]
+            );
+            commissionPercentage =
+                brandRows && brandRows[0] && brandRows[0].commissionPercentage != null
+                    ? Number(brandRows[0].commissionPercentage)
+                    : 0;
+            commissionAmount =
+                Math.round(totalAmount * (commissionPercentage / 100) * 100) / 100;
+            netAmount = Math.round((totalAmount - commissionAmount) * 100) / 100;
+        }
+
+        const items = (rows || []).map((row) => {
+            const base = {
+                itemID: row.itemID,
+                orderID: row.orderID,
+                productName: row.productName,
+                variationName: row.variationName,
+                featuredImage: row.featuredImage,
+                quantity: row.quantity,
+                amount: Number(row.amount || 0),
+                itemStatus: row.itemStatus,
+                returnStatus: row.returnStatus,
+                settlementStatus: row.settlementStatus,
+                coinLockUntil: row.coinLockUntil,
+                orderStatus: row.orderStatus,
+                paymentMode: row.paymentMode,
+                paymentStatus: row.paymentStatus,
+                deliveredAt: row.deliveredAt,
+                orderDate: row.orderDate,
+                returnWindowExpiry: row.returnWindowExpiry,
+                customerName: row.customerName,
+                customerPhone: row.customerPhone,
+            };
+
+            if (financialBuckets.has(bucket) && commissionPercentage != null) {
+                const itemCommission =
+                    Math.round(base.amount * (commissionPercentage / 100) * 100) / 100;
+                const itemNet = Math.round((base.amount - itemCommission) * 100) / 100;
+                return {
+                    ...base,
+                    itemCommission,
+                    itemNet,
+                };
+            }
+
+            return base;
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                bucket,
+                bucketLabel: bucketLabels[bucket] || bucket,
+                totalItems,
+                totalAmount,
+                commissionPercentage,
+                commissionAmount,
+                netAmount,
+                page: pageNum,
+                totalPages: Math.ceil(totalItems / limitNum) || 1,
+                items,
+            },
+        });
+    } catch (error) {
+        console.error('Error fetching brand analytics breakdown:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch analytics breakdown',
+            error: error.message,
+        });
+    }
+});
 
 // GET /api/brand/orders - Get all orders with pagination and filters
 orderBrandRouter.get('/orders', authBrandMiddleware.verifyAccessToken, async (req, res) => {
@@ -368,7 +935,7 @@ orderBrandRouter.get('/orders/invoice-pdf', authBrandMiddleware.verifyAccessToke
         }
 
         const brand = brandRows[0];
-        
+
         // For now, use basic address structure - can be enhanced if address is stored separately
         const brandInfo = {
             name: brand.name || brand.username || 'Brand',
@@ -429,9 +996,9 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
         const { id } = req.params;
         const brandID = req.user.uid; // Get brandID from JWT token
 
-        // Get order items for this brand
+        // Get order items for this brand (include return status and return AWB for return-initiated items)
         const itemsQuery = `
-            SELECT oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.createdAt FROM order_items oi WHERE oi.orderID = ? AND oi.brandID = ?
+            SELECT oi.orderItemID, oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl, oi.createdAt FROM order_items oi WHERE oi.orderID = ? AND oi.brandID = ?
             ORDER BY oi.createdAt ASC
         `;
 
@@ -589,18 +1156,20 @@ orderBrandRouter.put('/orders/:id/payment-status', authBrandMiddleware.verifyAcc
     }
 });
 
-// PUT /api/brand/orders/:id/items-tracking - Update per-item tracking info
+// PUT /api/brand/orders/:id/items-tracking - Update per-item tracking (shipment AWB, return AWB, return status)
+// Items: [{ orderItemID?, name?, variationName?, trackingCode?, deliveryCompany?, returnTrackingCode?, returnDeliveryCompany?, returnTrackingUrl?, itemStatus?, returnStatus? }]
+// Use orderItemID to update by id (e.g. for return AWB / return status); or name+variationName for shipment AWB.
+// returnStatus: brand can set return_initiated | return_picked | replacement_processing | replacement_shipped | replacement_complete | returned | refund_pending | refund_completed | returnRejected
 orderBrandRouter.put('/orders/:id/items-tracking', authBrandMiddleware.verifyAccessToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const { items } = req.body; // [{name, variationName, trackingCode, deliveryCompany}]
+        const { items } = req.body;
         const brandID = req.user.uid;
 
         if (!Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: 'Items array is required' });
         }
 
-        // Verify at least one row exists for this order+brand
         const [verify] = await db.query(
             `SELECT 1 FROM order_items WHERE orderID = ? AND brandID = ? LIMIT 1`,
             [id, brandID]
@@ -609,39 +1178,146 @@ orderBrandRouter.put('/orders/:id/items-tracking', authBrandMiddleware.verifyAcc
             return res.status(404).json({ success: false, message: 'Order not found or does not belong to this brand' });
         }
 
-        // Update matching items by unique tuple we have available (name + variationName)
-        // Ideally, we would use an itemID; if available later, prefer that.
         let updated = 0;
+        const statusUpdates = [];
+
         for (const it of items) {
             if (!it) continue;
-            // Build dynamic SET clause; allow explicit itemStatus, otherwise set shipped when trackingCode provided
-            let setClause = 'trackingCode = ?, deliveryCompany = ?';
-            const params = [it.trackingCode || null, it.deliveryCompany || null];
-            if (it.itemStatus) {
-                setClause += ', itemStatus = ?';
-                params.push(String(it.itemStatus).toLowerCase());
-            } else if (it.trackingCode) {
-                setClause += ', itemStatus = ?';
-                params.push('shipped');
+
+            const updates = [];
+            const params = [];
+            let newItemStatus = null;
+            let newReturnStatus = null;
+
+            if (it.trackingCode !== undefined || it.deliveryCompany !== undefined) {
+                updates.push('trackingCode = ?, deliveryCompany = ?');
+                params.push(it.trackingCode ?? null, it.deliveryCompany ?? null);
             }
-            params.push(id, brandID);
-            let whereClause = 'name = ?';
-            const whereParams = [it.name];
-            if (it.variationName) {
-                whereClause += ' AND variationName = ?';
-                whereParams.push(it.variationName);
+            if (it.returnTrackingCode !== undefined || it.returnDeliveryCompany !== undefined) {
+                updates.push('returnTrackingCode = ?, returnDeliveryCompany = ?');
+                params.push(it.returnTrackingCode ?? null, it.returnDeliveryCompany ?? null);
+            }
+            if (it.returnTrackingUrl !== undefined) {
+                updates.push('returnTrackingUrl = ?');
+                params.push(it.returnTrackingUrl ?? null);
+            }
+            if (it.itemStatus !== undefined) {
+                updates.push('itemStatus = ?');
+                newItemStatus = String(it.itemStatus).toLowerCase();
+                params.push(newItemStatus);
+            } else if (it.trackingCode && updates.length > 0) {
+                updates.push('itemStatus = ?');
+                newItemStatus = 'shipped';
+                params.push(newItemStatus);
+            }
+            const allowedReturnStatuses = [
+                // 'return_requested' reserved, not currently used in flow
+                'return_initiated',
+                'return_picked',
+                'replacement_processing',
+                'replacement_shipped',
+                'replacement_complete',
+                'returned',
+                'refund_pending',
+                'refund_completed',
+                'returnRejected'
+            ];
+            if (it.returnStatus !== undefined && allowedReturnStatuses.includes(String(it.returnStatus))) {
+                updates.push('returnStatus = ?');
+                newReturnStatus = String(it.returnStatus);
+                params.push(newReturnStatus);
+            }
+
+            if (updates.length === 0) continue;
+
+            const setClause = updates.join(', ');
+            let whereClause;
+            const whereParams = [id, brandID];
+
+            if (it.orderItemID != null) {
+                whereClause = 'orderItemID = ?';
+                whereParams.push(it.orderItemID);
             } else {
-                whereClause += ' AND (variationName IS NULL OR variationName = "")';
+                whereClause = 'name = ?';
+                whereParams.push(it.name);
+                if (it.variationName) {
+                    whereClause += ' AND variationName = ?';
+                    whereParams.push(it.variationName);
+                } else {
+                    whereClause += ' AND (variationName IS NULL OR variationName = "")';
+                }
             }
 
             const [result] = await db.query(
-                `UPDATE order_items 
-                 SET ${setClause}
-                 WHERE orderID = ? AND brandID = ? AND ${whereClause}
-                 LIMIT 1`,
+                `UPDATE order_items SET ${setClause} WHERE orderID = ? AND brandID = ? AND ${whereClause} LIMIT 1`,
                 [...params, ...whereParams]
             );
-            updated += result.affectedRows || 0;
+            if (result.affectedRows > 0) {
+                updated += 1;
+                if ((newItemStatus || newReturnStatus) && (it.orderItemID != null || it.name)) {
+                    statusUpdates.push({
+                        orderItemID: it.orderItemID,
+                        name: it.name,
+                        variationName: it.variationName || '',
+                        itemStatus: newItemStatus,
+                        returnStatus: newReturnStatus
+                    });
+                }
+            }
+        }
+
+        if (statusUpdates.length > 0) {
+            try {
+                const [orderRows] = await db.query('SELECT uid FROM orderDetail WHERE orderID = ? LIMIT 1', [id]);
+                const orderUid = orderRows && orderRows[0] ? orderRows[0].uid : null;
+                if (orderUid) {
+                    const [userRows] = await db.query('SELECT emailID, name, username FROM users WHERE uid = ? LIMIT 1', [orderUid]);
+                    const user = userRows && userRows[0] ? userRows[0] : null;
+                    const toEmail = user && user.emailID ? user.emailID : null;
+                    const customerName = (user && (user.name || user.username)) || 'Customer';
+                    if (toEmail) {
+                        for (const u of statusUpdates) {
+                            const orderItemID = u.orderItemID;
+                            let itemName = u.name;
+                            let variationName = u.variationName;
+                            let replacementOrderID = null;
+                            if (orderItemID != null) {
+                                const [itemRows] = await db.query(
+                                    'SELECT name, variationName, replacementOrderID FROM order_items WHERE orderItemID = ? AND orderID = ? LIMIT 1',
+                                    [orderItemID, id]
+                                );
+                                if (itemRows && itemRows[0]) {
+                                    itemName = itemRows[0].name || itemName;
+                                    variationName = itemRows[0].variationName || variationName;
+                                    replacementOrderID = itemRows[0].replacementOrderID || null;
+                                }
+                            }
+                            if (u.returnStatus) {
+                                await queueOrderStatusEmail({
+                                    to: toEmail,
+                                    customerName,
+                                    orderID: Number(id),
+                                    itemName: itemName || 'Item',
+                                    variationName: variationName || '',
+                                    statusType: u.returnStatus,
+                                    replacementOrderID: replacementOrderID ? Number(replacementOrderID) : undefined
+                                });
+                            } else if (u.itemStatus && ['shipped', 'delivered'].includes(u.itemStatus)) {
+                                await queueOrderStatusEmail({
+                                    to: toEmail,
+                                    customerName,
+                                    orderID: Number(id),
+                                    itemName: itemName || 'Item',
+                                    variationName: variationName || '',
+                                    statusType: u.itemStatus
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (emailErr) {
+                console.error('Error queueing order/return status emails:', emailErr);
+            }
         }
 
         return res.json({ success: true, message: 'Tracking info updated', updatedCount: updated });

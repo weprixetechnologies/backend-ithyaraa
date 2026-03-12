@@ -10,7 +10,7 @@ profileBrandRouter.get('/profile', authBrandMiddleware.verifyAccessToken, async 
         const brandID = req.user.uid;
 
         const [brandRows] = await db.query(
-            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail
+            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage
              FROM users
              WHERE uid = ? AND role = 'brand'`,
             [brandID]
@@ -32,7 +32,8 @@ profileBrandRouter.get('/profile', authBrandMiddleware.verifyAccessToken, async 
                 gstin: brand.gstin || '',
                 profilePhoto: brand.profilePhoto || null,
                 createdOn: brand.createdOn,
-                verifiedEmail: brand.verifiedEmail
+                verifiedEmail: brand.verifiedEmail,
+                commissionPercentage: brand.commissionPercentage != null ? parseFloat(brand.commissionPercentage) : null
             }
         });
     } catch (error) {
@@ -88,7 +89,7 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
 
         // Fetch updated profile
         const [updatedBrand] = await db.query(
-            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail
+            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage
              FROM users
              WHERE uid = ? AND role = 'brand'`,
             [brandID]
@@ -105,7 +106,8 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
                 gstin: updatedBrand[0].gstin || '',
                 profilePhoto: updatedBrand[0].profilePhoto || null,
                 createdOn: updatedBrand[0].createdOn,
-                verifiedEmail: updatedBrand[0].verifiedEmail
+                verifiedEmail: updatedBrand[0].verifiedEmail,
+                commissionPercentage: updatedBrand[0].commissionPercentage != null ? parseFloat(updatedBrand[0].commissionPercentage) : null
             }
         });
     } catch (error) {

@@ -33,14 +33,33 @@ const insertUser = async (userData) => {
         name,
         password,
         referCode,
-        profilePhoto
+        profilePhoto,
+        commissionPercentage
     } = userData;
 
     await db.query(
         `INSERT INTO users 
-        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role, referCode, profilePhoto)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, 'user', referCode, profilePhoto]
+        (uid, username, emailID, phonenumber, lastLogin, deviceInfo, joinedOn, verifiedEmail, verifiedPhone, balance, createdOn, name, password, role, referCode, profilePhoto, commissionPercentage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            uid,
+            username,
+            emailID,
+            phonenumber,
+            lastLogin,
+            deviceInfo,
+            joinedOn,
+            verifiedEmail,
+            verifiedPhone,
+            balance,
+            createdOn,
+            name,
+            password,
+            userData.role || 'user',
+            referCode,
+            profilePhoto,
+            commissionPercentage != null ? commissionPercentage : null
+        ]
     );
 };
 
@@ -97,6 +116,10 @@ const updateUserByUID = async (uid, updateData) => {
     if (updateData.verifiedPhone !== undefined) {
         fields.push("verifiedPhone = ?");
         values.push(updateData.verifiedPhone);
+    }
+    if (updateData.commissionPercentage !== undefined) {
+        fields.push("commissionPercentage = ?");
+        values.push(updateData.commissionPercentage);
     }
 
     if (fields.length === 0) return null;

@@ -6,6 +6,7 @@ const usersModel = require('./../model/usersModel');
 const affiliateModel = require('./../model/affiliateModel');
 const invoiceService = require('./invoiceService');
 const { addSendEmailJob } = require('../queue/emailProducer');
+const { queueOrderStatusEmail } = require('./orderStatusEmailService');
 const { randomUUID } = require('crypto');
 const cartModel = require('./../model/cartModel');
 const coinModel = require('../model/coinModel');
@@ -696,19 +697,31 @@ async function updateOrderStatus(orderId, orderStatus) {
             return null;
         }
 
+        const normalizedStatus = String(orderStatus).toLowerCase();
+
         const order = orderBefore[0];
         const oldStatus = order.orderStatus;
         const uid = order.uid;
         const hasPendingCoins = order.coinsEarned > 0;
 
-        // Update order status
+        // Update order status (stored in lowercase for consistency)
         const result = await db.query(
             'UPDATE orderDetail SET orderStatus = ? WHERE orderID = ?',
-            [orderStatus, orderId]
+            [normalizedStatus, orderId]
         );
 
         if (result[0].affectedRows === 0) {
             return null;
+        }
+
+        // Set deliveredAt and per-item coinLockUntil when order becomes Delivered
+        if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
+            try {
+                const orderModel = require('../model/orderModel');
+                await orderModel.setDeliveredAt(orderId, new Date());
+            } catch (e) {
+                console.error('[Order] Error setting deliveredAt/coinLockUntil:', e);
+            }
         }
 
         // Handle coin state transitions based on status change
@@ -878,13 +891,14 @@ async function getAdminOrderDetails(orderId) {
 
         // Get order items from order_items table
         const [items] = await db.query(
-            `SELECT oi.productID, oi.quantity, oi.variationID, oi.variationName,
+            `SELECT oi.orderItemID, oi.productID, oi.quantity, oi.variationID, oi.variationName,
                     oi.overridePrice, oi.salePrice, oi.regularPrice,
                     oi.unitPriceBefore, oi.unitPriceAfter,
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
+                    oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
                     oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
@@ -969,6 +983,7 @@ async function getAdminOrderDetails(orderId) {
 
             // Clean up the response - only send necessary fields
             processedItems.push({
+                orderItemID: item.orderItemID,
                 productID: item.productID,
                 quantity: item.quantity,
                 variationID: item.variationID,
@@ -977,13 +992,17 @@ async function getAdminOrderDetails(orderId) {
                 regularPrice: regularPrice,
                 lineTotalAfter: lineTotalAfter,
                 name: item.name,
-                featuredImage: parsedFeaturedImage, // This will be a proper array
+                featuredImage: parsedFeaturedImage,
                 custom_inputs: parsedCustomInputs,
-                productCustomInputs: productCustomInputs, // Field definitions with labels
+                productCustomInputs: productCustomInputs,
                 createdAt: item.createdAt,
                 trackingCode: item.trackingCode || null,
                 deliveryCompany: item.deliveryCompany || null,
                 itemStatus: item.itemStatus || 'pending',
+                returnStatus: item.returnStatus || 'none',
+                returnTrackingCode: item.returnTrackingCode || null,
+                returnDeliveryCompany: item.returnDeliveryCompany || null,
+                replacementOrderID: item.replacementOrderID || null,
                 comboItems: processedComboItems,
                 brandID: item.brandID,
                 brandName: brandName,
@@ -1190,9 +1209,181 @@ async function emailInvoiceToCustomer(orderId, uid) {
     }
 }
 
+// Partial return: validate 7-day window, replacement or refund_query, coin/affiliate reversal, order status
+async function returnOrder(uid, { orderID, orderItemID = null, reason = null }) {
+    const orderModel = require('../model/orderModel');
+    const refundQueryModel = require('../model/refundQueryModel');
+
+    const order = await orderModel.getOrderDetailForReturn(orderID, uid);
+    if (!order) {
+        throw new Error('Order not found or access denied');
+    }
+    const items = await orderModel.getOrderItemsForReturn(orderID, uid);
+    let targetItems;
+    if (orderItemID) {
+        const one = items.find(i => Number(i.orderItemID) === Number(orderItemID));
+        if (!one) throw new Error('Order item not found');
+        if ((one.returnStatus || 'none') !== 'none') throw new Error('This item is already in return process');
+        targetItems = [one];
+    } else {
+        targetItems = items.filter(i => (i.returnStatus || 'none') === 'none');
+        if (targetItems.length === 0) throw new Error('No eligible items to return');
+    }
+    // Check delivery at order_items level: each item being returned must be delivered
+    for (const it of targetItems) {
+        const itemStatus = String(it.itemStatus || '').toLowerCase();
+        if (itemStatus !== 'delivered') {
+            throw new Error('Return is only allowed for delivered items. This item is not yet marked as delivered.');
+        }
+    }
+    // Use orderDetail.deliveredAt for 7-day return window (set when order was marked Delivered)
+    const deliveredAt = order.deliveredAt ? new Date(order.deliveredAt) : null;
+    if (!deliveredAt || isNaN(deliveredAt.getTime())) {
+        throw new Error('Delivery date is not set for this order');
+    }
+    const now = new Date();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    if (now.getTime() - deliveredAt.getTime() > sevenDaysMs) {
+        throw new Error('Return window has expired (7 days after delivery)');
+    }
+
+    const orderTotal = Number(order.total) || 0;
+    const refundPendingIds = [];
+    const itemsForReturnInitiatedEmail = [];
+    const itemsForRefundPendingEmail = [];
+
+    for (const item of targetItems) {
+        const qty = Number(item.quantity) || 1;
+        const stock = item.variationID ? await orderModel.getVariationStock(item.variationID) : null;
+        const hasStock = stock != null && stock >= qty;
+
+        if (hasStock) {
+            const connection = await db.getConnection();
+            try {
+                await connection.beginTransaction();
+                if (!order.addressID) {
+                    throw new Error('Order address not found; cannot create replacement order');
+                }
+                const replacementOrderID = await orderModel.createReplacementOrder(connection, {
+                    uid: order.uid,
+                    addressID: order.addressID,
+                    items: [{
+                        productID: item.productID,
+                        quantity: item.quantity,
+                        variationID: item.variationID,
+                        variationName: item.variationName,
+                        name: item.name,
+                        featuredImage: item.featuredImage,
+                        brandID: item.brandID
+                    }]
+                });
+                await orderModel.updateOrderItemReturnStatus(
+                    item.orderItemID,
+                    {
+                        returnStatus: 'return_initiated',
+                        returnRequestedAt: new Date(),
+                        replacementOrderID
+                    },
+                    connection
+                );
+                await connection.commit();
+                itemsForReturnInitiatedEmail.push(item);
+            } catch (e) {
+                await connection.rollback();
+                throw e;
+            } finally {
+                connection.release();
+            }
+        } else {
+            const rq = await refundQueryModel.createRefundQuery({
+                orderID,
+                orderItemID: item.orderItemID,
+                productID: item.productID,
+                userID: String(uid),
+                brandID: item.brandID,
+                reason: reason || null
+            });
+            await orderModel.updateOrderItemReturnStatus(item.orderItemID, {
+                returnStatus: 'refund_pending',
+                returnRequestedAt: new Date(),
+                refundQueryID: rq.refundQueryID
+            });
+            refundPendingIds.push(item.orderItemID);
+            itemsForRefundPendingEmail.push(item);
+        }
+    }
+
+    try {
+        const [userRows] = await db.query('SELECT emailID, name, username FROM users WHERE uid = ? LIMIT 1', [order.uid]);
+        const user = userRows && userRows[0] ? userRows[0] : null;
+        const customerName = (user && (user.name || user.username)) || 'Customer';
+        const toEmail = user && user.emailID ? user.emailID : null;
+        if (toEmail) {
+            for (const item of itemsForReturnInitiatedEmail) {
+                await queueOrderStatusEmail({
+                    to: toEmail,
+                    customerName,
+                    orderID,
+                    itemName: item.name || 'Item',
+                    variationName: item.variationName || '',
+                    statusType: 'return_initiated'
+                });
+            }
+            for (const item of itemsForRefundPendingEmail) {
+                await queueOrderStatusEmail({
+                    to: toEmail,
+                    customerName,
+                    orderID,
+                    itemName: item.name || 'Item',
+                    variationName: item.variationName || '',
+                    statusType: 'refund_pending'
+                });
+            }
+        }
+    } catch (emailErr) {
+        console.error('[Return] Error queueing status emails:', emailErr);
+    }
+
+    for (const item of targetItems) {
+        const coins = Number(item.earnedCoins) || 0;
+        if (coins > 0 && !item.coinsReversed) {
+            try {
+                const revResult = await coinModel.reverseEarnedCoinsForItem(uid, orderID, item.orderItemID, coins);
+                if (revResult && revResult.success) {
+                    await db.query('UPDATE order_items SET coinsReversed = 1 WHERE orderItemID = ?', [item.orderItemID]);
+                }
+            } catch (e) {
+                console.error('[Return] Coin reversal error for item', item.orderItemID, e);
+            }
+        }
+        const referBy = item.referBy && String(item.referBy).trim();
+        if (referBy && orderTotal > 0) {
+            try {
+                await affiliateModel.deductAffiliateEarningsForReturnedItem(
+                    orderID,
+                    item.orderItemID,
+                    Number(item.lineTotalAfter) || 0,
+                    orderTotal,
+                    referBy
+                );
+            } catch (e) {
+                console.error('[Return] Affiliate deduction error for item', item.orderItemID, e);
+            }
+        }
+    }
+
+    await orderModel.recomputeOrderStatusFromReturnItems(orderID);
+
+    const message = refundPendingIds.length > 0
+        ? 'Return requested. Some items could not be replaced; our executive will contact you for refund.'
+        : 'Return request submitted successfully.';
+    return { success: true, message, refundPending: refundPendingIds.length > 0 };
+}
+
 module.exports.getAdminOrderDetails = getAdminOrderDetails;
 module.exports.getAllOrders = getAllOrders;
 module.exports.updateOrderStatus = updateOrderStatus;
+module.exports.returnOrder = returnOrder;
 module.exports.updatePaymentStatus = updatePaymentStatus;
 module.exports.generateInvoice = generateInvoice;
 module.exports.emailInvoice = emailInvoice;

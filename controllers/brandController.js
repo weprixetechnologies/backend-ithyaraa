@@ -2,6 +2,7 @@ const brandService = require('../services/brandService');
 const { generateUID } = require('../utils/uidUtils');
 const argon2 = require('argon2');
 const { addSendEmailJob } = require('../queue/emailProducer');
+const db = require('../utils/dbconnect');
 
 // Get all brands
 const getAllBrands = async (req, res) => {
@@ -165,6 +166,53 @@ const deleteBrand = async (req, res) => {
     }
 };
 
+// Set commission percentage for a brand (admin only)
+const setBrandCommission = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { commissionPercentage } = req.body || {};
+
+        // Allow null to clear commission
+        let value = null;
+        if (commissionPercentage !== null && commissionPercentage !== undefined && commissionPercentage !== '') {
+            const num = Number(commissionPercentage);
+            if (Number.isNaN(num)) {
+                return res.status(400).json({ success: false, message: 'commissionPercentage must be a number or null' });
+            }
+            if (num < 0 || num > 100) {
+                return res.status(400).json({ success: false, message: 'commissionPercentage must be between 0 and 100' });
+            }
+            value = num;
+        }
+
+        // Ensure brand exists
+        const [rows] = await db.query(
+            `SELECT uid FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+            [uid]
+        );
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Brand not found' });
+        }
+
+        await db.query(
+            `UPDATE users SET commissionPercentage = ? WHERE uid = ? AND role = 'brand'`,
+            [value, uid]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'Commission percentage updated successfully',
+            data: {
+                uid,
+                commissionPercentage: value
+            }
+        });
+    } catch (error) {
+        console.error('Set brand commission error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to update commission' });
+    }
+};
+
 module.exports = {
     getAllBrands,
     getBrandByUID,
@@ -172,6 +220,7 @@ module.exports = {
     updateBrand,
     resetBrandPassword,
     getBrandReviewStats,
-    deleteBrand
+    deleteBrand,
+    setBrandCommission
 };
 

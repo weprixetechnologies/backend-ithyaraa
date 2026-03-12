@@ -19,6 +19,9 @@ router.get('/brands/:uid', authAdminMiddleware.verifyAccessToken, brandControlle
 // Create brand
 router.post('/brands', authAdminMiddleware.verifyAccessToken, brandController.createBrand);
 
+// Set commission percentage for a brand
+router.patch('/brands/:uid/commission', authAdminMiddleware.verifyAccessToken, brandController.setBrandCommission);
+
 // Reset brand password (must come before /:uid route)
 router.put('/brands/:uid/reset-password', authAdminMiddleware.verifyAccessToken, brandController.resetBrandPassword);
 

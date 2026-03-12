@@ -122,7 +122,8 @@ const loginBrandUser = async (email, password, deviceInfo) => {
         brandID: user.brandID, // brandID and uid are the same
         username: user.username,
         emailID: user.emailID,
-        role: user.role
+        role: user.role,
+        commissionPercentage: user.commissionPercentage != null ? Number(user.commissionPercentage) : null
     };
     const accessToken = jwt.sign(payload, process.env.JWT_BRAND_SECRET, { expiresIn: '180m' });
     const refreshToken = jwt.sign(payload, process.env.JWT_BRAND_SECRET, { expiresIn: '30d' });
