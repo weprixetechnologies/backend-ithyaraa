@@ -757,6 +757,36 @@ const getProductDetails = async (productID) => {
         product.crossSellProducts = [];
     }
 
+    // Fetch offer details if product has an offerID
+    try {
+        if (product.offerID) {
+            const [offerRows] = await db.query(
+                `SELECT offerID, offerName, offerType, buyCount, getCount, offerBanner, offerMobileBanner
+                 FROM offers
+                 WHERE offerID = ?
+                 LIMIT 1`,
+                [product.offerID]
+            );
+            if (offerRows && offerRows.length > 0) {
+                const offer = offerRows[0];
+                product.offer = {
+                    offerID: offer.offerID,
+                    offerName: offer.offerName,
+                    offerType: offer.offerType,
+                    buyCount: parseInt(offer.buyCount, 10) || 1,
+                    getCount: parseInt(offer.getCount, 10) || 1
+                };
+            } else {
+                product.offer = null;
+            }
+        } else {
+            product.offer = null;
+        }
+    } catch (offerErr) {
+        console.error('Error fetching offer for product:', offerErr);
+        product.offer = null;
+    }
+
     return product;
 };
 

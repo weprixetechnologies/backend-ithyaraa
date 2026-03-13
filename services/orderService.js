@@ -115,9 +115,21 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     }
 
     // Step 4: Store order using processed cart data with new fields
+    // Resolve shipping snapshot from address table for this addressID
+    const addressModel = require('../model/addressModel');
+    const address = await addressModel.getAddressByID(addressID);
     const newOrder = await orderModel.createOrder({
         uid,
         addressID,
+        shippingName: null, // name not stored on address; keep null or derive elsewhere if needed
+        shippingPhone: address ? (address.phoneNumber || address.phonenumber || '') : '',
+        shippingEmail: address ? (address.emailID || address.email || '') : '',
+        shippingLine1: address ? (address.line1 || address.addressLine1 || '') : '',
+        shippingLine2: address ? (address.line2 || address.addressLine2 || '') : '',
+        shippingCity: address ? (address.city || '') : '',
+        shippingState: address ? (address.state || '') : '',
+        shippingPincode: address ? (address.pincode || '') : '',
+        shippingLandmark: address ? (address.landmark || '') : '',
         paymentMode,
         couponCode,
         couponDiscount,
@@ -536,9 +548,31 @@ async function getOrderDetails(orderId, uid) {
             });
         }
 
-        // Get address details
+        // Get delivery address from snapshot when available; fall back to address table for legacy orders.
         let deliveryAddress = null;
-        if (order.addressID) {
+        const hasSnapshot =
+            order.shippingLine1 ||
+            order.shippingLine2 ||
+            order.shippingCity ||
+            order.shippingState ||
+            order.shippingPincode ||
+            order.shippingLandmark ||
+            order.shippingPhone ||
+            order.shippingEmail;
+
+        if (hasSnapshot) {
+            deliveryAddress = {
+                emailID: order.shippingEmail || '',
+                phoneNumber: order.shippingPhone || '',
+                line1: order.shippingLine1 || '',
+                line2: order.shippingLine2 || '',
+                city: order.shippingCity || '',
+                state: order.shippingState || '',
+                pincode: order.shippingPincode || '',
+                landmark: order.shippingLandmark || '',
+                type: null
+            };
+        } else if (order.addressID) {
             try {
                 const addressResult = await db.query(
                     'SELECT * FROM address WHERE addressID = ? AND uid = ?',
@@ -546,17 +580,16 @@ async function getOrderDetails(orderId, uid) {
                 );
                 if (addressResult[0] && addressResult[0].length > 0) {
                     const addr = addressResult[0][0];
-                    // Clean up address response - only send necessary fields
                     deliveryAddress = {
                         emailID: addr.emailID,
-                        phoneNumber: addr.phoneNumber,
-                        line1: addr.line1,
-                        line2: addr.line2,
-                        city: addr.city,
-                        state: addr.state,
-                        pincode: addr.pincode,
-                        landmark: addr.landmark,
-                        type: addr.type
+                        phoneNumber: addr.phoneNumber || addr.phonenumber || '',
+                        line1: addr.line1 || addr.addressLine1 || '',
+                        line2: addr.line2 || addr.addressLine2 || '',
+                        city: addr.city || '',
+                        state: addr.state || '',
+                        pincode: addr.pincode || '',
+                        landmark: addr.landmark || '',
+                        type: addr.type || null
                     };
                 }
             } catch (e) {

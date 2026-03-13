@@ -17,8 +17,15 @@ async function createOrder(orderData) {
         const paymentStatus = (pm === 'PREPAID') ? 'pending' : 'successful'; // FULL_COIN and COD = successful
 
         const [detailResult] = await connection.query(
-            `INSERT INTO orderDetail (uid, subtotal, total, totalDiscount, modified, txnID, createdAt, addressID, paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO orderDetail (
+                uid, subtotal, total, totalDiscount, modified, txnID, createdAt,
+                addressID,
+                shippingName, shippingPhone, shippingEmail,
+                shippingLine1, shippingLine2, shippingCity, shippingState, shippingPincode, shippingLandmark,
+                paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy,
+                isWalletUsed, paidWallet, handlingFee, handFeeRate
+            )
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderData.uid,
                 orderData.summary.subtotal,
@@ -27,6 +34,15 @@ async function createOrder(orderData) {
                 orderData.summary.anyModifications ? 1 : 0,
                 generatedTxnID,
                 orderData.addressID,
+                orderData.shippingName || null,
+                orderData.shippingPhone || null,
+                orderData.shippingEmail || null,
+                orderData.shippingLine1 || null,
+                orderData.shippingLine2 || null,
+                orderData.shippingCity || null,
+                orderData.shippingState || null,
+                orderData.shippingPincode || null,
+                orderData.shippingLandmark || null,
                 orderData.paymentMode || 'cod',
                 paymentStatus,
                 orderData.trackingID || null,
