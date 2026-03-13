@@ -909,7 +909,7 @@ const buyNowController = async (req, res) => {
                     shippingLine1, shippingLine2, shippingCity, shippingState, shippingPincode, shippingLandmark,
                     paymentMode, paymentStatus, trackingID, deliveryCompany, merchantID,
                     couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate
-                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, 0, 0.00, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     uid,
                     subtotal,
@@ -928,9 +928,14 @@ const buyNowController = async (req, res) => {
                     shippingSnapshot.shippingLandmark || null,
                     pm,
                     paymentStatus,
+                    null, // trackingID
+                    null, // deliveryCompany
                     pm === 'PREPAID' ? merchantOrderId : null,
                     couponCode || null,
                     couponDiscount,
+                    null, // referBy (Buy Now has no affiliate referBy today)
+                    0,    // isWalletUsed
+                    0.00, // paidWallet
                     handlingFee,
                     handFeeRate,
                 ]

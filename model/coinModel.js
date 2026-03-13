@@ -47,7 +47,7 @@ async function completePendingCoins(uid, orderID, refType = 'order') {
         const earnedAt = new Date();
         const expiresAt = new Date(earnedAt.getTime() + 365 * 24 * 60 * 60 * 1000); // 365 days expiry
         const redeemableAt = new Date(earnedAt.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days redemption hold
-        
+
         // Try to insert with redeemableAt, fall back if column doesn't exist
         let lotRes;
         try {
@@ -61,10 +61,10 @@ async function completePendingCoins(uid, orderID, refType = 'order') {
             if (error.message && error.message.includes('redeemableAt')) {
                 console.warn('redeemableAt column not found, inserting without it (migration may not be run yet)');
                 [lotRes] = await connection.query(
-            `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
+                    `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
              VALUES (?, ?, ?, 0, 0, ?, ?)`,
-            [uid, orderID, coins, earnedAt, expiresAt]
-        );
+                    [uid, orderID, coins, earnedAt, expiresAt]
+                );
             } else {
                 throw error;
             }
@@ -311,7 +311,7 @@ async function createEarnLot(uid, orderID, coins, earnedAt, expiresAt) {
     await ensureBalanceRow(uid);
     // Coins are credited instantly but become redeemable after 7 days (return period)
     const redeemableAt = new Date(earnedAt.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days redemption hold
-    
+
     // Try to insert with redeemableAt, fall back if column doesn't exist
     let res;
     try {
@@ -325,10 +325,10 @@ async function createEarnLot(uid, orderID, coins, earnedAt, expiresAt) {
         if (error.message && error.message.includes('redeemableAt')) {
             console.warn('redeemableAt column not found, inserting without it (migration may not be run yet)');
             [res] = await db.query(
-        `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
+                `INSERT INTO coin_lots (uid, orderID, coinsTotal, coinsUsed, coinsExpired, earnedAt, expiresAt)
          VALUES (?, ?, ?, 0, 0, ?, ?)`,
-        [uid, orderID || null, coins, earnedAt, expiresAt]
-    );
+                [uid, orderID || null, coins, earnedAt, expiresAt]
+            );
         } else {
             throw error;
         }
@@ -421,14 +421,14 @@ async function redeemCoinsToWallet(uid, coins) {
             if (error.message && error.message.includes('redeemableAt')) {
                 console.warn('redeemableAt column not found, using all available coins (migration may not be run yet)');
                 [lots] = await connection.query(
-            `SELECT lotID, coinsTotal, coinsUsed, coinsExpired, expiresAt
+                    `SELECT lotID, coinsTotal, coinsUsed, coinsExpired, expiresAt
                      FROM coin_lots 
                      WHERE uid = ? 
                      AND (coinsTotal - coinsUsed - coinsExpired) > 0
              ORDER BY expiresAt ASC, earnedAt ASC
              FOR UPDATE`,
-            [uid]
-        );
+                    [uid]
+                );
             } else {
                 throw error;
             }
@@ -539,7 +539,8 @@ module.exports = {
     getLockedCoinsBreakdown,
     getHistory,
     redeemCoinsToWallet,
-    expireDueLots
+    expireDueLots,
+    ensureBalanceRow
 };
 
 
