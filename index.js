@@ -47,8 +47,10 @@ const presaleDetailsRouter = require('./router/admin/presaleDetailsRouter')
 const presaleBookingRouter = require('./router/admin/presaleBookingRouter')
 const presaleRouter = require('./router/presaleRouter')
 const homepageSectionsRouter = require('./router/homepageSectionsRouter')
+const sliderBannersRouter = require('./router/sliderBannersRouter')
 const productGroupsRouter = require('./router/productGroupsRouter')
 const newsletterRouter = require('./router/newsletterRouter')
+const homeCategoryRouter = require('./router/homeCategoryRouter')
 const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
 const newsletterController = require('./controllers/newsletterController')
 const sizeChartRouter = require('./router/sizeChartRouter')
@@ -102,7 +104,9 @@ app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
 app.use('/api/homepage-sections', homepageSectionsRouter)
+app.use('/api/slider-banners', sliderBannersRouter)
 app.use('/api/newsletter', newsletterRouter)
+app.use('/api/home-categories', homeCategoryRouter)
 app.use('/api/size-charts', sizeChartRouter)
 app.use('/api/public', publicFaqRouter)
 // Alias for public newsletters feed: GET /api/newsletters
@@ -133,6 +137,9 @@ app.use('/api/admin/custom-image-sections', customImageSectionsRouter);
 const sectionItemsRouter = require('./router/sectionItemsRouter');
 app.use('/api/section-items', sectionItemsRouter);
 app.use('/api/admin/section-items', sectionItemsRouter);
+// Home category tiles (admin managed)
+const homeCategoryAdminRouter = require('./router/admin/homeCategoryAdminRouter');
+app.use('/api/admin/home-categories', homeCategoryAdminRouter);
 
 // BRAND AUTH ROUTE
 app.use('/api/brand', brandAuthRouter)

@@ -35,6 +35,7 @@ userRouter.get('/verify-email/:token', usersController.verifyEmail);
 userRouter.post('/send-verification-email', usersController.sendVerificationEmail);
 userRouter.post('/send-otp', otpController.sendOtpController)
 userRouter.post('/verify-otp', otpController.verifyOtp)
+userRouter.get('/check-phone', usersController.checkPhone)
 
 // Payout OTP routes (protected)
 userRouter.post('/send-payout-otp', authMiddleware.verifyAccessToken, otpController.sendPayoutOtpController)

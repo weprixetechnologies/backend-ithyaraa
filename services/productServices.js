@@ -589,7 +589,7 @@ const fetchPaginatedProducts = async (query) => {
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
         'overridePrice', 'tab1', 'tab2', 'productID',
-        'sectionid', 'featuredImage', 'categoryID', 'categoryName'
+        'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
 
     const likeFields = ['name', 'productID', 'sectionid'];

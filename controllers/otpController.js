@@ -6,13 +6,25 @@ const sendOtpController = async (req, res) => {
 
     try {
         const { phoneNumber } = req.body;
-        if (!phoneNumber) return res.status(400).json({ error: "Phone number required" });
+        if (!phoneNumber || typeof phoneNumber !== 'string') {
+            return res.status(400).json({ success: false, message: 'Phone number is required' });
+        }
+        const normalized = phoneNumber.replace(/\D/g, '');
+        const digits = normalized.startsWith('91') && normalized.length === 12
+            ? normalized.slice(-10)
+            : normalized.length === 10
+                ? normalized
+                : '';
+        if (digits.length !== 10) {
+            return res.status(400).json({ success: false, message: 'Enter a valid 10-digit Indian phone number' });
+        }
+        const phoneForOtp = `+91${digits}`;
 
-        const result = await sendOtp(phoneNumber);
+        const result = await sendOtp(phoneForOtp);
         return res.json(result);
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: "Internal server error" });
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
