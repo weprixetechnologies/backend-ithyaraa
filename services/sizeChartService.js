@@ -1,7 +1,7 @@
 const sizeChartModel = require('../model/sizeChartModel');
 
 async function createSizeChart(payload) {
-    const { chartName, imgUrl } = payload || {};
+    const { chartName, imgUrl, brandID = null } = payload || {};
 
     if (!chartName || !chartName.trim()) {
         const err = new Error('chartName is required');
@@ -17,6 +17,7 @@ async function createSizeChart(payload) {
     const chart = await sizeChartModel.createSizeChart({
         chartName: chartName.trim(),
         imgUrl: imgUrl.trim(),
+        brandID: brandID ? String(brandID).trim() : null
     });
 
     return chart;

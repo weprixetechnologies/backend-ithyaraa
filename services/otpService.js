@@ -180,22 +180,30 @@ const sendEmailVerificationOtp = async (email, name) => {
 // Verify email OTP
 const verifyEmailOtp = async (email, otp) => {
     try {
+        console.log('[OtpService][VerifyEmailOtp] Start', {
+            email,
+            hasOtp: !!otp,
+            otpLen: typeof otp === 'string' ? otp.length : otp != null ? String(otp).length : 0,
+        });
         const hashedOtp = hashOtp(otp);
 
         // Get OTP record
         const otpRecord = await otpModel.getOtpRecord(email, hashedOtp);
         if (!otpRecord) {
+            console.warn('[OtpService][VerifyEmailOtp] No matching OTP record (invalid/expired)', { email });
             return { success: false, message: 'Invalid or expired OTP' };
         }
 
         // Check if OTP is expired
         if (new Date() > new Date(otpRecord.expiry)) {
+            console.warn('[OtpService][VerifyEmailOtp] OTP expired', { email, expiry: otpRecord.expiry });
             return { success: false, message: 'OTP has expired' };
         }
 
         // Delete OTP once used
         await deleteOtpByPhoneNumber(email);
 
+        console.log('[OtpService][VerifyEmailOtp] Success', { email });
         return { success: true, message: 'Email OTP verified successfully' };
     } catch (error) {
         console.error('Error verifying email OTP:', error);

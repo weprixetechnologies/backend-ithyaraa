@@ -1,16 +1,16 @@
 const db = require('../utils/dbconnect');
 
-async function createSizeChart({ chartName, imgUrl }) {
+async function createSizeChart({ chartName, imgUrl, brandID = null }) {
     const [result] = await db.query(
-        `INSERT INTO size_charts (chartName, imgUrl) VALUES (?, ?)`,
-        [chartName, imgUrl]
+        `INSERT INTO size_charts (chartName, imgUrl, brandID) VALUES (?, ?, ?)`,
+        [chartName, imgUrl, brandID]
     );
-    return { id: result.insertId, chartName, imgUrl };
+    return { id: result.insertId, chartName, imgUrl, brandID };
 }
 
 async function listSizeCharts() {
     const [rows] = await db.query(
-        `SELECT id, chartName, imgUrl, createdAt, updatedAt FROM size_charts ORDER BY createdAt DESC`
+        `SELECT id, chartName, imgUrl, brandID, createdAt, updatedAt FROM size_charts ORDER BY createdAt DESC`
     );
     return rows;
 }

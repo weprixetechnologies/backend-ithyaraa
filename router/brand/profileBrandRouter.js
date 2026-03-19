@@ -3,6 +3,8 @@ const profileBrandRouter = express.Router();
 const authBrandMiddleware = require('../../middleware/authBrandMiddleware');
 const db = require('../../utils/dbconnect');
 const brandService = require('../../services/brandService');
+const verificationController = require('../../controllers/verificationController');
+const sizeChartController = require('../../controllers/sizeChartController');
 
 // GET /api/brand/profile - Get current brand profile
 profileBrandRouter.get('/profile', authBrandMiddleware.verifyAccessToken, async (req, res) => {
@@ -115,6 +117,18 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
         res.status(500).json({ success: false, message: 'Failed to update profile', error: error.message });
     }
 });
+
+// POST /api/brand/send-email-verification-otp - Send OTP for brand email
+profileBrandRouter.post('/send-email-verification-otp', authBrandMiddleware.verifyAccessToken, verificationController.sendEmailVerificationOtp);
+
+// POST /api/brand/verify-email-otp - Verify OTP for brand email
+profileBrandRouter.post('/verify-email-otp', authBrandMiddleware.verifyAccessToken, verificationController.verifyEmailOtp);
+
+// POST /api/brand/size-charts - Create size chart for brand
+profileBrandRouter.post('/size-charts', authBrandMiddleware.verifyAccessToken, sizeChartController.createSizeChart);
+
+// GET /api/brand/size-charts - List size charts for brand (filtered by brandID in controller)
+profileBrandRouter.get('/size-charts', authBrandMiddleware.verifyAccessToken, sizeChartController.listSizeCharts);
 
 module.exports = profileBrandRouter;
 

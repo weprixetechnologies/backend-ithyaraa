@@ -35,24 +35,36 @@ const verifyEmailOtp = async (req, res) => {
         const { uid } = req.user;
         const { otp } = req.body;
 
+        console.log('[VerifyEmailOtp] Incoming', {
+            uid,
+            hasOtp: !!otp,
+            otpLen: typeof otp === 'string' ? otp.length : otp != null ? String(otp).length : 0,
+        });
+
         const user = await usersModel.findUserByUIDFull(uid);
         if (!user) {
+            console.warn('[VerifyEmailOtp] User not found for uid:', uid);
             return res.status(404).json({ success: false, message: 'User not found' });
         }
 
         if (user.verifiedEmail === 1) {
+            console.warn('[VerifyEmailOtp] Already verified for uid:', uid, 'email:', user.emailID);
             return res.status(400).json({ success: false, message: 'Email already verified' });
         }
 
         if (!otp) {
+            console.warn('[VerifyEmailOtp] Missing OTP for uid:', uid, 'email:', user.emailID);
             return res.status(400).json({ success: false, message: 'OTP is required' });
         }
 
+        console.log('[VerifyEmailOtp] Verifying OTP for email:', user.emailID);
         const result = await otpService.verifyEmailOtp(user.emailID, otp);
+        console.log('[VerifyEmailOtp] OTP service result:', result);
 
         if (result.success) {
             // Mark email as verified
-            await usersService.verifyEmail(uid);
+            const verifyRes = await usersService.verifyEmail(uid);
+            console.log('[VerifyEmailOtp] Mark email verified result:', verifyRes);
             return res.status(200).json({ success: true, message: 'Email verified successfully' });
         } else {
             return res.status(400).json(result);

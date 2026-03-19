@@ -2,6 +2,7 @@ const express = require('express')
 const orderBrandRouter = express.Router()
 const authBrandMiddleware = require('../../middleware/authBrandMiddleware')
 const db = require('../../utils/dbconnect')
+const ExcelJS = require('exceljs');
 const { queueOrderStatusEmail } = require('../../services/orderStatusEmailService')
 
 const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
@@ -573,7 +574,7 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
 // GET /api/brand/orders - Get all orders with pagination and filters
 orderBrandRouter.get('/orders', authBrandMiddleware.verifyAccessToken, async (req, res) => {
     try {
-        const { page = 1, limit = 10, status, paymentStatus, search, itemStatus } = req.query;
+        const { page = 1, limit = 10, status, paymentStatus, search, itemStatus, startDate, endDate } = req.query;
         const offset = (page - 1) * limit;
         const brandID = req.user.uid; // Get brandID from JWT token
         console.log(brandID);
@@ -594,6 +595,11 @@ orderBrandRouter.get('/orders', authBrandMiddleware.verifyAccessToken, async (re
         if (effectiveItemStatus) {
             whereConditions.push('oi.itemStatus = ?');
             queryParams.push(effectiveItemStatus);
+        }
+
+        if (startDate && endDate) {
+            whereConditions.push('DATE(oi.createdAt) BETWEEN ? AND ?');
+            queryParams.push(startDate, endDate);
         }
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
@@ -641,6 +647,96 @@ orderBrandRouter.get('/orders', authBrandMiddleware.verifyAccessToken, async (re
     } catch (error) {
         console.error('Error fetching brand orders:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch orders', error: error.message });
+    }
+});
+
+// GET /api/brand/orders/export - Export orders to Excel
+orderBrandRouter.get('/orders/export', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const { search, itemStatus, startDate, endDate } = req.query;
+
+        let whereConditions = ['oi.brandID = ?'];
+        let queryParams = [brandID];
+
+        if (search) {
+            whereConditions.push('(oi.orderID LIKE ? OR oi.name LIKE ?)');
+            const searchTerm = `%${search}%`;
+            queryParams.push(searchTerm, searchTerm);
+        }
+
+        if (itemStatus) {
+            whereConditions.push('oi.itemStatus = ?');
+            queryParams.push(itemStatus);
+        }
+
+        if (startDate && endDate) {
+            whereConditions.push('DATE(oi.createdAt) BETWEEN ? AND ?');
+            queryParams.push(startDate, endDate);
+        }
+
+        const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+        const exportQuery = `
+            SELECT 
+                oi.orderID,
+                oi.orderItemID,
+                oi.name AS productName,
+                oi.variationName,
+                oi.quantity,
+                oi.lineTotalAfter AS amount,
+                oi.itemStatus,
+                oi.createdAt,
+                oi.settlementStatus,
+                oi.replacementOrderID,
+                u.name AS customerName,
+                u.phonenumber AS customerPhone
+            FROM order_items oi
+            LEFT JOIN users u ON u.uid = oi.uid
+            ${whereClause}
+            ORDER BY oi.createdAt DESC
+        `;
+
+        const [rows] = await db.query(exportQuery, queryParams);
+
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Orders');
+
+        worksheet.columns = [
+            { header: 'Order ID', key: 'orderID', width: 20 },
+            { header: 'Item ID', key: 'orderItemID', width: 15 },
+            { header: 'Product Name', key: 'productName', width: 30 },
+            { header: 'Variation', key: 'variationName', width: 20 },
+            { header: 'Quantity', key: 'quantity', width: 10 },
+            { header: 'Amount', key: 'amount', width: 15 },
+            { header: 'Status', key: 'itemStatus', width: 15 },
+            { header: 'Settlement', key: 'settlementStatus', width: 15 },
+            { header: 'Replacement Order ID', key: 'replacementOrderID', width: 25 },
+            { header: 'Date', key: 'createdAt', width: 25 },
+            { header: 'Customer Name', key: 'customerName', width: 25 },
+            { header: 'Customer Phone', key: 'customerPhone', width: 20 }
+        ];
+
+        rows.forEach(row => {
+            worksheet.addRow({
+                ...row,
+                createdAt: new Date(row.createdAt).toLocaleString('en-IN'),
+                customerPhone: row.customerPhone ? 'XXXXXX' + row.customerPhone.slice(-4) : 'N/A'
+            });
+        });
+
+        // Style the header
+        worksheet.getRow(1).font = { bold: true };
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=orders_export_${new Date().getTime()}.xlsx`);
+
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (error) {
+        console.error('Error exporting brand orders:', error);
+        res.status(500).json({ success: false, message: 'Failed to export orders', error: error.message });
     }
 });
 
