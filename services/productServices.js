@@ -4,7 +4,6 @@ const crossSellModel = require('./../model/crossSellModel');
 const db = require('./../utils/dbconnect');
 const { getCache, setCache } = require('../utils/cacheHelper');
 const { SCOPE } = require('../utils/cacheScopes');
-const { get } = require('../router/admin/productRouter');
 
 const generateRandomID = () => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -523,7 +522,7 @@ const getProductCount = async (query) => {
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
         'overridePrice', 'tab1', 'tab2', 'productID',
-        'sectionid', 'featuredImage', 'categoryID', 'categoryName'
+        'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
 
     const likeFields = ['name', 'type', 'productID', 'sectionid'];
@@ -577,7 +576,7 @@ const fetchPaginatedProducts = async (query) => {
     console.log(query);
 
     let page = parseInt(query.page) || 1;
-    let limit = parseInt(query.limit) || 2;
+    let limit = parseInt(query.limit) || 20;
 
     if (page < 1) page = 1;
     if (limit < 1) limit = 10;

@@ -115,6 +115,7 @@ const addProduct = async (req, res) => {
         }
 
         // ✅ 8. Success Response
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         return res.status(201).json({
             success: true,
             message: 'Product uploaded successfully',
@@ -228,6 +229,7 @@ const addCustomProduct = async (req, res) => {
         }
 
         // ✅ Success Response
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         return res.status(201).json({
             success: true,
             message: 'Custom product uploaded successfully',
@@ -308,6 +310,7 @@ const editProduct = async (req, res) => {
         // Invalidate cached product details
         try {
             await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
+            await deleteCache(SCOPE.OFFERS_LIST);
         } catch (e) {
             console.error('editProduct cache delete error', e);
         }
@@ -409,6 +412,7 @@ const deleteProduct = async (req, res) => {
         if (result.success) {
             try {
                 await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
+                await deleteCache(SCOPE.OFFERS_LIST);
             } catch (e) {
                 console.error('deleteProduct cache delete error', e);
             }
@@ -441,6 +445,7 @@ const bulkDeleteProducts = async (req, res) => {
     try {
         const { productIDs } = req.body || {};
         const result = await service.bulkDeleteProducts(productIDs);
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -461,6 +466,7 @@ const bulkUpdateSale = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkUpdateSale(payload);
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -481,6 +487,7 @@ const bulkAssignSection = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkAssignSection(payload);
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -501,6 +508,7 @@ const bulkRemoveSection = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkRemoveSection(payload);
+        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {

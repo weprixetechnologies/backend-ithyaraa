@@ -57,6 +57,19 @@ const getOffers = async (req, res) => {
         });
     }
 };
+const getOffersWithProducts = async (req, res) => {
+    try {
+        const result = await offerService.fetchActiveOffersWithProducts();
+        return res.json(result);
+    } catch (err) {
+        console.error('Error fetching offers with products:', err);
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+
 const getOfferCount = async (req, res) => {
     try {
         const count = await offerService.fetchOfferCount(req.query);
@@ -135,4 +148,4 @@ const deleteOffer = async (req, res) => {
     }
 };
 
-module.exports = { fetchOfferbyName, postOfferController, getOffers, getOfferCount, editOffer, getOfferDetails, deleteOffer };
+module.exports = { fetchOfferbyName, postOfferController, getOffers, getOfferCount, editOffer, getOfferDetails, deleteOffer, getOffersWithProducts };

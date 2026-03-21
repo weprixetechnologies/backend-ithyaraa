@@ -5,6 +5,7 @@ const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 
 // Public routes (no auth required)
 offerRouter.get('/public', controller.getOffers)
+offerRouter.get('/public-list', controller.getOffersWithProducts)
 offerRouter.get('/public/:offerID', controller.getOfferDetails)
 
 // Admin routes (auth required)

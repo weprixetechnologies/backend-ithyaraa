@@ -1,7 +1,8 @@
 const offerModel = require('../model/offersModel');
 const { v4: uuidv4 } = require('uuid');
-const { deleteCache } = require('../utils/cacheHelper');
+const { deleteCache, getCache, setCache } = require('../utils/cacheHelper');
 const { SCOPE } = require('../utils/cacheScopes');
+const db = require('../utils/dbconnect');
 
 const generateUniqueOfferID = async () => {
     let unique = false;
@@ -49,6 +50,7 @@ const createOffer = async (offerData) => {
     // Invalidate offer cache
     try {
         await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+        await deleteCache(SCOPE.OFFERS_LIST);
     } catch (err) {
         console.error('createOffer cache delete error', err);
     }
@@ -147,6 +149,7 @@ const updateOffer = async (offerID, updatedData) => {
         // Invalidate offer cache
         try {
             await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+            await deleteCache(SCOPE.OFFERS_LIST);
         } catch (err) {
             console.error('updateOffer cache delete error', err);
         }
@@ -193,6 +196,7 @@ const deleteOffer = async (offerID) => {
         // Invalidate offer cache
         try {
             await deleteCache(SCOPE.OFFER_ACTIVE(offerID));
+            await deleteCache(SCOPE.OFFERS_LIST);
         } catch (err) {
             console.error('deleteOffer cache delete error', err);
         }
@@ -211,4 +215,59 @@ const deleteOffer = async (offerID) => {
     }
 };
 
-module.exports = { createOffer, fetchFilteredOffers, fetchOfferCount, updateOffer, fetchOfferDetails, deleteOffer };
+const fetchActiveOffersWithProducts = async () => {
+    // 1️⃣ check cache
+    const cacheKey = SCOPE.OFFERS_LIST;
+    const cached = await getCache(cacheKey);
+    if (cached) {
+        return cached;
+    }
+
+    // 2️⃣ Fetch all offers
+    const [offers] = await db.query(`
+        SELECT offerID, offerName, offerType, buyAt, buyCount, getCount, offerMobileBanner, offerBanner
+        FROM offers
+        ORDER BY createdAt DESC
+    `);
+
+    // 3️⃣ For each offer, fetch up to 10 latest products
+    for (let offer of offers) {
+        const [products] = await db.query(`
+            SELECT productID, name, regularPrice, salePrice,
+                   discountType, discountValue, type, status,
+                   brand, featuredImage, categories, sectionid, createdAt
+            FROM products
+            WHERE offerID = ? AND (status = 'In Stock' OR status IS NULL)
+            ORDER BY createdAt DESC
+            LIMIT 10
+        `, [offer.offerID]);
+
+        // Parse JSON fields
+        products.forEach(row => {
+            try {
+                if (typeof row.featuredImage === 'string') {
+                    row.featuredImage = JSON.parse(row.featuredImage);
+                }
+                if (typeof row.categories === 'string') {
+                    row.categories = JSON.parse(row.categories);
+                }
+            } catch (e) {
+                console.error('JSON parse error for product:', row.productID, e);
+            }
+        });
+
+        offer.products = products;
+    }
+
+    const data = {
+        success: true,
+        data: offers
+    };
+
+    // Save cache
+    await setCache(cacheKey, data, 300); // 5 minutes TTL
+
+    return data;
+};
+
+module.exports = { createOffer, fetchFilteredOffers, fetchOfferCount, updateOffer, fetchOfferDetails, deleteOffer, fetchActiveOffersWithProducts };
