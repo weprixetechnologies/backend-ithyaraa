@@ -4,7 +4,7 @@
  */
 const { addSendEmailJob } = require('../queue/emailProducer');
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ithyaraa.com';
 
 const STATUS_CONFIG = {
     shipped: {

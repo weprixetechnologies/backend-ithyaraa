@@ -57,6 +57,8 @@ const sizeChartRouter = require('./router/sizeChartRouter')
 const faqAdminRouter = require('./router/admin/faqAdminRouter')
 const affiliateAdminRouter = require('./router/admin/affiliateAdminRouter')
 const publicFaqRouter = require('./router/publicFaqRouter')
+const reelsRouter = require('./router/reelsRouter')
+const reelsAdminRouter = require('./router/admin/reelsAdminRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
@@ -109,6 +111,7 @@ app.use('/api/newsletter', newsletterRouter)
 app.use('/api/home-categories', homeCategoryRouter)
 app.use('/api/size-charts', sizeChartRouter)
 app.use('/api/public', publicFaqRouter)
+app.use('/api/reels', reelsRouter)
 // Alias for public newsletters feed: GET /api/newsletters
 app.get('/api/newsletters', newsletterController.listNewsletters)
 
@@ -127,6 +130,7 @@ app.use('/api/admin', newsletterAdminRouter);
 app.use('/api/admin', faqAdminRouter);
 app.use('/api/admin', affiliateAdminRouter);
 app.use('/api/admin', settlementAdminRouter);
+app.use('/api/admin/reels', reelsAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 // Product groups (homepage grouping) - admin endpoints
 app.use('/api/admin/product-groups', productGroupsRouter);
