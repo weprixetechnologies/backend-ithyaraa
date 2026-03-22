@@ -4,6 +4,8 @@ const {
   returnWindowClosed,
   ACTIVE_RETURN_STATUSES,
   FINAL_REFUND_STATUSES,
+  REFUND_FLOW_STATUSES,
+  REPLACEMENT_FLOW_STATUSES,
   fetchRawItems,
   fetchReplacementItems,
   fetchCarriedForwardItems,
@@ -34,19 +36,25 @@ function segregateItems(rawItems, replacementMap, cutoff) {
 
     const isDelivered    = itemStatus === 'delivered';
     const isCodUnpaid    = paymentMode === 'cod' && !['successful', 'paid'].includes(paymentStatus);
+    
+    // Explicitly identify refund related items
+    const isRefundRelated = REFUND_FLOW_STATUSES.has(returnStatus) || 
+                          (returnStatus === 'return_picked' && !item.replacementOrderID && item.refundQueryID);
+    
     const isActiveReturn = ACTIVE_RETURN_STATUSES.has(returnStatus);
-    const isFinalRefund  = FINAL_REFUND_STATUSES.has(returnStatus);
 
     const hasReplacement = !!item.replacementOrderID;
-    let combinedLineTotal = Number(item.lineTotalAfter || 0);
+    let combinedLineTotal = Number(item.lineTotalAfter || 0); // Always use main item's price
     let windowRef = item;
 
     if (hasReplacement) {
       const replacementItems = replacementMap.get(item.replacementOrderID) || [];
+      // Replacement orders are ₹0, but we iterate just in case there are multiple items or adjustments
       for (const rep of replacementItems) {
         combinedLineTotal += Number(rep.lineTotalAfter || 0);
       }
       if (replacementItems.length > 0) {
+        // Use the replacement item's delivery/window info
         windowRef = replacementItems[0];
       }
     }
@@ -59,16 +67,19 @@ function segregateItems(rawItems, replacementMap, cutoff) {
 
     const row = { ...item, lineTotalAfter: combinedLineTotal, hasReplacement, windowClosed };
 
-    if (isFinalRefund && !hasReplacement) {
+    // 1. Exclude Refund Related
+    if (isRefundRelated) {
       deductedItems.push({ ...row, bucket: 'deducted' });
       continue;
     }
 
-    if (!isDelivered || !windowClosed || isCodUnpaid || isActiveReturn) {
+    // 2. On Hold (Preparing, Shipped, Delivered within window, Active Replacement, Unpaid COD)
+    if (!isDelivered || !windowClosed || isCodUnpaid || (isActiveReturn && hasReplacement) || returnStatus === 'return_initiated') {
       onHoldItems.push({ ...row, bucket: 'onHold' });
       continue;
     }
 
+    // 3. Available
     eligibleItems.push({ ...row, bucket: 'eligible' });
   }
 
@@ -129,21 +140,40 @@ async function computeSettlement(brandID, settlementMonth) {
         if (reps.length > 0) windowRef = reps[0];
       }
 
-      const closed = returnWindowClosed(
+      const returnStatus = String(item.returnStatus || '').toLowerCase();
+      const isRefundRelated = REFUND_FLOW_STATUSES.has(returnStatus) || 
+                            (returnStatus === 'return_picked' && !item.replacementOrderID && item.refundQueryID);
+      const isActiveReturn = ACTIVE_RETURN_STATUSES.has(returnStatus);
+      const itemStatus = String(item.itemStatus || '').toLowerCase();
+      const isDelivered = itemStatus === 'delivered';
+      const paymentMode = String(item.paymentMode || '').toLowerCase();
+      const paymentStatus = String(item.paymentStatus || '').toLowerCase();
+      const isCodUnpaid = paymentMode === 'cod' && !['successful', 'paid'].includes(paymentStatus);
+
+      const closed = isDelivered && returnWindowClosed(
         windowRef.coinLockUntil,
         windowRef.deliveredAt,
         cutoff
       );
 
-      if (closed) {
-        holdReleasedAmount += combinedLineTotal;
-        holdReleasedItems.push({
-          ...item,
-          lineTotalAfter: combinedLineTotal,
-          hasReplacement,
-          bucket: 'holdReleased',
-        });
+      const row = { ...item, lineTotalAfter: combinedLineTotal, hasReplacement, windowClosed: closed };
+
+      if (isRefundRelated) {
+        deductedItems.push({ ...row, bucket: 'deducted_from_hold' });
+        continue;
       }
+
+      if (!isDelivered || !closed || isCodUnpaid || (isActiveReturn && hasReplacement) || returnStatus === 'return_initiated') {
+        onHoldItems.push({ ...row, bucket: 'onHold' });
+        continue;
+      }
+
+      // Released
+      holdReleasedAmount += combinedLineTotal;
+      holdReleasedItems.push({
+        ...row,
+        bucket: 'holdReleased',
+      });
     }
   }
 

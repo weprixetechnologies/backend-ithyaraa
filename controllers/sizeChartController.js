@@ -10,10 +10,11 @@ const createSizeChart = async (req, res) => {
             data: chart,
         });
     } catch (error) {
-        const status = error.statusCode || 400;
+        console.error('Error in createSizeChart:', error);
+        const status = error.statusCode || 500;
         res.status(status).json({
             success: false,
-            message: error.message,
+            message: error.message || 'Internal server error',
         });
     }
 };
@@ -33,9 +34,10 @@ const listSizeCharts = async (req, res) => {
             data: charts,
         });
     } catch (error) {
+        console.error('Error in listSizeCharts:', error);
         res.status(500).json({
             success: false,
-            message: error.message,
+            message: error.message || 'Internal server error',
         });
     }
 };

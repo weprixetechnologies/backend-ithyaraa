@@ -28,7 +28,6 @@ function returnWindowClosed(coinLockUntil, deliveredAt, cutoff) {
 }
 
 const ACTIVE_RETURN_STATUSES = new Set([
-  'return_requested',
   'return_initiated',
   'return_picked',
   'replacement_processing',
@@ -37,6 +36,21 @@ const ACTIVE_RETURN_STATUSES = new Set([
 ]);
 
 const FINAL_REFUND_STATUSES = new Set(['returned', 'refund_completed']);
+
+// Statuses that are ALWAYS part of a refund flow
+const REFUND_FLOW_STATUSES = new Set([
+  'refund_pending',
+  'returned',
+  'refund_completed',
+]);
+
+// Statuses that are ALWAYS part of a replacement flow
+const REPLACEMENT_FLOW_STATUSES = new Set([
+  'return_initiated',
+  'replacement_processing',
+  'replacement_shipped',
+  'replacement_complete',
+]);
 
 async function fetchRawItems(brandID, periodStart, periodEnd) {
   const [rows] = await db.query(
@@ -60,7 +74,8 @@ async function fetchRawItems(brandID, periodStart, periodEnd) {
        od.orderStatus,
        od.paymentMode,
        od.paymentStatus,
-       od.isReplacement
+       od.isReplacement,
+       oi.refundQueryID
      FROM order_items oi
      INNER JOIN orderDetail od ON od.orderID = oi.orderID
      WHERE oi.brandID = ?
@@ -119,6 +134,7 @@ async function fetchCarriedForwardItems(brandID, prevSettlementID) {
        oi.itemStatus,
        oi.returnStatus,
        oi.replacementOrderID,
+       oi.refundQueryID,
        oi.wasCarriedForward,
        od.deliveredAt,
        od.orderStatus,

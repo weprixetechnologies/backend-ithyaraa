@@ -73,25 +73,25 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                 COUNT(DISTINCT oi.orderID) AS totalOrders,
                 SUM(CASE WHEN oi.itemStatus = 'shipped' THEN 1 ELSE 0 END) AS shippedItems,
                 SUM(CASE WHEN oi.itemStatus = 'delivered' THEN 1 ELSE 0 END) AS deliveredItems,
-                SUM(CASE WHEN oi.itemStatus = 'pending' THEN 1 ELSE 0 END) AS pendingItems,
-                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed') THEN 1 ELSE 0 END) AS returnItems,
-                SUM(CASE WHEN oi.returnStatus IN ('replacement_processing', 'replacement_shipped', 'replacement_complete') THEN 1 ELSE 0 END) AS replacementItems,
+                SUM(CASE WHEN oi.itemStatus IN ('pending', 'preparing') THEN 1 ELSE 0 END) AS pendingItems,
+                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed', 'refund_pending') THEN 1 ELSE 0 END) AS returnItems,
+                SUM(CASE WHEN oi.returnStatus IN ('return_initiated', 'replacement_processing', 'replacement_shipped', 'replacement_complete') THEN 1 ELSE 0 END) AS replacementItems,
                 SUM(CASE WHEN oi.returnStatus = 'returnRejected' THEN 1 ELSE 0 END) AS returnRejectedCount,
                 SUM(CASE WHEN LOWER(od.paymentMode) = 'cod' THEN oi.lineTotalAfter ELSE 0 END) AS codAmount,
                 SUM(CASE WHEN LOWER(od.paymentMode) <> 'cod' THEN oi.lineTotalAfter ELSE 0 END) AS prepaidAmount,
 
-                -- ON HOLD bucket 1: shipped, no return raised
+                -- ON HOLD bucket 1: preparing / shipped, no return raised
                 SUM(
                     CASE 
-                        WHEN oi.itemStatus = 'shipped'
-                             AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+                        WHEN oi.itemStatus IN ('preparing', 'shipped')
+                             AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none', 'returnRejected'))
                              AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                              AND oi.settlementStatus = 'unsettled'
                         THEN oi.lineTotalAfter ELSE 0 
                     END
-                ) AS shippedPendingDeliveryAmount,
+                ) AS awaitingDeliveryAmount,
 
-                -- ON HOLD bucket 2: delivered, within return window, no active refund
+                -- ON HOLD bucket 2: delivered, within return window
                 SUM(
                     CASE 
                         WHEN oi.itemStatus = 'delivered' 
@@ -99,7 +99,7 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                              AND (
                                  (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil > NOW())
                                  OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
-                                     AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) > NOW())
+                                     AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) > NOW())
                              )
                              AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                              AND oi.settlementStatus = 'unsettled'
@@ -107,9 +107,25 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                     END
                 ) AS deliveredWithinWindowAmount,
 
-                -- GROSS AVAILABLE: payable to brand now (no active refund path).
-                -- Includes normal delivered items (including replacement_complete) 
-                -- only after the return window has expired.
+                -- ON HOLD bucket 3: replacement in progress
+                SUM(
+                    CASE 
+                        WHEN oi.returnStatus IN ('return_initiated', 'replacement_processing','replacement_shipped')
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS replacementInProgressAmount,
+
+                -- DEDUCTED: refund in progress or complete
+                SUM(
+                    CASE 
+                        WHEN oi.returnStatus IN ('returned','refund_pending','refund_completed')
+                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
+                        THEN oi.lineTotalAfter ELSE 0 
+                    END
+                ) AS refundedAmount,
+
+                -- GROSS AVAILABLE
                 SUM(
                     CASE
                         WHEN oi.itemStatus = 'delivered'
@@ -117,8 +133,7 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                              AND (
                                  (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
                                  OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
-                                     AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) <= NOW())
-                                  OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
+                                     AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
                              )
                              AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                              AND oi.settlementStatus = 'unsettled'
@@ -127,41 +142,9 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                                  AND od.paymentStatus NOT IN ('successful', 'paid')
                              )
                         THEN oi.lineTotalAfter
-
                         ELSE 0
                     END
                 ) AS grossAvailablePayment,
-
-                -- ON HOLD bucket 3: replacement in progress (original item being replaced, not yet complete)
-                SUM(
-                    CASE 
-                        WHEN oi.returnStatus IN ('replacement_processing','replacement_shipped')
-                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
-                        THEN oi.lineTotalAfter ELSE 0 
-                    END
-                ) AS replacementInProgressAmount,
-
-                -- TOTAL RETURNS: any item where a return/refund/replacement path exists
-                SUM(
-                    CASE 
-                        WHEN oi.returnStatus IN (
-                            'return_initiated','return_picked',
-                            'replacement_processing','replacement_shipped','replacement_complete',
-                            'returned','refund_pending','refund_completed'
-                        )
-                        AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
-                        THEN oi.lineTotalAfter ELSE 0 
-                    END
-                ) AS totalReturnsAmount,
-
-                -- REPLACEMENT AMOUNT: items going through replacement flow (any stage)
-                SUM(
-                    CASE 
-                        WHEN oi.returnStatus IN ('replacement_processing','replacement_shipped','replacement_complete')
-                             AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
-                        THEN oi.lineTotalAfter ELSE 0 
-                    END
-                ) AS replacementAmount,
 
                 SUM(
                     CASE
@@ -171,7 +154,7 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                              AND (
                                 (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
                                 OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
-                                    AND DATE_ADD(od.deliveredAt, INTERVAL ? DAY) <= NOW())
+                                    AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
                              )
                              AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                         THEN oi.lineTotalAfter ELSE 0
@@ -182,7 +165,7 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
             INNER JOIN orderDetail od ON od.orderID = oi.orderID
             WHERE oi.brandID = ?
               AND DATE(oi.createdAt) BETWEEN ? AND ?`,
-            [RETURN_WINDOW_DAYS, RETURN_WINDOW_DAYS, RETURN_WINDOW_DAYS, brandID, startStr, endStr]
+            [brandID, startStr, endStr]
         );
 
         const s = summaryRows && summaryRows[0] ? summaryRows[0] : {};
@@ -190,22 +173,19 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
         const codAmount = Number(s.codAmount || 0);
         const prepaidAmount = Number(s.prepaidAmount || 0);
 
-        const shippedPendingDeliveryAmount = Number(s.shippedPendingDeliveryAmount || 0);
+        const awaitingDeliveryAmount = Number(s.awaitingDeliveryAmount || 0);
         const deliveredWithinWindowAmount = Number(s.deliveredWithinWindowAmount || 0);
         const replacementInProgressAmount = Number(s.replacementInProgressAmount || 0);
-        const totalReturnsAmount = Number(s.totalReturnsAmount || 0);
-        const replacementAmount = Number(s.replacementAmount || 0);
+        const refundedAmount = Number(s.refundedAmount || 0);
         const carriedForwardAmount = Number(s.carriedForwardAmount || 0);
         const returnRejectedCount = Number(s.returnRejectedCount || 0);
 
-        // ON HOLD: shipped (no return) + delivered within window (no return) + replacement in progress
-        const onHoldAmount = shippedPendingDeliveryAmount
+        // ON HOLD: preparing + shipped + delivered within window + replacement in progress
+        const onHoldAmount = awaitingDeliveryAmount
             + deliveredWithinWindowAmount
             + replacementInProgressAmount;
 
-        // DEDUCTED: net impact of returns = TOTAL RETURNS - REPLACEMENT (even if shipped).
-        // Example: 1000 INR return → deducted = 1000; after replacement flow (any stage) → deducted = 0.
-        const deductedAmount = Math.max(0, totalReturnsAmount - replacementAmount);
+        const deductedAmount = refundedAmount;
 
         const grossAvailablePayment = Number(s.grossAvailablePayment || 0);
         const appliedCommission = commissionPercentage != null ? commissionPercentage : 0;
@@ -228,7 +208,7 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                 COALESCE(SUM(oi.lineTotalAfter), 0) AS revenue,
                 SUM(CASE WHEN oi.itemStatus = 'shipped' THEN 1 ELSE 0 END) AS shipped,
                 SUM(CASE WHEN oi.itemStatus = 'delivered' THEN 1 ELSE 0 END) AS delivered,
-                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed') THEN 1 ELSE 0 END) AS returns
+                SUM(CASE WHEN oi.returnStatus IN ('returned', 'refund_completed', 'refund_pending') THEN 1 ELSE 0 END) AS returns
              FROM order_items oi
              INNER JOIN orderDetail od ON od.orderID = oi.orderID
              WHERE oi.brandID = ?
@@ -262,14 +242,13 @@ orderBrandRouter.get('/analytics', authBrandMiddleware.verifyAccessToken, async 
                     prepaidAmount,
                     onHoldAmount,
                     onHoldBreakdown: {
-                        shippedPendingDelivery: shippedPendingDeliveryAmount,
+                        awaitingDelivery: awaitingDeliveryAmount,
                         deliveredWithinReturnWindow: deliveredWithinWindowAmount,
                         replacementInProgress: replacementInProgressAmount
                     },
                     deductedAmount,
                     deductedBreakdown: {
-                        totalReturns: totalReturnsAmount,
-                        replacementAmount: replacementAmount
+                        refunded: refundedAmount
                     },
                     carriedForwardAmount,
                     grossAvailablePayment,
@@ -312,7 +291,6 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
                     (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
                     OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
                         AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
-                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
                 )
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                 AND oi.settlementStatus = 'unsettled'
@@ -322,8 +300,8 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
                 )
             `,
             onHold_shipped: `
-                oi.itemStatus = 'shipped'
-                AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+                (oi.itemStatus IN ('preparing', 'shipped'))
+                AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none','returnRejected'))
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                 AND oi.settlementStatus = 'unsettled'
             `,
@@ -338,26 +316,21 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                 AND oi.settlementStatus = 'unsettled'
             `,
-            deducted_returnInProgress: `
-                oi.returnStatus IN ('return_initiated','return_picked')
-                AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
-            `,
-            deducted_replacementInProgress: `
-                oi.returnStatus IN ('replacement_processing','replacement_shipped')
+            onHold_replacement: `
+                oi.returnStatus IN ('return_initiated','replacement_processing','replacement_shipped')
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
             `,
             deducted_refunded: `
                 oi.returnStatus IN ('returned','refund_pending','refund_completed')
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
             `,
-            // Period-scoped buckets: bucketCondition only expresses the category;
-            // DATE(oi.createdAt) BETWEEN ? AND ? is applied separately.
+            // Period-scoped buckets
             totalOrders: `1=1`,
             shipped: `oi.itemStatus = 'shipped'`,
             delivered: `oi.itemStatus = 'delivered'`,
-            pending: `oi.itemStatus = 'pending'`,
-            returns: `oi.returnStatus IN ('returned','refund_completed')`,
-            replacements: `oi.returnStatus IN ('replacement_processing','replacement_shipped','replacement_complete')`,
+            pending: `oi.itemStatus = 'preparing' OR oi.itemStatus = 'pending'`,
+            returns: `oi.returnStatus IN ('returned','refund_completed','refund_pending')`,
+            replacements: `oi.returnStatus IN ('return_initiated','replacement_processing','replacement_shipped','replacement_complete')`,
             cod: `LOWER(od.paymentMode) = 'cod'`,
             prepaid: `LOWER(od.paymentMode) <> 'cod'`,
             commissionDue: `
@@ -367,7 +340,6 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
                     (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
                     OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
                         AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
-                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
                 )
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                 AND oi.settlementStatus = 'unsettled'
@@ -383,7 +355,6 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
                     (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
                     OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NOT NULL
                         AND DATE_ADD(od.deliveredAt, INTERVAL ${RETURN_WINDOW_DAYS} DAY) <= NOW())
-                    OR (oi.coinLockUntil IS NULL AND od.deliveredAt IS NULL)
                 )
                 AND LOWER(od.orderStatus) NOT IN ('pending','cancelled')
                 AND oi.settlementStatus = 'unsettled'
@@ -402,8 +373,7 @@ orderBrandRouter.get('/analytics/breakdown', authBrandMiddleware.verifyAccessTok
             netAvailable: 'Net Payable After Commission',
             onHold_shipped: 'On Hold — Shipped (Awaiting Delivery)',
             onHold_delivered: 'On Hold — Delivered (Within Return Window)',
-            deducted_returnInProgress: 'Deducted — Return In Progress',
-            deducted_replacementInProgress: 'Deducted — Replacement In Progress',
+            onHold_replacement: 'On Hold — Replacement In Progress',
             deducted_refunded: 'Deducted — Refunded',
             totalOrders: 'All Orders',
             shipped: 'Shipped Orders',
