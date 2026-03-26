@@ -529,9 +529,9 @@ const buyNowController = async (req, res) => {
                         message: 'Selected dress type is not available for this product',
                     });
                 }
-                
+
                 matchedDressType = matchedType;
-                
+
                 // Inject into customInputs for persistence
                 if (!customInputs || typeof customInputs !== 'object') customInputs = {};
                 customInputs['Dress Type'] = matchedType.label;
@@ -1218,8 +1218,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
@@ -1401,14 +1401,9 @@ const checkOffer = async (req, res) => {
             });
         }
 
-        if (productType !== 'variable') {
-            console.log(`[BuyNow][CheckOffer] ${productType} product – skipping offer check`);
-            return res.status(200).json({
-                success: true,
-                offerApplied: false,
-                message: `Offers are only available for variable products`,
-            });
-        }
+        // Offers are strictly for variable products, but we continue to compute base pricing
+        // (including dress type and flash sale) even for other types so the frontend gets
+        // a correct price breakdown.
 
         // Fetch base product pricing
         const [prodRows] = await db.query('SELECT * FROM products WHERE productID = ? LIMIT 1', [productID]);
@@ -1434,8 +1429,8 @@ const checkOffer = async (req, res) => {
             );
             if (varRows && varRows.length > 0) {
                 const v = varRows[0];
-                unitPriceBefore = v.variationSalePrice != null 
-                    ? Number(v.variationSalePrice) 
+                unitPriceBefore = v.variationSalePrice != null
+                    ? Number(v.variationSalePrice)
                     : Number(v.variationPrice || 0);
             }
         }
@@ -1493,6 +1488,18 @@ const checkOffer = async (req, res) => {
             qty,
             originalTotal,
         });
+
+        // Skip offer check for non-variable products (but return the base prices calculated above)
+        if (productType !== 'variable') {
+            return res.status(200).json({
+                success: true,
+                offerApplied: false,
+                originalTotal,
+                discountedTotal: originalTotal,
+                savedAmount: 0,
+                message: `Offers are only available for variable products`,
+            });
+        }
 
         // Look up offer (same condition as main flow)
         const [offerRows] = await db.query(
