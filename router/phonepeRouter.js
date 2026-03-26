@@ -84,7 +84,7 @@ router.get('/presale/:preBookingID/status', phonepeController.getPresalePaymentS
  * @access Public
  */
 router.get('/webhook/test', (req, res) => {
-    const backendUrl = process.env.BACKEND_URL || 'https://backend.ithyaraa.com';
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:7885';
     res.json({
         success: true,
         message: 'Webhook endpoint is accessible',

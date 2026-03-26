@@ -42,6 +42,7 @@ const createItem = async (req, res) => {
     if (!result.success) {
       return res.status(500).json(result);
     }
+    try { await deleteCache(SCOPE.HOME_DATA); } catch (e) { console.error(e); }
     return res.status(201).json({ success: true, id: result.id });
   } catch (error) {
     console.error('sectionItemsController.createItem error', error);
@@ -99,6 +100,7 @@ const reorderItems = async (req, res) => {
     if (!result.success) {
       return res.status(500).json(result);
     }
+    try { await deleteCache(SCOPE.HOME_DATA); } catch (e) { console.error(e); }
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('sectionItemsController.reorderItems error', error);
@@ -145,6 +147,7 @@ const updateItem = async (req, res) => {
     const orderIndex = order !== undefined && order !== null ? parseInt(order, 10) : undefined;
     const result = await model.updateItem(id, { itemId, type, orderIndex });
     if (!result.success) return res.status(400).json(result);
+    try { await deleteCache(SCOPE.HOME_DATA); } catch (e) { console.error(e); }
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('sectionItemsController.updateItem error', error);
@@ -157,6 +160,7 @@ const deleteItem = async (req, res) => {
     const { id } = req.params;
     const result = await model.deleteItem(id);
     if (!result.success) return res.status(404).json(result);
+    try { await deleteCache(SCOPE.HOME_DATA); } catch (e) { console.error(e); }
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('sectionItemsController.deleteItem error', error);

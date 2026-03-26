@@ -1,7 +1,7 @@
 const { redis } = require('../config/redis');
 
 // Default TTL in seconds (configurable via env var)
-const DEFAULT_TTL = parseInt(process.env.CACHE_TTL, 10) || 60;
+const DEFAULT_TTL = parseInt(process.env.CACHE_TTL, 10) || 180;
 
 /**
  * NOTE:
@@ -12,11 +12,17 @@ const DEFAULT_TTL = parseInt(process.env.CACHE_TTL, 10) || 60;
 
 async function getCache(key) {
   const data = await redis.get(key);
-  return data ? JSON.parse(data) : null;
+  if (data) {
+    console.log(`[Cache HIT] key: ${key}`);
+    return JSON.parse(data);
+  }
+  console.log(`[Cache MISS] key: ${key}`);
+  return null;
 }
 
 async function setCache(key, value, ttl = DEFAULT_TTL) {
   const str = JSON.stringify(value);
+  console.log(`[Cache SET] key: ${key}, ttl: ${ttl}s`);
   if (ttl && Number.isInteger(ttl) && ttl > 0) {
     await redis.set(key, str, 'EX', ttl);
   } else {
@@ -25,18 +31,20 @@ async function setCache(key, value, ttl = DEFAULT_TTL) {
 }
 
 async function deleteCache(key) {
+  console.log(`[Cache DEL] key: ${key}`);
   await redis.del(key);
 }
 
 /**
  * Remove keys matching a pattern.
- * - pattern should be provided WITHOUT the top-level "cache:" prefix and
- *   can include glob-style wildcards, e.g. 'products:*' or 'products:page:*'
- * - This uses SCAN (stream) under the hood to avoid blocking Redis.
- * - Returns number of keys deleted.
+ * - pattern should be provided WITH the 'cache:' prefix if that's how it's stored,
+ *   OR the helper can ensure it. Given our new SCOPE, literal 'cache:' is assumed.
  */
 async function clearByPattern(pattern) {
-  const stream = redis.scanStream({ match: pattern, count: 100 });
+  const fullPattern = pattern.startsWith('cache:') ? pattern : `cache:${pattern}`;
+  console.log(`[Cache CLEAR] pattern: ${fullPattern}`);
+
+  const stream = redis.scanStream({ match: fullPattern, count: 100 });
   const pipeline = redis.pipeline();
   let keysSeen = 0;
 
@@ -48,15 +56,23 @@ async function clearByPattern(pattern) {
       }
     });
     stream.on('end', async () => {
-      if (keysSeen === 0) return resolve(0);
+      if (keysSeen === 0) {
+        console.log(`[Cache CLEAR] No keys found for pattern: ${fullPattern}`);
+        return resolve(0);
+      }
       try {
         await pipeline.exec();
+        console.log(`[Cache CLEAR] Deleted ${keysSeen} keys for pattern: ${fullPattern}`);
         resolve(keysSeen);
       } catch (err) {
+        console.error(`[Cache CLEAR] Error:`, err);
         reject(err);
       }
     });
-    stream.on('error', reject);
+    stream.on('error', (err) => {
+      console.error(`[Cache CLEAR] Stream Error:`, err);
+      reject(err);
+    });
   });
 }
 

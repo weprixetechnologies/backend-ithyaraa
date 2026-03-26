@@ -555,6 +555,20 @@ async function handleRegularOrderWebhook(
             await sendOrderConfirmationAndNotifications(merchantID);
             console.log(`[WEBHOOK-ORDER] Confirmation emails sent for order ${order.orderID}`);
 
+            // Clear cart for PREPAID orders (COD is cleared in placeOrder)
+            // ONLY if the order was placed through the cart (isBuyNow = 0)
+            if (!order.isBuyNow) {
+                try {
+                    const cartModel = require('../model/cartModel');
+                    await cartModel.clearCartByUid(order.uid);
+                    console.log(`[WEBHOOK-ORDER] Cart cleared for uid: ${order.uid}`);
+                } catch (cartErr) {
+                    console.error('[WEBHOOK-ORDER] Failed to clear cart:', cartErr);
+                }
+            } else {
+                console.log(`[WEBHOOK-ORDER] Skipping cart cleanup for Buy Now order: ${order.orderID}`);
+            }
+
             // Record coupon usage for PREPAID orders (idempotent; COD is recorded in placeOrder)
             if (order.couponCode && Number(order.couponDiscount || 0) > 0 && order.uid) {
                 try {
@@ -751,6 +765,20 @@ const getOrderPaymentStatusController = async (req, res) => {
 
                         // Send seller notification emails
                         await orderController.sendSellerNotificationEmails(order.orderID, order.paymentMode || 'PREPAID');
+
+                        // Clear cart for successfully paid prepaid orders
+                        // ONLY if the order was placed through the cart (isBuyNow = 0)
+                        if (!order.isBuyNow) {
+                            try {
+                                const cartModel = require('../model/cartModel');
+                                await cartModel.clearCartByUid(order.uid);
+                                console.log(`[STATUS-CHECK] Cart cleared for uid: ${order.uid}`);
+                            } catch (cartErr) {
+                                console.error('[STATUS-CHECK] Failed to clear cart:', cartErr);
+                            }
+                        } else {
+                            console.log(`[STATUS-CHECK] Skipping cart cleanup for Buy Now order: ${order.orderID}`);
+                        }
 
                         console.log(`[STATUS-CHECK] Confirmation email and seller notifications sent for order ${orderId}`);
                     }

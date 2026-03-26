@@ -19,7 +19,7 @@ async function ensureCartItemsSchema() {
 // Fetch product by productID
 async function getProductByID(productID) {
     const [rows] = await db.query(
-        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice , brandID
+        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice , brandID, dressTypes
      FROM products 
      WHERE productID = ?`,
         [productID]
@@ -518,6 +518,36 @@ async function updateCartItemsSelected(uid, selectedItems) {
     }
 }
 
+// Clear selected items for a user (used after successful order/payment)
+async function clearCartByUid(uid) {
+    try {
+        // 1. Delete items that were selected (these are the items included in the order)
+        // Note: selected = TRUE OR selected = 1 covers both boolean and integer representations
+        const [deleteResult] = await db.query(
+            `DELETE FROM cart_items WHERE uid = ? AND (selected = TRUE OR selected = 1)`,
+            [uid]
+        );
+        console.log(`[Cart Model] Deleted ${deleteResult.affectedRows} selected items for uid: ${uid}`);
+
+        // 2. Check if the cart is now empty
+        const [remainingItems] = await db.query(
+            `SELECT COUNT(*) as count FROM cart_items WHERE uid = ?`,
+            [uid]
+        );
+
+        // 3. If cart is empty, remove the cartDetail record as well
+        if (remainingItems[0].count === 0) {
+            await db.query(`DELETE FROM cartDetail WHERE uid = ?`, [uid]);
+            console.log(`[Cart Model] CartDetail cleared for uid: ${uid} (cart is now empty)`);
+        }
+        
+        return { success: true, deletedCount: deleteResult.affectedRows };
+    } catch (error) {
+        console.error(`[Cart Model] Error clearing cart for uid: ${uid}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
 module.exports = {
     getProductByID,
     getOrCreateCart,
@@ -535,5 +565,6 @@ module.exports = {
     insertCartItemCombo,
     insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy,
     resetFlashForCartItem, setCartModified,
-    updateCartItemsSelected
+    updateCartItemsSelected,
+    clearCartByUid
 };

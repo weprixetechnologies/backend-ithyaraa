@@ -30,6 +30,7 @@ const uploadProduct = async ({
     galleryImage,
     brandID,
     custom_inputs,
+    dressTypes,
     allowCustomerImageUpload,
     sizeChartUrl // optional, only used for variable products
 }) => {
@@ -61,6 +62,7 @@ const uploadProduct = async ({
             galleryImage,
             brandID,
             custom_inputs,
+            dressTypes,
             allowCustomerImageUpload,
             sizeChartUrl
         ) VALUES (
@@ -85,6 +87,7 @@ const uploadProduct = async ({
             '${safeString(JSON.stringify(galleryImage))}',
             ${brandID === null || brandID === undefined ? 'NULL' : `'${safeString(brandID)}'`},
             ${custom_inputs === null || custom_inputs === undefined ? 'NULL' : `'${safeString(JSON.stringify(custom_inputs))}'`},
+            ${dressTypes === null || dressTypes === undefined ? 'NULL' : `'${safeString(JSON.stringify(dressTypes))}'`},
             ${allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0},
             ${sizeChartUrl ? `'${safeString(sizeChartUrl)}'` : 'NULL'}
         );
@@ -115,7 +118,7 @@ const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes, categories, brand, galleryImage, custom_inputs,
+        productID, featuredImage, attributes, categories, brand, galleryImage, custom_inputs, dressTypes,
         allowCustomerImageUpload,
         sectionid,
         brandID,
@@ -128,7 +131,7 @@ const editProductModel = async (product) => {
             name = ?, description = ?, regularPrice = ?, salePrice = ?,
             discountType = ?, discountValue = ?, type = ?,
             status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, allowCustomerImageUpload = ?, sizeChartUrl = ?, brandID = ?
+            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, dressTypes = ?, allowCustomerImageUpload = ?, sizeChartUrl = ?, brandID = ?
         WHERE productID = ?
     `;
 
@@ -143,6 +146,7 @@ const editProductModel = async (product) => {
         brand || null,
         JSON.stringify(galleryImage),
         custom_inputs ? JSON.stringify(custom_inputs) : null,
+        dressTypes ? JSON.stringify(dressTypes) : null,
         allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0,
         product.sizeChartUrl || null,
         brandID || null,

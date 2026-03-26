@@ -7,7 +7,7 @@ async function addCartItem(req, res) {
         console.log('🔍 req.body:', req.body);
 
         const { uid } = req.user; // JWT payload uses uid
-        const { productID, quantity, variationID, variationName, referBy, customInputs } = req.body;
+        const { productID, quantity, variationID, variationName, referBy, customInputs, selectedDressType } = req.body;
 
         console.log('Cart Controller - Received data:', {
             uid,
@@ -16,14 +16,15 @@ async function addCartItem(req, res) {
             variationID,
             variationName,
             referBy,
-            customInputs
+            customInputs,
+            selectedDressType
         });
 
         if (!uid || !productID || (typeof quantity === 'undefined')) {
             return res.status(400).json({ message: 'uid, productID, and quantity are required' });
         }
 
-        const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy, customInputs);
+        const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy, customInputs, selectedDressType);
         res.status(200).json({ 
             success: true, 
             cartItem: result.cartItem, 

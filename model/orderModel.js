@@ -22,10 +22,10 @@ async function createOrder(orderData) {
                 addressID,
                 shippingName, shippingPhone, shippingEmail,
                 shippingLine1, shippingLine2, shippingCity, shippingState, shippingPincode, shippingLandmark,
-                paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, referBy,
-                isWalletUsed, paidWallet, handlingFee, handFeeRate
+                paymentMode, paymentStatus, trackingID, deliveryCompany, couponCode, couponDiscount, shippingFee, referBy,
+                isWalletUsed, paidWallet, handlingFee, handFeeRate, isBuyNow
             )
-             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 orderData.uid,
                 orderData.summary.subtotal,
@@ -49,11 +49,13 @@ async function createOrder(orderData) {
                 orderData.deliveryCompany || null,
                 orderData.couponCode || null,
                 orderData.couponDiscount || 0.00,
+                orderData.shippingFee || 0.00,
                 orderReferBy || null,
                 orderData.isWalletUsed || 0,
                 orderData.paidWallet || 0.00,
                 orderData.handlingFee || 0,
-                orderData.handFeeRate || 0.00
+                orderData.handFeeRate || 0.00,
+                0 // isBuyNow
             ]
         );
         const orderID = detailResult.insertId;
@@ -190,49 +192,14 @@ async function createOrder(orderData) {
         await connection.commit();
 
         // 4. Clear only the selected items from the cart (AFTER successful commit)
-        // Get cartItemIDs of items that were included in the order
-        const cartItemIDs = orderData.items.map(item => item.cartItemID).filter(id => id != null);
-
-        console.log('\n=== CART CLEANUP DEBUG ===');
-        console.log('Total items in order:', orderData.items.length);
-        console.log('CartItemIDs to delete:', cartItemIDs);
-        console.log('UID:', orderData.uid);
-
-        if (cartItemIDs.length > 0) {
-            const placeholders = cartItemIDs.map(() => '?').join(',');
-            // Use a new connection for cart cleanup (after transaction commit)
-            const cleanupConnection = await db.getConnection();
-            try {
-                // First, verify which items will be deleted (for debugging)
-                const [itemsToDelete] = await cleanupConnection.query(
-                    `SELECT cartItemID, productID, selected FROM cart_items WHERE uid = ? AND cartItemID IN (${placeholders}) AND (selected = TRUE OR selected = 1)`,
-                    [orderData.uid, ...cartItemIDs]
-                );
-                console.log('Items that will be deleted (selected = TRUE):', itemsToDelete);
-
-                // Explicitly check selected = TRUE to ensure only selected items are deleted
-                const [deleteResult] = await cleanupConnection.query(
-                    `DELETE FROM cart_items WHERE uid = ? AND cartItemID IN (${placeholders}) AND (selected = TRUE OR selected = 1)`,
-                    [orderData.uid, ...cartItemIDs]
-                );
-                console.log('Deleted rows:', deleteResult.affectedRows);
-
-                // Check if cart is now empty, and if so, clear cartDetail
-                const [remainingItems] = await cleanupConnection.query(
-                    `SELECT COUNT(*) as count FROM cart_items WHERE uid = ?`,
-                    [orderData.uid]
-                );
-                console.log('Remaining items in cart:', remainingItems[0].count);
-
-                if (remainingItems[0].count === 0) {
-                    await cleanupConnection.query(`DELETE FROM cartDetail WHERE uid = ?`, [orderData.uid]);
-                    console.log('CartDetail cleared (cart is empty)');
-                }
-            } finally {
-                cleanupConnection.release();
-            }
+        // ONLY if it's a COD or FULL_COIN order. For PREPAID, the webhook handles it.
+        const pmRaw = (orderData.paymentMode || 'cod').toUpperCase();
+        if (pmRaw === 'COD' || pmRaw === 'FULL_COIN') {
+            console.log(`[Order Model] Immediate cart cleanup for ${pmRaw} order`);
+            const cartModel = require('./cartModel');
+            await cartModel.clearCartByUid(orderData.uid);
         } else {
-            console.log('WARNING: No cartItemIDs found in order items. Cart will not be cleared.');
+            console.log(`[Order Model] Prepaid order (${pmRaw}) - skipping immediate cart cleanup. Webhook will handle it.`);
         }
 
         return { orderID, orderData };

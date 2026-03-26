@@ -59,6 +59,7 @@ const affiliateAdminRouter = require('./router/admin/affiliateAdminRouter')
 const publicFaqRouter = require('./router/publicFaqRouter')
 const reelsRouter = require('./router/reelsRouter')
 const reelsAdminRouter = require('./router/admin/reelsAdminRouter')
+const cacheAdminRouter = require('./router/admin/cacheAdminRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
@@ -131,6 +132,7 @@ app.use('/api/admin', faqAdminRouter);
 app.use('/api/admin', affiliateAdminRouter);
 app.use('/api/admin', settlementAdminRouter);
 app.use('/api/admin/reels', reelsAdminRouter);
+app.use('/api/admin', cacheAdminRouter);
 app.use('/api/admin', adminAuthRouter);
 // Product groups (homepage grouping) - admin endpoints
 app.use('/api/admin/product-groups', productGroupsRouter);

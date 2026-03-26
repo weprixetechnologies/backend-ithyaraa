@@ -11,33 +11,33 @@ const { buildPaginatedKey } = require('./cacheKeyUtils');
 
 const SCOPE = {
   // ========== PRODUCTS ==========
-  PRODUCTS_ALL: 'products:all',
+  PRODUCTS_ALL: 'cache:products:all',
 
   PRODUCTS_PAGE: (page, limit, filters = {}) =>
     buildPaginatedKey('products:page', page, limit, filters),
 
   PRODUCT_DETAIL: (productID) =>
-    `products:detail:${productID}`,
+    `cache:products:detail:${productID}`,
 
   // ========== SHOP / PUBLIC ==========
   SHOP_PRODUCTS_PAGE: (page, limit, filters = {}) =>
     buildPaginatedKey('shop:products', page, limit, filters),
 
   // ========== CATEGORIES ==========
-  CATEGORIES_ALL: 'categories:all',
+  CATEGORIES_ALL: 'cache:categories:all',
+  CATEGORY_DETAIL: (categoryID) => `cache:categories:detail:${categoryID}`,
 
   // ========== OFFERS ==========
-  OFFERS_ALL: 'offers:all',
-  OFFERS_LIST: 'offers:list',
-  OFFER_ACTIVE: (offerID) => `offers:active:${offerID}`,
+  OFFERS_ALL: 'cache:offers:all',
+  OFFERS_LIST: 'cache:offers:list',
+  OFFER_ACTIVE: (offerID) => `cache:offers:active:${offerID}`,
 
   // ========== FLASH SALES ==========
-  FLASH_ACTIVE: (productID) => `flash:active:${productID}`,
+  FLASH_ACTIVE: (productID) => `cache:flash:active:${productID}`,
 
   // ========== HOMEPAGE ==========
-  HOMEPAGE: 'homepage:data',
   // Top-level home data (used by section-items/home API)
-  HOME_DATA: 'home:data',
+  HOME_DATA: 'cache:home:data',
 };
 
 module.exports = { SCOPE };

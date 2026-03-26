@@ -190,6 +190,7 @@ const buyNowController = async (req, res) => {
         address: addressPayload,
         existingAddressID,
         uid: providedUid,
+        selectedDressType,
     } = payload;
 
     const paymentMode = String(rawPaymentMode || 'COD').toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
@@ -460,7 +461,7 @@ const buyNowController = async (req, res) => {
                         return res.status(404).json({
                             success: false,
                             error: 'VARIATION_NOT_FOUND',
-                            message: 'Variation not found for make_combo item',
+                            message: 'Variation not found for make combo item',
                         });
                     }
                     const v = varRows[0];
@@ -505,6 +506,35 @@ const buyNowController = async (req, res) => {
                         details: missing,
                     });
                 }
+            }
+
+            // [NEW] Validate and Inject Dress Type
+            let matchedDressType = null;
+            if (selectedDressType) {
+                let availableDressTypes = [];
+                try {
+                    let dt = productRow.dressTypes;
+                    while (typeof dt === 'string') dt = JSON.parse(dt);
+                    availableDressTypes = Array.isArray(dt) ? dt : [];
+                } catch (e) {
+                    availableDressTypes = [];
+                }
+
+                const matchedType = availableDressTypes.find(t => t.label === (selectedDressType.label || selectedDressType));
+                if (!matchedType) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        success: false,
+                        error: 'INVALID_DRESS_TYPE',
+                        message: 'Selected dress type is not available for this product',
+                    });
+                }
+                
+                matchedDressType = matchedType;
+                
+                // Inject into customInputs for persistence
+                if (!customInputs || typeof customInputs !== 'object') customInputs = {};
+                customInputs['Dress Type'] = matchedType.label;
             }
 
             if (variationID) {
@@ -635,6 +665,13 @@ const buyNowController = async (req, res) => {
             salePrice = baseSale;
         }
 
+        // [NEW] Apply Dress Type override for custom products (overrides variation/product prices)
+        if (productType === 'customproduct' && matchedDressType) {
+            regularPrice = Number(matchedDressType.price);
+            unitPriceBefore = regularPrice;
+            salePrice = null; // Dress type price overrides any sale price
+        }
+
         let isFlashSale = 0;
         let offerID = null;
         let offerApplied = 0;
@@ -668,12 +705,12 @@ const buyNowController = async (req, res) => {
             }
         }
 
-        // Offer application (mirror cartService.applyBuyXGetY / applyBuyXAtXxx)
         let unitPriceAfter = unitPriceBefore;
         let lineTotalBefore = Number((regularPrice * qty).toFixed(2));
         let lineTotalAfter = Number((unitPriceAfter * qty).toFixed(2));
 
-        if (productType !== 'presale') {
+        // Offer application (strictly for variable products as per user request)
+        if (productType === 'variable') {
             const [offerRows] = await connection.query(
                 'SELECT * FROM offers WHERE JSON_CONTAINS(products, JSON_QUOTE(?)) LIMIT 1',
                 [productID]
@@ -821,7 +858,8 @@ const buyNowController = async (req, res) => {
             );
         }
 
-        const total = Number((subtotal - couponDiscount).toFixed(2));
+        const handlingFee = paymentMode === 'COD' ? 8 : 0;
+        const total = Number((subtotal - couponDiscount + handlingFee).toFixed(2));
         const totalDiscount = Number((lineTotalBefore * 1 - lineTotalAfter * 1 + couponDiscount).toFixed(2));
 
         // Coins
@@ -897,8 +935,8 @@ const buyNowController = async (req, res) => {
             const pm = paymentMode;
             const paymentStatus = pm === 'PREPAID' ? 'pending' : 'successful';
 
-            // No handling fee for this dedicated Buy Now flow; align with summary
-            const handlingFee = 0;
+            // Handle handling fee for COD
+            // handlingFee is already defined at higher scope for normal orders
             const handFeeRate = 0;
 
             const [detailResult] = await connection.query(
@@ -908,8 +946,8 @@ const buyNowController = async (req, res) => {
                     shippingName, shippingPhone, shippingEmail,
                     shippingLine1, shippingLine2, shippingCity, shippingState, shippingPincode, shippingLandmark,
                     paymentMode, paymentStatus, trackingID, deliveryCompany, merchantID,
-                    couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate
-                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate, isBuyNow
+                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     uid,
                     subtotal,
@@ -938,6 +976,7 @@ const buyNowController = async (req, res) => {
                     0.00, // paidWallet
                     handlingFee,
                     handFeeRate,
+                    1 // isBuyNow
                 ]
             );
 
@@ -1179,8 +1218,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
@@ -1340,6 +1379,8 @@ const checkOffer = async (req, res) => {
         const productID = req.query.productID;
         const rawQuantity = req.query.quantity;
         const productType = req.query.productType || 'variable';
+        const selectedDressType = req.query.selectedDressType;
+        const variationID = req.query.variationID;
 
         const qty = Math.max(1, Number(rawQuantity) || 1);
 
@@ -1348,6 +1389,7 @@ const checkOffer = async (req, res) => {
             rawQuantity,
             qty,
             productType,
+            variationID,
         });
 
         if (!productID) {
@@ -1359,12 +1401,12 @@ const checkOffer = async (req, res) => {
             });
         }
 
-        if (productType === 'presale') {
-            console.log('[BuyNow][CheckOffer] Presale product – skipping offer check');
+        if (productType !== 'variable') {
+            console.log(`[BuyNow][CheckOffer] ${productType} product – skipping offer check`);
             return res.status(200).json({
                 success: true,
                 offerApplied: false,
-                message: 'Offers are not applied to presale products',
+                message: `Offers are only available for variable products`,
             });
         }
 
@@ -1383,6 +1425,37 @@ const checkOffer = async (req, res) => {
         let unitPriceBefore = productRow.salePrice != null
             ? Number(productRow.salePrice)
             : Number(productRow.regularPrice || 0);
+
+        // [NEW] Handle variation price override for variable products
+        if (variationID) {
+            const [varRows] = await db.query(
+                'SELECT * FROM variations WHERE variationID = ? AND productID = ? LIMIT 1',
+                [variationID, productID]
+            );
+            if (varRows && varRows.length > 0) {
+                const v = varRows[0];
+                unitPriceBefore = v.variationSalePrice != null 
+                    ? Number(v.variationSalePrice) 
+                    : Number(v.variationPrice || 0);
+            }
+        }
+
+        // Apply Dress Type price override for custom products
+        if (productType === 'customproduct' && selectedDressType) {
+            let availableDressTypes = [];
+            try {
+                let dt = productRow.dressTypes;
+                while (typeof dt === 'string') dt = JSON.parse(dt);
+                availableDressTypes = Array.isArray(dt) ? dt : [];
+            } catch (e) {
+                availableDressTypes = [];
+            }
+
+            const matchedType = availableDressTypes.find(t => t.label === (selectedDressType.label || selectedDressType));
+            if (matchedType && matchedType.price) {
+                unitPriceBefore = Number(matchedType.price);
+            }
+        }
 
         // Flash sale (for preview use same logic as buyNowController)
         const [fsRows] = await db.query(

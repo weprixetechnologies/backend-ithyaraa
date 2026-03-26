@@ -1,4 +1,5 @@
 const commonService = require('../services/index');
+const settingsModel = require('../model/settingsModel');
 
 const getCountController = async (req, res) => {
     const { dataType } = req.query;
@@ -42,3 +43,19 @@ async function getFiltersController(req, res) {
 }
 
 module.exports.getFiltersController = getFiltersController;
+
+async function getPublicSettingsController(req, res) {
+    try {
+        const settings = await settingsModel.getAllSettings();
+        // Only return public settings if needed, or all for now
+        res.status(200).json({
+            success: true,
+            data: settings
+        });
+    } catch (error) {
+        console.error('getPublicSettingsController error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+}
+
+module.exports.getPublicSettingsController = getPublicSettingsController;

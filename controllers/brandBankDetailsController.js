@@ -12,7 +12,7 @@ const addBankDetails = async (req, res) => {
         console.log(req.user.uid);
         console.log(req.body);
 
-        if (!brandID || !accountHolderName || !accountNumber || !ifscCode || !bankName) {
+        if (!brandID || !accountHolderName || !accountNumber || !ifscCode || !bankName || !panNumber) {
             return res.status(400).json({ success: false, message: 'Required fields are missing' });
         }
 

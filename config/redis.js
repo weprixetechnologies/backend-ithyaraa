@@ -3,10 +3,7 @@ const { REDIS_CONNECTION } = require('../utils/config');
 
 // Keep a single Redis client for caching. This client uses a key prefix
 // so all cache keys will be stored as `cache:<your-key>` in Redis.
-const options = Object.assign({}, REDIS_CONNECTION || {}, {
-  // Prefix all cache keys with "cache:" as required.
-  keyPrefix: 'cache:',
-});
+const options = Object.assign({}, REDIS_CONNECTION || {});
 
 const redis = new Redis(options);
 

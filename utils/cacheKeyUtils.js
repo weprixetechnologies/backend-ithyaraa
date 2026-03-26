@@ -1,10 +1,7 @@
+const crypto = require('crypto');
+
 /**
  * Cache key utility helpers
- *
- * PURPOSE:
- * - Ensure consistent cache keys
- * - Avoid duplicate cache entries due to object order
- * - Centralize all key-building logic
  */
 
 /**
@@ -48,17 +45,29 @@ function stableStringify(obj = {}) {
 }
 
 /**
+ * MD5 Hash of an object
+ */
+function hashObject(obj = {}) {
+    const str = stableStringify(obj);
+    return crypto.createHash('md5').update(str).digest('hex').substring(0, 10);
+}
+
+/**
  * Build paginated cache key safely
+ * Pattern: cache:{scope}:{page}:{limit}:{hash}
  */
 function buildPaginatedKey(scope, page, limit, filters = {}) {
     const cleanFilters = normalizeFilters(filters);
-    const filterHash = stableStringify(cleanFilters);
+    const filterHash = hashObject(cleanFilters);
 
-    return `${scope}:${page}:${limit}:${filterHash}`;
+    // Prepend 'cache:' if not already present
+    const cleanScope = scope.startsWith('cache:') ? scope : `cache:${scope}`;
+    return `${cleanScope}:${page}:${limit}:${filterHash}`;
 }
 
 module.exports = {
     normalizeFilters,
     stableStringify,
+    hashObject,
     buildPaginatedKey,
 };

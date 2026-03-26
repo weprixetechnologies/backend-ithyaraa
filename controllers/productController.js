@@ -115,7 +115,13 @@ const addProduct = async (req, res) => {
         }
 
         // ✅ 8. Success Response
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            // Clear paginated patterns
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         return res.status(201).json({
             success: true,
             message: 'Product uploaded successfully',
@@ -229,7 +235,12 @@ const addCustomProduct = async (req, res) => {
         }
 
         // ✅ Success Response
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         return res.status(201).json({
             success: true,
             message: 'Custom product uploaded successfully',
@@ -311,6 +322,9 @@ const editProduct = async (req, res) => {
         try {
             await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
             await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
         } catch (e) {
             console.error('editProduct cache delete error', e);
         }
@@ -334,16 +348,29 @@ const editProduct = async (req, res) => {
 };
 
 const getPaginatedProducts = async (req, res) => {
-    // console.log(req);
-    
     try {
-      const result = await service.fetchPaginatedProducts(req.query);
-      console.log(result);
-      
-      res.status(200).json({ success: true, ...result });
+        const { page, limit, ...filters } = req.query;
+        const cacheKey = SCOPE.PRODUCTS_PAGE(page || 1, limit || 10, filters);
+        
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            // console.log(`[Product Cache] HIT for key: ${cacheKey}`);
+            return res.status(200).json({ success: true, ...cached, cached: true });
+        }
+
+        const result = await service.fetchPaginatedProducts(req.query);
+        
+        // console.log(`[Product Cache] MISS. Setting data for key: ${cacheKey}`);
+        try { 
+            await setCache(cacheKey, result); 
+        } catch (e) { 
+            console.error(`[Product Cache] Error setting key ${cacheKey}:`, e); 
+        }
+        
+        res.status(200).json({ success: true, ...result });
     } catch (error) {
-      console.error('Error getting products:', error);
-      res.status(500).json({ success: false, message: 'Server error' });
+        console.error('Error getting products:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
   
@@ -413,6 +440,9 @@ const deleteProduct = async (req, res) => {
             try {
                 await deleteCache(SCOPE.PRODUCT_DETAIL(productID));
                 await deleteCache(SCOPE.OFFERS_LIST);
+                await deleteCache(SCOPE.PRODUCTS_ALL);
+                await clearByPattern('products:page:*');
+                await clearByPattern('shop:products:*');
             } catch (e) {
                 console.error('deleteProduct cache delete error', e);
             }
@@ -445,7 +475,12 @@ const bulkDeleteProducts = async (req, res) => {
     try {
         const { productIDs } = req.body || {};
         const result = await service.bulkDeleteProducts(productIDs);
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -466,7 +501,12 @@ const bulkUpdateSale = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkUpdateSale(payload);
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -487,7 +527,12 @@ const bulkAssignSection = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkAssignSection(payload);
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -508,7 +553,12 @@ const bulkRemoveSection = async (req, res) => {
     try {
         const payload = req.body || {};
         const result = await service.bulkRemoveSection(payload);
-        try { await deleteCache(SCOPE.OFFERS_LIST); } catch (e) { console.error(e); }
+        try { 
+            await deleteCache(SCOPE.OFFERS_LIST);
+            await deleteCache(SCOPE.PRODUCTS_ALL);
+            await clearByPattern('products:page:*');
+            await clearByPattern('shop:products:*');
+        } catch (e) { console.error(e); }
         const statusCode = result.success ? 200 : 400;
         return res.status(statusCode).json(result);
     } catch (error) {
@@ -538,7 +588,18 @@ module.exports = {
 // Public shop products endpoint
 async function shopList(req, res) {
     try {
+        const { page, limit, ...filters } = req.query;
+        const cacheKey = SCOPE.SHOP_PRODUCTS_PAGE(page || 1, limit || 10, filters);
+        
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            return res.status(200).json({ ...cached, cached: true });
+        }
+
         const result = await service.getShopProductsPublic(req.query);
+        
+        try { await setCache(cacheKey, result); } catch (e) { console.error(e); }
+
         return res.status(200).json(result);
     } catch (e) {
         console.error('shopList error:', e);

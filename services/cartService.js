@@ -1,9 +1,10 @@
 const cartModel = require('../model/cartModel');
+const settingsModel = require('../model/settingsModel');
 const db = require('./../utils/dbconnect');
 const flashSaleModel = require('../model/flashSaleModel');
 const crossSellModel = require('../model/crossSellModel');
 
-async function addToCart(uid, productID, quantity, variationID, variationName, referBy, customInputs) {
+async function addToCart(uid, productID, quantity, variationID, variationName, referBy, customInputs, selectedDressType) {
     // 1. Fetch product
     const product = await cartModel.getProductByID(productID);
     console.log(product);
@@ -24,6 +25,35 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
     // 3. Get variation prices if variationID is provided
     let regularPrice = product.regularPrice;
     let salePrice = product.salePrice;
+
+    // Handle Dress Type logic (Dynamic Pricing for Custom Products)
+    let dressTypes = [];
+    try {
+        if (product.dressTypes) {
+            dressTypes = typeof product.dressTypes === 'string' ? JSON.parse(product.dressTypes) : product.dressTypes;
+        }
+    } catch (e) {
+        console.error('Failed to parse dressTypes:', e);
+    }
+
+    if (Array.isArray(dressTypes) && dressTypes.length > 0) {
+        if (!selectedDressType || !selectedDressType.label) {
+            throw new Error('Please select a dress type');
+        }
+
+        const matchedType = dressTypes.find(dt => dt.label === selectedDressType.label);
+        if (!matchedType) {
+            throw new Error('Invalid dress type selected');
+        }
+
+        // Override prices with dress type price
+        regularPrice = matchedType.price;
+        salePrice = matchedType.price;
+
+        // Inject selection into customInputs for display
+        customInputs = customInputs || {};
+        customInputs['Dress Type'] = matchedType.label;
+    }
 
     if (variationID) {
         const variation = await cartModel.getVariationByID(variationID);
@@ -474,6 +504,12 @@ async function getCart(uid) {
         const totalDiscount = Number((subtotal - total).toFixed(2));
         const summary = { subtotal, total, totalDiscount, anyModifications: items.some(it => it.isFlashSale) };
 
+        // Shipping Fee Logic
+        const globalShippingFee = await settingsModel.getSetting('shipping_fee');
+        const defaultShippingFee = Number(globalShippingFee) || 50;
+        summary.shipping = (summary.total < 799) ? defaultShippingFee : 0;
+        summary.total = Number((summary.total + summary.shipping).toFixed(2));
+
         // Write to cartDetail table
         await cartModel.updateCartDetail(uid, summary);
 
@@ -603,7 +639,14 @@ async function getCart(uid) {
     const totalDiscount = Number((subtotal - total).toFixed(2));
 
     const summary = { subtotal, total, totalDiscount, anyModifications };
-    console.log(`[SUMMARY] subtotal=${subtotal}, total=${total}, totalDiscount=${totalDiscount}`);
+
+    // Shipping Fee Logic
+    const globalShippingFee = await settingsModel.getSetting('shipping_fee');
+    const defaultShippingFee = Number(globalShippingFee) || 50;
+    summary.shipping = (summary.total < 799) ? defaultShippingFee : 0;
+    summary.total = Number((summary.total + summary.shipping).toFixed(2));
+
+    console.log(`[SUMMARY] subtotal=${subtotal}, total=${summary.total}, totalDiscount=${totalDiscount}, shipping=${summary.shipping}`);
 
     // Update DB: cart_items and cartDetail
     await cartModel.updateCartItems(items);

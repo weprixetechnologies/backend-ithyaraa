@@ -1,4 +1,5 @@
 const db = require('../utils/dbconnect');
+const settingsModel = require('../model/settingsModel');
 
 // Get dashboard stats
 const getDashboardStatsController = async (req, res) => {
@@ -105,7 +106,47 @@ const getDashboardStatsController = async (req, res) => {
     }
 };
 
+// Get global settings
+const getGlobalSettingsController = async (req, res) => {
+    try {
+        const settings = await settingsModel.getAllSettings();
+        res.status(200).json({
+            success: true,
+            data: settings
+        });
+    } catch (error) {
+        console.error('Error fetching settings:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Update global setting
+const updateGlobalSettingsController = async (req, res) => {
+    try {
+        const { key, value } = req.body;
+        if (!key) {
+            return res.status(400).json({ success: false, message: 'Setting key is required' });
+        }
+        await settingsModel.updateSetting(key, value);
+        res.status(200).json({
+            success: true,
+            message: `Setting ${key} updated successfully`
+        });
+    } catch (error) {
+        console.error('Error updating setting:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
 module.exports = {
-    getDashboardStatsController
+    getDashboardStatsController,
+    getGlobalSettingsController,
+    updateGlobalSettingsController
 };
 

@@ -1,4 +1,5 @@
 const orderModel = require('./../model/orderModel')
+const settingsModel = require('./../model/settingsModel')
 const getCart = require('./../services/cartService')
 const couponsModel = require('./../model/couponsModel')
 const db = require('./../utils/dbconnect');
@@ -74,7 +75,20 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     // Total should be: subtotal - totalDiscount + shipping (keep original, don't modify)
     const baseSubtotal = Math.max(0, Number(finalSummary.subtotal) || 0);
     const baseDiscount = Math.max(0, Number(finalSummary.totalDiscount) || 0);
-    const baseShipping = Math.max(0, Number(finalSummary.shipping) || 0);
+
+    // Calculate Shipping Fee
+    let baseShipping = 0;
+    const subtotalAfterDiscount = baseSubtotal - baseDiscount;
+    const globalShippingFee = await settingsModel.getSetting('shipping_fee');
+    const defaultShippingFee = Number(globalShippingFee) || 50;
+
+    if (subtotalAfterDiscount < 799) {
+        baseShipping = defaultShippingFee;
+    } else {
+        baseShipping = 0; // Free shipping above 799
+    }
+    
+    finalSummary.shippingFee = baseShipping;
 
     // Add handling fee for COD orders (8 INR)
     const HANDLING_FEE_RATE = 8.00;
