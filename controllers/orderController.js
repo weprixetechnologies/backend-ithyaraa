@@ -852,6 +852,10 @@ const updateOrderItemsTrackingController = async (req, res) => {
                 updates.push('itemStatus = ?');
                 params.push('shipped');
             }
+            if (it.returnStatus !== undefined) {
+                updates.push('returnStatus = ?');
+                params.push(it.returnStatus || 'none');
+            }
             if (updates.length === 0) continue;
 
             const setClause = updates.join(', ');

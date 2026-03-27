@@ -7,8 +7,10 @@ function toMySQLDateTime(value) {
     try {
         const date = new Date(value);
         if (isNaN(date.getTime())) return null;
-        // Format: YYYY-MM-DD HH:MM:SS
-        return date.toISOString().slice(0, 19).replace('T', ' ');
+        
+        const pad = (n) => n.toString().padStart(2, '0');
+        // Format to local YYYY-MM-DD HH:MM:SS (respecting TZ=Asia/Kolkata)
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     } catch {
         return null;
     }
@@ -20,7 +22,8 @@ function toMySQLDate(value) {
     try {
         const date = new Date(value);
         if (isNaN(date.getTime())) return null;
-        return date.toISOString().slice(0, 10);
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     } catch {
         return null;
     }
