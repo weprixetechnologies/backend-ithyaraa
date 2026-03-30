@@ -58,6 +58,39 @@ function generateComboInstanceId() {
 }
 
 /**
+ * Shared helper to calculate shipping fee for Buy Now (single product focus).
+ * Consistent with cart service: free above 999.
+ */
+async function calculateShippingFee(subtotalResult, productID, connection) {
+    if (subtotalResult >= 999) return 0;
+
+    // Fetch product's brand and its specific shipping charge
+    const [prodRows] = await connection.query(
+        `SELECT p.brandID, u.shippingCharge AS brandShippingCharge 
+         FROM products p 
+         LEFT JOIN users u ON p.brandID = u.uid 
+         WHERE p.productID = ? LIMIT 1`,
+        [productID]
+    );
+
+    if (prodRows && prodRows.length > 0) {
+        const brandID = prodRows[0].brandID;
+        const brandFee = Number(prodRows[0].brandShippingCharge || 0);
+        // If it's a brand product (not inhouse), return its fee
+        if (brandID && brandID !== 'inhouse') {
+            return brandFee;
+        }
+    }
+
+    // Inhouse fallback from settings
+    const [settings] = await connection.query(
+        "SELECT setting_value FROM settings WHERE setting_key = 'shipping_fee' LIMIT 1"
+    );
+    const globalFee = Number(settings && settings[0] ? settings[0].setting_value : 50);
+    return globalFee;
+}
+
+/**
  * Lightweight coupon validation for Buy Now (single product, no cart).
  * GET /api/order/buy-now/validate-coupon?code=...&subtotal=...&email=...&uid=...
  */
@@ -108,16 +141,6 @@ const validateCoupon = async (req, res) => {
         }
 
         const coupon = rows[0];
-        console.log('[BuyNow][ValidateCoupon] Coupon row:', {
-            couponID: coupon.couponID,
-            couponCode: coupon.couponCode,
-            discountType: coupon.discountType,
-            discountValue: coupon.discountValue,
-            usageLimit: coupon.usageLimit,
-            couponUsage: coupon.couponUsage,
-            assignedUser: coupon.assignedUser,
-            minOrderValue: coupon.minOrderValue,
-        });
 
         // 2. Minimum order value (if configured) – based on passed subtotal
         const minOrder = coupon.minOrderValue != null ? Number(coupon.minOrderValue) : null;
@@ -144,12 +167,20 @@ const validateCoupon = async (req, res) => {
         if (couponDiscount > subtotal) couponDiscount = subtotal;
         couponDiscount = Math.round(couponDiscount * 100) / 100;
 
+        // [NEW] Calculate shipping fee after coupon
+        const productID = req.query.productID;
+        let shippingFee = 0;
+        if (productID) {
+            shippingFee = await calculateShippingFee(subtotal - couponDiscount, productID, db);
+        }
+
         console.log('[BuyNow][ValidateCoupon] Computed discount:', {
             subtotal,
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             couponDiscount,
-            finalTotal: subtotal - couponDiscount,
+            shippingFee,
+            finalTotal: subtotal - couponDiscount + shippingFee,
         });
 
         return res.status(200).json({
@@ -158,7 +189,8 @@ const validateCoupon = async (req, res) => {
             discountType: coupon.discountType,
             discountValue: coupon.discountValue,
             couponDiscount,
-            message: `Coupon applied! You save ₹${couponDiscount}`,
+            shippingFee,
+            message: `Coupon applied! You save ₹${couponDiscount}${shippingFee > 0 ? ' (Shipping: ₹' + shippingFee + ')' : ''}`,
         });
     } catch (err) {
         console.error('[BuyNow][ValidateCoupon] Error:', err);
@@ -858,8 +890,10 @@ const buyNowController = async (req, res) => {
             );
         }
 
+        // Shipping fee calculation (Source of Truth: Backend)
+        const shippingFee = await calculateShippingFee(subtotal - couponDiscount, productID, connection);
         const handlingFee = paymentMode === 'COD' ? 8 : 0;
-        const total = Number((subtotal - couponDiscount + handlingFee).toFixed(2));
+        const total = Number((subtotal - couponDiscount + shippingFee + handlingFee).toFixed(2));
         const totalDiscount = Number((lineTotalBefore * 1 - lineTotalAfter * 1 + couponDiscount).toFixed(2));
 
         // Coins
@@ -946,8 +980,8 @@ const buyNowController = async (req, res) => {
                     shippingName, shippingPhone, shippingEmail,
                     shippingLine1, shippingLine2, shippingCity, shippingState, shippingPincode, shippingLandmark,
                     paymentMode, paymentStatus, trackingID, deliveryCompany, merchantID,
-                    couponCode, couponDiscount, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate, isBuyNow
-                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    couponCode, couponDiscount, shippingFee, referBy, isWalletUsed, paidWallet, handlingFee, handFeeRate, isBuyNow
+                ) VALUES (?, ?, ?, ?, 0, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     uid,
                     subtotal,
@@ -971,6 +1005,7 @@ const buyNowController = async (req, res) => {
                     pm === 'PREPAID' ? merchantOrderId : null,
                     couponCode || null,
                     couponDiscount,
+                    shippingFee,
                     null, // referBy (Buy Now has no affiliate referBy today)
                     0,    // isWalletUsed
                     0.00, // paidWallet
@@ -1489,6 +1524,23 @@ const checkOffer = async (req, res) => {
             originalTotal,
         });
 
+        // [NEW] Resolve coupon if provided for preview
+        let previewCouponDiscount = 0;
+        if (couponCode) {
+            const [cRows] = await db.query('SELECT * FROM coupons WHERE couponCode = ? LIMIT 1', [couponCode]);
+            if (cRows && cRows.length > 0) {
+                const c = cRows[0];
+                if (c.discountType === 'percentage') {
+                    previewCouponDiscount = Number((originalTotal * Number(c.discountValue || 0) / 100).toFixed(2));
+                } else if (c.discountType === 'flat') {
+                    previewCouponDiscount = Number(c.discountValue || 0);
+                }
+            }
+        }
+
+        // Calculate shipping fee before early return
+        const shippingFeePreview = await calculateShippingFee(originalTotal - previewCouponDiscount, productID, db);
+
         // Skip offer check for non-variable products (but return the base prices calculated above)
         if (productType !== 'variable') {
             return res.status(200).json({
@@ -1496,7 +1548,9 @@ const checkOffer = async (req, res) => {
                 offerApplied: false,
                 originalTotal,
                 discountedTotal: originalTotal,
+                couponDiscount: previewCouponDiscount,
                 savedAmount: 0,
+                shippingFee: shippingFeePreview,
                 message: `Offers are only available for variable products`,
             });
         }
@@ -1514,7 +1568,9 @@ const checkOffer = async (req, res) => {
                 offerApplied: false,
                 originalTotal,
                 discountedTotal: originalTotal,
+                couponDiscount: previewCouponDiscount,
                 savedAmount: 0,
+                shippingFee: shippingFeePreview,
             });
         }
 
@@ -1621,6 +1677,8 @@ const checkOffer = async (req, res) => {
         }
 
         const savedAmount = Math.max(0, Number((originalTotal - discountedTotal).toFixed(2)));
+        // Refresh shipping fee calculation if offer changed discountedTotal
+        const finalShippingFee = await calculateShippingFee(discountedTotal - previewCouponDiscount, productID, db);
 
         console.log('[BuyNow][CheckOffer] Final offer preview:', {
             offerApplied,
@@ -1629,7 +1687,9 @@ const checkOffer = async (req, res) => {
             paidUnits,
             originalTotal,
             discountedTotal,
+            previewCouponDiscount,
             savedAmount,
+            shippingFeePreview,
         });
 
         return res.status(200).json({
@@ -1642,7 +1702,9 @@ const checkOffer = async (req, res) => {
             paidUnits,
             originalTotal,
             discountedTotal,
+            couponDiscount: previewCouponDiscount,
             savedAmount,
+            shippingFee: finalShippingFee,
             requiredQty: offerType === 'buy_x_get_y' || offerType === 'buy_x_at_x' ? buyCount + (offerType === 'buy_x_get_y' ? getCount : 0) : null,
         });
     } catch (err) {
@@ -1655,9 +1717,53 @@ const checkOffer = async (req, res) => {
     }
 };
 
+/**
+ * Lightweight shipping fee calculation for Buy Now UI.
+ * GET /api/order/buy-now/shipping-fee?productID=...&brandID=...&subtotal=...
+ */
+const getShippingFee = async (req, res) => {
+    try {
+        const { productID, brandID, subtotal: rawSubtotal } = req.query;
+        const subtotal = Number(rawSubtotal || 0);
+
+        console.log('[BuyNow][GetShippingFee] Request:', { productID, brandID, subtotal });
+
+        // Prefer productID for database-driven accuracy
+        if (productID) {
+            const fee = await calculateShippingFee(subtotal, productID, db);
+            return res.status(200).json({ success: true, shippingFee: fee });
+        }
+
+        // Threshold check
+        if (subtotal >= 999) {
+            return res.status(200).json({ success: true, shippingFee: 0 });
+        }
+
+        // Brand-specific override if brandID provided but no productID
+        if (brandID && brandID !== 'inhouse') {
+            const [rows] = await db.query('SELECT shippingCharge FROM users WHERE uid = ? LIMIT 1', [brandID]);
+            if (rows && rows.length > 0) {
+                return res.status(200).json({ success: true, shippingFee: Number(rows[0].shippingCharge || 0) });
+            }
+        }
+
+        // Global / Inhouse fallback
+        const [settings] = await db.query(
+            "SELECT setting_value FROM settings WHERE setting_key = 'shipping_fee' LIMIT 1"
+        );
+        const globalFee = Number(settings && settings[0] ? settings[0].setting_value : 50);
+        return res.status(200).json({ success: true, shippingFee: globalFee });
+
+    } catch (err) {
+        console.error('[BuyNow][GetShippingFee] Error:', err);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 module.exports = {
     buyNowController,
     validateCoupon,
     checkOffer,
+    getShippingFee,
 };
 

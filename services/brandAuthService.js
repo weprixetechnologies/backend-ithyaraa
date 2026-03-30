@@ -78,7 +78,8 @@ const createBrandUser = async (userData) => {
         verifiedEmail: 0,
         createdOn: new Date(),
         gstin: userData.gstin || null,
-        profilePhoto: userData.profilePhoto || null
+        profilePhoto: userData.profilePhoto || null,
+        shippingCharge: userData.shippingCharge || 0
     };
 
     // 6. Insert into DB

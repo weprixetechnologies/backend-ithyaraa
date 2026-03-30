@@ -47,6 +47,7 @@ const createBrand = async (req, res) => {
             password,
             gstin,
             profilePhoto: profilePhoto || null,
+            shippingCharge: req.body.shippingCharge || 0,
             deviceInfo: req.headers['user-agent'] || 'unknown'
         });
 
@@ -90,6 +91,7 @@ const updateBrand = async (req, res) => {
         if (updateData.email !== undefined) mappedData.emailID = updateData.email;
         if (updateData.gstin !== undefined) mappedData.gstin = updateData.gstin || null;
         if (updateData.profilePhoto !== undefined) mappedData.profilePhoto = updateData.profilePhoto;
+        if (updateData.shippingCharge !== undefined) mappedData.shippingCharge = updateData.shippingCharge;
 
         // Don't allow updating sensitive fields
         delete mappedData.password;

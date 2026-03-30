@@ -601,10 +601,32 @@ const updateRefundQueryStatusController = async (req, res) => {
         const { refundQueryID } = req.params;
         const { status } = req.body || {};
         if (!refundQueryID || !status) return res.status(400).json({ success: false, message: 'refundQueryID and status required' });
+
         const valid = ['pending', 'contacting_customer', 'resolved'];
         if (!valid.includes(status)) return res.status(400).json({ success: false, message: 'Invalid status' });
+
+        // Get old status to check for transition to 'resolved'
+        const existing = await refundQueryModel.getRefundQueryByID(refundQueryID);
+        if (!existing) return res.status(404).json({ success: false, message: 'Refund query not found' });
+
         const updated = await refundQueryModel.updateRefundQueryStatus(refundQueryID, status);
-        if (!updated) return res.status(404).json({ success: false, message: 'Refund query not found' });
+        if (!updated) return res.status(404).json({ success: false, message: 'Failed to update status' });
+
+        // Settlement Hook: When refund is resolved, record 'returned' (Effect: NEUTRAL per new logic)
+        if (status === 'resolved' && existing.status !== 'resolved') {
+            const result = await settlementService.recordEvent({
+                orderItemID: existing.orderItemID,
+                event: 'returned',
+                effect: 'neutral',
+                refundQueryID: existing.refundQueryID,
+                notes: `Refund resolved/completed. Item refunded — earnings neutralised.`,
+                createdBy: (req.user.username || req.user.uid)
+            });
+            if (!result.success) {
+                await settlementService.logFailure(existing.orderItemID, 'returned', { status, refundQueryID }, result.error);
+            }
+        }
+
         return res.status(200).json({ success: true, message: 'Status updated' });
     } catch (error) {
         console.error('Update refund query status error:', error);
@@ -881,6 +903,38 @@ const updateOrderItemsTrackingController = async (req, res) => {
                 [...params, ...whereParams]
             );
             updated += result.affectedRows || 0;
+
+            // Settlement Hook: If item was delivered, record 'order_placed' (Hold)
+            if (result.affectedRows > 0) {
+                let finalOIDM = it.orderItemID;
+                if (!finalOIDM) {
+                    const [row] = await db.query(`SELECT orderItemID FROM order_items WHERE orderID = ? AND ${whereClause} LIMIT 1`, [orderId, ...whereParams]);
+                    if (row && row[0]) finalOIDM = row[0].orderItemID;
+                }
+
+                if (finalOIDM) {
+                    // 1. Order Delivered (Hold)
+                    if (it.itemStatus && String(it.itemStatus).toLowerCase() === 'delivered') {
+                        const sResult = await settlementService.recordEvent({
+                            orderItemID: finalOIDM,
+                            event: 'order_delivered',
+                            effect: 'hold',
+                            notes: 'Item delivered - earnings on hold'
+                        });
+                        if (!sResult.success) {
+                            await settlementService.logFailure(finalOIDM, 'order_delivered', it, sResult.error);
+                        }
+                    }
+
+                    // 2. Part 3 Phase 1: Admin marks replacement_complete
+                    if (it.returnStatus === 'replacement_complete') {
+                        const sResult = await settlementService.manualReplacementCredit(finalOIDM, (req.user.username || req.user.uid));
+                        if (!sResult.success) {
+                            await settlementService.logFailure(finalOIDM, 'replacement_complete', it, sResult.error);
+                        }
+                    }
+                }
+            }
         }
 
         // If any item was marked as delivered via tracking, ensure deliveredAt and coinLockUntil are populated

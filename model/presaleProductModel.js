@@ -236,6 +236,7 @@ const getPresaleProductsPaginated = async (limit, offset) => {
                 featuredImage,
                 categories,
                 brand,
+                preSaleStartDate,
                 preSaleEndDate
             FROM presale_products 
             ORDER BY createdAt DESC

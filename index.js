@@ -159,4 +159,3 @@ app.use('/api/brand', settlementBrandRouter)
 app.listen(process.env.PORT, () => {
   console.log('Server Started');
 });
-

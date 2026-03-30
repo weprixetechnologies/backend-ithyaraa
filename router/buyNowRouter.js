@@ -13,6 +13,9 @@ buyNowRouter.get('/buy-now/validate-coupon', buyNowController.validateCoupon);
 // Lightweight offer preview for Buy Now (no DB mutations)
 buyNowRouter.get('/buy-now/check-offer', buyNowController.checkOffer);
 
+// Lightweight shipping fee calculation for Buy Now UI
+buyNowRouter.get('/buy-now/shipping-fee', buyNowController.getShippingFee);
+
 module.exports = buyNowRouter;
 
 

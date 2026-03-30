@@ -3,13 +3,139 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>New notification available</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New Notification — Ithyaraa Brand Panel</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap');
+  </style>
 </head>
 
-<body>
-  <p>Hello {{name}},</p>
-  <p>You have one new notification in your brand dashboard.</p>
-  <p>Please log in to your brand panel to view it.</p>
+<body style="margin:0;padding:0;background-color:#F5F2EE;font-family:'DM Sans',Helvetica,Arial,sans-serif;">
+
+  <!-- Outer wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F2EE;padding:48px 16px;">
+    <tr>
+      <td align="center">
+
+        <!-- Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"
+          style="max-width:560px;background-color:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+
+          <!-- Top accent bar -->
+          <tr>
+            <td style="background:linear-gradient(90deg,#1A1A2E 0%,#2D2D5E 50%,#ffd232 100%);height:5px;"></td>
+          </tr>
+
+          <!-- Header -->
+          <tr>
+            <td style="padding:40px 48px 28px;border-bottom:1px solid #F0EDE8;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td>
+                    <!-- Logo mark -->
+                    <!-- Logo image -->
+                    <img src="https://ithyaraa.b-cdn.net/ithyaraa-logo.png" alt="Ithyaraa" style="display:block;width:130px;height:auto;border:0;">
+                  </td>
+                  <td align="right">
+                    <span
+                      style="display:inline-block;background:#FFFBEC;border:1px solid #ffe07a;color:#a07800;font-size:11px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;padding:4px 10px;border-radius:20px;">Notification</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px 48px 32px;">
+
+              <!-- Greeting -->
+              <p
+                style="margin:0 0 6px;font-size:13px;color:#9A9080;letter-spacing:0.4px;text-transform:uppercase;font-weight:500;">
+                Hello,</p>
+              <h1
+                style="margin:0 0 24px;font-family:'DM Serif Display',Georgia,serif;font-size:28px;color:#1A1A2E;line-height:1.2;letter-spacing:-0.5px;">
+                {{name}} 👋</h1>
+
+              <!-- Message -->
+              <p style="margin:0 0 28px;font-size:16px;color:#4A4540;line-height:1.7;">
+                You have a <strong style="color:#1A1A2E;">new notification</strong> waiting in your brand dashboard.
+                Head over to your panel to see what's new.
+              </p>
+
+              <!-- Notification card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                style="background:#F9F7F4;border:1px solid #EDE8E0;border-radius:12px;margin-bottom:32px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="width:40px;vertical-align:top;">
+                          <div
+                            style="width:36px;height:36px;background:#1A1A2E;border-radius:50%;text-align:center;line-height:36px;">
+                            <span style="color:#ffd232;font-size:16px;">🔔</span>
+                          </div>
+                        </td>
+                        <td style="padding-left:14px;vertical-align:top;">
+                          <p style="margin:0 0 3px;font-size:14px;font-weight:600;color:#1A1A2E;">1 unread notification
+                          </p>
+                          <p style="margin:0;font-size:13px;color:#8A8070;">Log in to view the full details in your
+                            dashboard.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-radius:10px;background:#1A1A2E;">
+                    <a href="#"
+                      style="display:inline-block;padding:14px 32px;color:#FFFFFF;text-decoration:none;font-size:15px;font-weight:600;letter-spacing:0.2px;border-radius:10px;">
+                      View My Dashboard &nbsp;→
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:0 48px;">
+              <div style="height:1px;background:#F0EDE8;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 48px 32px;">
+              <p style="margin:0 0 8px;font-size:12px;color:#B0A898;line-height:1.6;">
+                You're receiving this email because you have an active account on Ithyaraa. If you didn't expect this
+                notification, you can safely ignore this email.
+              </p>
+              <p style="margin:0;font-size:12px;color:#C8B8A0;">
+                <a href="#" style="color:#ffd232;text-decoration:none;">Unsubscribe</a> &nbsp;·&nbsp;
+                <a href="#" style="color:#ffd232;text-decoration:none;">Privacy Policy</a> &nbsp;·&nbsp;
+                <a href="#" style="color:#ffd232;text-decoration:none;">Help Center</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+        <!-- Below card -->
+        <p style="margin:20px 0 0;font-size:12px;color:#B0A898;text-align:center;">© 2026 Ithyaraa. All rights reserved.
+        </p>
+
+      </td>
+    </tr>
+  </table>
+
 </body>
 
 </html>

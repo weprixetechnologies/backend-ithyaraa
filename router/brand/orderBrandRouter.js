@@ -1118,6 +1118,9 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             }
         }
 
+        // Calculate total shipping fee acquired by this brand for this order
+        const brandShippingFee = processedItems.reduce((sum, item) => sum + (parseFloat(item.brandShippingFee) || 0), 0);
+
         // Format the response
         const orderDetails = {
             orderID: parseInt(id),
@@ -1129,7 +1132,7 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             items: processedItems,
             subtotal: parseFloat(order.subtotal) || 0,
             discount: parseFloat(order.totalDiscount) || 0,
-            shipping: 0, // Not stored separately in current schema
+            shipping: brandShippingFee,
             total: parseFloat(order.total) || 0,
             deliveryAddress: deliveryAddress,
             couponCode: order.couponCode,

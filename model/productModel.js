@@ -345,7 +345,13 @@ const checkIfVariationIDExists = async (variationID) => {
     return rows.length > 0;
 };
 const getProductWithVariations = async (productID) => {
-    const [productRows] = await db.query(`SELECT * FROM products WHERE productID = ? LIMIT 1`, [productID]);
+    const [productRows] = await db.query(
+        `SELECT p.*, u.shippingCharge AS brandShippingCharge 
+         FROM products p 
+         LEFT JOIN users u ON p.brandID = u.uid 
+         WHERE p.productID = ? LIMIT 1`, 
+        [productID]
+    );
 
     if (productRows.length === 0) return null;
 
@@ -360,7 +366,13 @@ const getProductWithVariations = async (productID) => {
 
 const getProductByID = async (productID) => {
     try {
-        const [rows] = await db.query(`SELECT * FROM products WHERE productID = ? LIMIT 1`, [productID]);
+        const [rows] = await db.query(
+            `SELECT p.*, u.shippingCharge AS brandShippingCharge 
+             FROM products p 
+             LEFT JOIN users u ON p.brandID = u.uid 
+             WHERE p.productID = ? LIMIT 1`, 
+            [productID]
+        );
         if (!rows || rows.length === 0) return null;
         return rows[0];
     } catch (error) {

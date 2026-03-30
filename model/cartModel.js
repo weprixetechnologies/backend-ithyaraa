@@ -548,6 +548,20 @@ async function clearCartByUid(uid) {
     }
 }
 
+async function getBrandShippingCharges(brandIDs) {
+    if (!brandIDs || brandIDs.length === 0) return new Map();
+    const placeholders = brandIDs.map(() => '?').join(',');
+    const [rows] = await db.query(
+        `SELECT uid as brandID, COALESCE(shippingCharge, 0) as shippingCharge FROM users WHERE uid IN (${placeholders})`,
+        brandIDs
+    );
+    const map = new Map();
+    for (const row of rows) {
+        map.set(row.brandID, Number(row.shippingCharge));
+    }
+    return map;
+}
+
 module.exports = {
     getProductByID,
     getOrCreateCart,
@@ -566,5 +580,6 @@ module.exports = {
     insertComboItemCombo, updateCartTotalsCombo, getComboItems, getCartItemWithVariation, updateCartReferBy,
     resetFlashForCartItem, setCartModified,
     updateCartItemsSelected,
-    clearCartByUid
+    clearCartByUid,
+    getBrandShippingCharges
 };

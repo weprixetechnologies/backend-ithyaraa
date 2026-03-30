@@ -11,6 +11,7 @@ const { queueOrderStatusEmail } = require('./orderStatusEmailService');
 const { randomUUID } = require('crypto');
 const cartModel = require('./../model/cartModel');
 const coinModel = require('../model/coinModel');
+const settlementService = require('./settlementService');
 
 async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null, walletApplied = 0) {
     // Step 1: Process cart (offers, totals, summary)
@@ -76,16 +77,41 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     const baseSubtotal = Math.max(0, Number(finalSummary.subtotal) || 0);
     const baseDiscount = Math.max(0, Number(finalSummary.totalDiscount) || 0);
 
-    // Calculate Shipping Fee
+    // Calculate Shipping Fee: Brand-Specific + Inhouse (Admin)
     let baseShipping = 0;
     const subtotalAfterDiscount = baseSubtotal - baseDiscount;
-    const globalShippingFee = await settingsModel.getSetting('shipping_fee');
-    const defaultShippingFee = Number(globalShippingFee) || 50;
 
-    if (subtotalAfterDiscount < 799) {
-        baseShipping = defaultShippingFee;
+    if (subtotalAfterDiscount < 999) {
+        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
+        const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+        
+        const brandShippingMap = uniqueBrandIDs.length > 0 ? await cartModel.getBrandShippingCharges(uniqueBrandIDs) : new Map();
+        const globalShippingFee = hasInhouse ? (Number(await settingsModel.getSetting('shipping_fee')) || 50) : 0;
+
+        const processedBrands = new Set();
+        let inhouseShippingAssigned = false;
+        let totalShippingFee = 0;
+
+        selectedItems.forEach(item => {
+            item.brandShippingFee = 0; // Default
+            if (item.brandID) {
+                if (!processedBrands.has(item.brandID)) {
+                    const fee = brandShippingMap.get(item.brandID) || 0;
+                    item.brandShippingFee = fee;
+                    totalShippingFee += fee;
+                    processedBrands.add(item.brandID);
+                }
+            } else if (!inhouseShippingAssigned && (item.productType === 'combo' || item.productType === 'customproduct' || !item.brandID)) {
+                item.brandShippingFee = globalShippingFee;
+                totalShippingFee += globalShippingFee;
+                inhouseShippingAssigned = true;
+            }
+        });
+        
+        baseShipping = totalShippingFee;
     } else {
-        baseShipping = 0; // Free shipping above 799
+        baseShipping = 0; // Free shipping above 999
+        selectedItems.forEach(item => { item.brandShippingFee = 0; });
     }
     
     finalSummary.shippingFee = baseShipping;
@@ -162,6 +188,20 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         } catch (error) {
             console.error('Failed to record coupon usage:', error);
             // Don't throw - order is already created
+        }
+    }
+
+    // Step 5.1: Record settlement 'order_placed' event (on hold, 0 effect for now)
+    const [orderItemsForSettle] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [newOrder.orderID]);
+    for (const item of orderItemsForSettle) {
+        const sResult = await settlementService.recordEvent({
+            orderItemID: item.orderItemID,
+            event: 'order_placed',
+            effect: 'hold',
+            notes: 'Order placed'
+        });
+        if (!sResult.success) {
+            await settlementService.logFailure(item.orderItemID, 'order_placed', { orderID: newOrder.orderID }, sResult.error);
         }
     }
 
@@ -762,12 +802,38 @@ async function updateOrderStatus(orderId, orderStatus) {
         }
 
         // Set deliveredAt and per-item coinLockUntil when order becomes Delivered
-        if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
-            try {
-                const orderModel = require('../model/orderModel');
-                await orderModel.setDeliveredAt(orderId, new Date());
-            } catch (e) {
-                console.error('[Order] Error setting deliveredAt/coinLockUntil:', e);
+        if (normalizedStatus === 'delivered' && oldStatus !== 'delivered') {
+            const orderModel = require('../model/orderModel');
+            await orderModel.setDeliveredAt(orderId, new Date());
+
+            // Settlement Hook: Record 'order_delivered' (Hold) with actual amount
+            const [orderItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [orderId]);
+            for (const item of orderItems) {
+                const sResult = await settlementService.recordEvent({
+                    orderItemID: item.orderItemID,
+                    event: 'order_delivered',
+                    effect: 'hold',
+                    notes: 'Order delivered - earnings on hold'
+                });
+                if (!sResult.success) {
+                    await settlementService.logFailure(item.orderItemID, 'order_delivered', { orderId }, sResult.error);
+                }
+            }
+        }
+        
+        // Settlement Hook: Record 'cancelled' if order is cancelled
+        if (normalizedStatus === 'cancelled' && oldStatus !== 'cancelled') {
+            const [orderItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [orderId]);
+            for (const item of orderItems) {
+                const sResult = await settlementService.recordEvent({
+                    orderItemID: item.orderItemID,
+                    event: 'cancelled',
+                    effect: 'neutral',
+                    notes: 'Order cancelled'
+                });
+                if (!sResult.success) {
+                    await settlementService.logFailure(item.orderItemID, 'cancelled', { orderId }, sResult.error);
+                }
             }
         }
 
@@ -1335,6 +1401,32 @@ async function returnOrder(uid, { orderID, orderItemID = null, reason = null }) 
                 );
                 await connection.commit();
                 itemsForReturnInitiatedEmail.push(item);
+
+                // Settlement Hook: Record 'replacement_original' (Wait for admin Phase 1 credit)
+                const sResultOriginal = await settlementService.recordEvent({
+                    orderItemID: item.orderItemID,
+                    event: 'replacement_original',
+                    effect: 'hold', // Changed from 'debit' to 'hold' so it stays as eligible for Phase 1 credit
+                    notes: `Replacement initiated (Replacement Order: ${replacementOrderID}). Waiting for admin confirmation.`
+                });
+                if (!sResultOriginal.success) {
+                    await settlementService.logFailure(item.orderItemID, 'replacement_original', { replacementOrderID }, sResultOriginal.error);
+                }
+
+                // Settlement Hook: Record 'replacement_item' (Neutral) for the new item
+                const [newItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [replacementOrderID]);
+                for (const ni of newItems) {
+                    const sResultItem = await settlementService.recordEvent({
+                        orderItemID: ni.orderItemID,
+                        event: 'replacement_item',
+                        effect: 'neutral',
+                        notes: `Replacement item for item ${item.orderItemID}`,
+                        relatedOrderItemId: item.orderItemID // Track back to original
+                    });
+                    if (!sResultItem.success) {
+                        await settlementService.logFailure(ni.orderItemID, 'replacement_item', { originalItemID: item.orderItemID }, sResultItem.error);
+                    }
+                }
             } catch (e) {
                 await connection.rollback();
                 throw e;

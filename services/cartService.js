@@ -504,10 +504,28 @@ async function getCart(uid) {
         const totalDiscount = Number((subtotal - total).toFixed(2));
         const summary = { subtotal, total, totalDiscount, anyModifications: items.some(it => it.isFlashSale) };
 
-        // Shipping Fee Logic
-        const globalShippingFee = await settingsModel.getSetting('shipping_fee');
-        const defaultShippingFee = Number(globalShippingFee) || 50;
-        summary.shipping = (summary.total < 799) ? defaultShippingFee : 0;
+        // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
+        if (summary.total < 999) {
+            const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
+            const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+            
+            let shippingFee = 0;
+            if (uniqueBrandIDs.length > 0) {
+                const brandShippingMap = await cartModel.getBrandShippingCharges(uniqueBrandIDs);
+                uniqueBrandIDs.forEach(bid => {
+                    shippingFee += (brandShippingMap.get(bid) || 0);
+                });
+            }
+            
+            if (hasInhouse) {
+                const globalShippingFee = await settingsModel.getSetting('shipping_fee');
+                shippingFee += (Number(globalShippingFee) || 50);
+            }
+            
+            summary.shipping = shippingFee;
+        } else {
+            summary.shipping = 0;
+        }
         summary.total = Number((summary.total + summary.shipping).toFixed(2));
 
         // Write to cartDetail table
@@ -640,10 +658,28 @@ async function getCart(uid) {
 
     const summary = { subtotal, total, totalDiscount, anyModifications };
 
-    // Shipping Fee Logic
-    const globalShippingFee = await settingsModel.getSetting('shipping_fee');
-    const defaultShippingFee = Number(globalShippingFee) || 50;
-    summary.shipping = (summary.total < 799) ? defaultShippingFee : 0;
+    // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
+    if (summary.total < 999) {
+        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
+        const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+        
+        let shippingFee = 0;
+        if (uniqueBrandIDs.length > 0) {
+            const brandShippingMap = await cartModel.getBrandShippingCharges(uniqueBrandIDs);
+            uniqueBrandIDs.forEach(bid => {
+                shippingFee += (brandShippingMap.get(bid) || 0);
+            });
+        }
+        
+        if (hasInhouse) {
+            const globalShippingFee = await settingsModel.getSetting('shipping_fee');
+            shippingFee += (Number(globalShippingFee) || 50);
+        }
+        
+        summary.shipping = shippingFee;
+    } else {
+        summary.shipping = 0;
+    }
     summary.total = Number((summary.total + summary.shipping).toFixed(2));
 
     console.log(`[SUMMARY] subtotal=${subtotal}, total=${summary.total}, totalDiscount=${totalDiscount}, shipping=${summary.shipping}`);

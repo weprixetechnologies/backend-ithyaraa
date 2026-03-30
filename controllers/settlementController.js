@@ -1,219 +1,345 @@
 const db = require('../utils/dbconnect');
-const { computeSettlement } = require('../services/settlementService');
-const {
-  fetchLockedSettlement,
-  fetchPaymentHistory,
-  insertLockedSettlement,
-  markItemsIncluded,
-  markItemsCarriedForward,
-  insertPaymentRecord,
-  updateSettlementPayment,
-} = require('../models/settlementModel');
+const settlementService = require('../services/settlementService');
 
-async function getSettlementDetail(req, res) {
-  const { brandID, month } = req.params;
-  if (!brandID || !month || !/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ success: false, message: 'Invalid brandID or month format (YYYY-MM)' });
-  }
-  try {
-    const locked = await fetchLockedSettlement(brandID, month);
-    if (locked) {
-      const payments = await fetchPaymentHistory(locked.id);
-      return res.json({ success: true, isLocked: true, settlement: locked, payments });
+/**
+ * ADMIN: Get all settlement periods
+ */
+const getAllSettlements = async (req, res) => {
+    try {
+        const { brandID, month, status, page = 1, limit = 20 } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
+        
+        let query = `
+            SELECT bsp.*, u.username as brandName, u.emailID as brandEmail
+            FROM brand_settlement_periods bsp
+            LEFT JOIN users u ON bsp.brandID = u.uid
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (brandID) {
+            query += ` AND bsp.brandID = ?`;
+            params.push(brandID);
+        }
+        if (month) {
+            query += ` AND bsp.settlementMonth = ?`;
+            params.push(month);
+        }
+        if (status) {
+            query += ` AND bsp.status = ?`;
+            params.push(status);
+        }
+
+        query += ` ORDER BY bsp.settlementMonth DESC, bsp.createdAt DESC LIMIT ? OFFSET ?`;
+        params.push(Number(limit), offset);
+
+        const [rows] = await db.query(query, params);
+        
+        // Get total count
+        let countQuery = `SELECT COUNT(*) as total FROM brand_settlement_periods WHERE 1=1`;
+        const countParams = [];
+        if (brandID) { countQuery += ` AND brandID = ?`; countParams.push(brandID); }
+        if (month) { countQuery += ` AND settlementMonth = ?`; countParams.push(month); }
+        if (status) { countQuery += ` AND status = ?`; countParams.push(status); }
+
+        const [[{ total }]] = await db.query(countQuery, countParams);
+
+        return res.json({ success: true, data: rows, total, page: Number(page), limit: Number(limit) });
+    } catch (error) {
+        console.error('Error fetching settlements:', error);
+        return res.status(500).json({ success: false, message: error.message });
     }
-    const preview = await computeSettlement(brandID, month);
-    return res.json({ success: true, isLocked: false, preview });
-  } catch (err) {
-    console.error('[getSettlementDetail]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-}
-
-async function lockSettlement(req, res) {
-  const { brandID, month } = req.params;
-  const adminID = req.admin?.uid || req.user?.uid || req.body.adminID;
-  if (!brandID || !month || !/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ success: false, message: 'Invalid brandID or month' });
-  }
-  const conn = await db.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [existing] = await conn.query(
-      `SELECT id, status FROM brand_settlements WHERE brandID = ? AND settlementMonth = ? LIMIT 1`,
-      [brandID, month]
-    );
-    if (existing.length && existing[0].status !== 'draft') {
-      await conn.rollback();
-      const locked = await fetchLockedSettlement(brandID, month);
-      const payments = await fetchPaymentHistory(locked.id);
-      return res.json({ success: true, isLocked: true, settlement: locked, payments, alreadyExists: true });
-    }
-    const preview = await computeSettlement(brandID, month);
-    const settlementID = await insertLockedSettlement(conn, {
-      brandID,
-      settlementMonth: month,
-      periodStart: preview.periodStart,
-      periodEnd: preview.periodEnd,
-      grossAmount: preview.grossAmount,
-      commissionPercentage: preview.commissionPercentage,
-      commissionAmount: preview.commissionAmount,
-      netAmount: preview.netAmount,
-      carriedForwardAmount: preview.carriedForwardAmount,
-      holdReleasedAmount: preview.holdReleasedAmount,
-      totalPayable: preview.totalPayable,
-      itemCount: preview.itemCount,
-      generatedBy: adminID,
-    });
-    await markItemsIncluded(conn, settlementID, preview.eligibleItems.map(i => i.id));
-    await markItemsCarriedForward(conn, settlementID, preview.onHoldItems.map(i => i.id));
-    const holdReleasedIDs = (preview.holdReleasedItems || []).map(i => i.id);
-    if (holdReleasedIDs.length) {
-      await conn.query(
-        `UPDATE order_items SET settlementStatus='included', settlementID=? WHERE orderItemID IN (?)`,
-        [settlementID, holdReleasedIDs]
-      );
-    }
-    await conn.commit();
-    const locked = await fetchLockedSettlement(brandID, month);
-    const payments = await fetchPaymentHistory(locked.id);
-    return res.json({ success: true, isLocked: true, settlement: locked, payments });
-  } catch (err) {
-    await conn.rollback();
-    console.error('[lockSettlement]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  } finally {
-    conn.release();
-  }
-}
-
-async function recordPayment(req, res) {
-  const { id } = req.params;
-  const { amount, paymentMode, utrReference, paymentDate, remarks } = req.body;
-  const adminID = req.admin?.uid || req.user?.uid;
-  if (!amount || isNaN(amount) || Number(amount) <= 0)
-    return res.status(400).json({ success: false, message: 'Amount must be greater than 0' });
-  if (!paymentMode)
-    return res.status(400).json({ success: false, message: 'Payment mode is required' });
-  if (['bank_transfer', 'upi'].includes(paymentMode) && !utrReference)
-    return res.status(400).json({ success: false, message: 'UTR/Reference number required for this payment mode' });
-  if (!paymentDate)
-    return res.status(400).json({ success: false, message: 'Payment date is required' });
-
-  const conn = await db.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [[settlement]] = await conn.query(
-      `SELECT id, brandID, settlementMonth, totalPayable, amountPaid, balanceDue, status
-       FROM brand_settlements WHERE id = ? FOR UPDATE`,
-      [id]
-    );
-    if (!settlement) {
-      await conn.rollback();
-      return res.status(404).json({ success: false, message: 'Settlement not found' });
-    }
-    if (settlement.status === 'paid') {
-      await conn.rollback();
-      return res.status(400).json({ success: false, message: 'Settlement is already fully paid' });
-    }
-    const payAmt = Math.round(Number(amount) * 100) / 100;
-    const balanceDue = Math.round(Number(settlement.balanceDue) * 100) / 100;
-    if (payAmt > balanceDue) {
-      await conn.rollback();
-      return res.status(400).json({ success: false, message: `Amount exceeds balance due of ₹${balanceDue}` });
-    }
-    await insertPaymentRecord(conn, {
-      settlementID: id, amount: payAmt, paymentMode,
-      utrReference, paymentDate, remarks, recordedBy: adminID,
-    });
-    const newAmountPaid = Math.round((Number(settlement.amountPaid) + payAmt) * 100) / 100;
-    const newBalanceDue = Math.round((Number(settlement.totalPayable) - newAmountPaid) * 100) / 100;
-    const newStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
-    await updateSettlementPayment(conn, id, newAmountPaid, newBalanceDue, newStatus, adminID);
-    await conn.commit();
-    const locked = await fetchLockedSettlement(settlement.brandID, settlement.settlementMonth);
-    const payments = await fetchPaymentHistory(id);
-    return res.json({ success: true, settlement: locked, payments, newAmountPaid, newBalanceDue, newStatus });
-  } catch (err) {
-    await conn.rollback();
-    console.error('[recordPayment]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  } finally {
-    conn.release();
-  }
-}
-
-async function getPaymentHistory(req, res) {
-  const { id } = req.params;
-  try {
-    const payments = await fetchPaymentHistory(id);
-    return res.json({ success: true, payments });
-  } catch (err) {
-    console.error('[getPaymentHistory]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-}
-
-async function getBrandsOverview(req, res) {
-  const { month } = req.query;
-  if (!month || !/^\d{4}-\d{2}$/.test(month))
-    return res.status(400).json({ success: false, message: 'month param required (YYYY-MM)' });
-  try {
-    const [brands] = await db.query(
-      `SELECT uid AS brandID, name AS brandName, username AS brandUsername
-       FROM users WHERE role = 'brand' ORDER BY name ASC`
-    );
-    const [settlements] = await db.query(
-      `SELECT * FROM brand_settlements WHERE settlementMonth = ?`, [month]
-    );
-    const settlementMap = new Map(settlements.map(s => [s.brandID, s]));
-    const overview = brands.map(brand => {
-      const s = settlementMap.get(brand.brandID);
-      if (s) return { ...brand, ...s, settlementMonth: month };
-      return {
-        ...brand,
-        settlementMonth: month,
-        grossAmount: null, commissionAmount: null, netAmount: null,
-        carriedForwardAmount: null, holdReleasedAmount: null,
-        totalPayable: null, amountPaid: null, balanceDue: null,
-        status: 'not_generated',
-      };
-    });
-    return res.json({ success: true, data: overview });
-  } catch (err) {
-    console.error('[getBrandsOverview]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-}
-
-async function listSettlements(req, res) {
-  const { month, brandID, status } = req.query;
-  const where = [], params = [];
-  if (month) { where.push('bs.settlementMonth = ?'); params.push(month); }
-  if (brandID) { where.push('bs.brandID = ?'); params.push(brandID); }
-  if (status && status !== 'all') { where.push('bs.status = ?'); params.push(status); }
-  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  try {
-    const [rows] = await db.query(
-      `SELECT bs.*, u.name AS brandName, u.username AS brandUsername
-       FROM brand_settlements bs
-       LEFT JOIN users u ON u.uid = bs.brandID
-       ${whereClause}
-       ORDER BY bs.periodStart DESC, bs.brandID ASC`,
-      params
-    );
-    return res.json({ success: true, data: rows });
-  } catch (err) {
-    console.error('[listSettlements]', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-}
-
-module.exports = {
-  getSettlementDetail,
-  lockSettlement,
-  recordPayment,
-  getPaymentHistory,
-  getBrandsOverview,
-  listSettlements,
 };
 
+/**
+ * ADMIN & BRAND: Get settlement detail (Statement)
+ */
+const getSettlementDetail = async (req, res) => {
+    try {
+        const { brandID, month } = req.params;
+        const isAdmin = req.user.role === 'admin';
+        
+        // If brand, they can only see their own
+        if (!isAdmin && req.user.uid !== brandID) {
+            return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        // 1. Get period summary
+        const [periods] = await db.query(`
+            SELECT bsp.*, u.username as brandName, u.emailID as brandEmail
+            FROM brand_settlement_periods bsp
+            LEFT JOIN users u ON bsp.brandID = u.uid
+            WHERE bsp.brandID = ? AND bsp.settlementMonth = ?
+        `, [brandID, month]);
+
+        if (periods.length === 0) {
+            return res.status(404).json({ success: false, message: 'Settlement period not found' });
+        }
+
+        // 2. Get ledger items (statement)
+        const [ledger] = await db.query(`
+            SELECT * FROM settlement_order_details
+            WHERE brandID = ? AND settlementMonth = ?
+            ORDER BY createdAt DESC
+        `, [brandID, month]);
+
+        // 3. Get payments audit log
+        const [payments] = await db.query(`
+            SELECT * FROM brand_settlement_payments
+            WHERE brandID = ? AND settlementPeriodID = ?
+            ORDER BY paymentDate DESC
+        `, [brandID, periods[0].id]);
+
+        return res.json({
+            success: true,
+            period: periods[0],
+            statement: ledger,
+            payments: payments
+        });
+    } catch (error) {
+        console.error('Error fetching settlement detail:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * ADMIN: Record a payment
+ */
+const recordPayment = async (req, res) => {
+    try {
+        const { id } = req.params; // brand_settlement_periods.id
+        const { amount, paymentMode, utrReference, paymentDate, remarks } = req.body;
+        const recordedBy = req.user.username || req.user.uid;
+
+        if (!amount || !paymentMode || !paymentDate) {
+            return res.status(400).json({ success: false, message: 'Amount, paymentMode, and paymentDate are required' });
+        }
+
+        // 1. Get period info
+        const [periods] = await db.query('SELECT * FROM brand_settlement_periods WHERE id = ?', [id]);
+        if (periods.length === 0) return res.status(404).json({ success: false, message: 'Period not found' });
+        const period = periods[0];
+
+        // 2. Record payment in audit log
+        await db.query(`
+            INSERT INTO brand_settlement_payments (
+                settlementPeriodID, brandID, amount, paymentMode, utrReference, paymentDate, remarks, recordedBy
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [id, period.brandID, amount, paymentMode, utrReference, paymentDate, remarks, recordedBy]);
+
+        // 3. Update period totals
+        await db.query(`
+            UPDATE brand_settlement_periods
+            SET amountPaid = amountPaid + ?,
+                balanceDue = balanceDue - ?,
+                status = CASE 
+                    WHEN (amountPaid + ?) >= netPayable THEN 'paid'
+                    WHEN (amountPaid + ?) > 0 THEN 'partially_paid'
+                    ELSE status
+                END,
+                paidAt = NOW(),
+                paidBy = ?
+            WHERE id = ?
+        `, [amount, amount, amount, amount, recordedBy, id]);
+
+        return res.json({ success: true, message: 'Payment recorded successfully' });
+    } catch (error) {
+        console.error('Error recording payment:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * BRAND: Get my settlements
+ */
+const getMySettlements = async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const { page = 1, limit = 20 } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
+
+        const [rows] = await db.query(`
+            SELECT * FROM brand_settlement_periods
+            WHERE brandID = ?
+            ORDER BY settlementMonth DESC, createdAt DESC
+            LIMIT ? OFFSET ?
+        `, [brandID, Number(limit), offset]);
+
+        const [[{ total }]] = await db.query('SELECT COUNT(*) as total FROM brand_settlement_periods WHERE brandID = ?', [brandID]);
+
+        return res.json({ success: true, data: rows, total, page: Number(page), limit: Number(limit) });
+    } catch (error) {
+        console.error('Error fetching my settlements:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * ADMIN: Manually clear the return window for a ledger entry
+ */
+const manualClearWindow = async (req, res) => {
+    try {
+        const { id } = req.params; // settlement_order_details.id
+        const recordedBy = req.user.username || req.user.uid;
+
+        // 1. Get ledger entry
+        const [ledgerEntries] = await db.query('SELECT * FROM settlement_order_details WHERE id = ?', [id]);
+        if (ledgerEntries.length === 0) return res.status(404).json({ success: false, message: 'Ledger entry not found' });
+        
+        const entry = ledgerEntries[0];
+
+        // 2. Validation
+        if (entry.effect !== 'hold' || (entry.event !== 'order_delivered' && entry.event !== 'order_placed')) {
+            return res.status(400).json({ success: false, message: 'Only hold events (placed/delivered) can be manually cleared' });
+        }
+
+        // 3. Check if already cleared
+        const [existingCredits] = await db.query(`
+            SELECT id FROM settlement_order_details 
+            WHERE orderItemID = ? AND event = 'return_window_cleared'
+        `, [entry.orderItemID]);
+
+        if (existingCredits.length > 0) {
+            return res.status(400).json({ success: false, message: 'Return window already cleared for this item' });
+        }
+
+        // 4. Record the credit event (Current item)
+        const result = await settlementService.recordEvent({
+            orderItemID: entry.orderItemID,
+            event: 'return_window_cleared',
+            effect: 'credit',
+            notes: 'Manual override by Admin',
+            createdBy: recordedBy
+        });
+
+        if (!result.success) throw new Error(result.error);
+
+        // 5. Update current order_item status
+        await db.query(`UPDATE order_items SET settlementStatus = 'included' WHERE orderItemID = ?`, [entry.orderItemID]);
+
+        // 6. Handle Replacements (Bidirectional Clearing - Robust)
+        
+        let originalItemID = null;
+        let replacementItemID = null;
+
+        // Try to find if THIS item is a replacement (Find the original)
+        const [asRepl] = await db.query(`
+            SELECT relatedOrderItemId FROM settlement_order_details 
+            WHERE orderItemID = ? AND relatedOrderItemId IS NOT NULL 
+            LIMIT 1
+        `, [entry.orderItemID]);
+        if (asRepl.length > 0) originalItemID = asRepl[0].relatedOrderItemId;
+
+        // Try to find if THIS item was replaced (Find the replacement)
+        const [asOrig] = await db.query(`
+            SELECT orderItemID FROM settlement_order_details 
+            WHERE relatedOrderItemId = ? AND event = 'replacement_item' 
+            LIMIT 1
+        `, [entry.orderItemID]);
+        if (asOrig.length > 0) replacementItemID = asOrig[0].orderItemID;
+
+        // --- Credit the Other Half of the Pair ---
+        const peerItemID = originalItemID || replacementItemID;
+        if (peerItemID) {
+            const [peerStatus] = await db.query(`
+                SELECT settlementStatus FROM order_items WHERE orderItemID = ?
+            `, [peerItemID]);
+
+            if (peerStatus.length > 0 && peerStatus[0].settlementStatus !== 'included') {
+                const recordPeer = await settlementService.recordEvent({
+                    orderItemID: peerItemID,
+                    event: 'return_window_cleared',
+                    effect: 'credit',
+                    notes: `Automatic peer-clearing (Linked to manual override of ${entry.orderItemID})`,
+                    createdBy: recordedBy
+                });
+                if (recordPeer.success) {
+                    await db.query(`UPDATE order_items SET settlementStatus = 'included' WHERE orderItemID = ?`, [peerItemID]);
+                }
+            }
+        }
+
+        return res.json({ success: true, message: 'Return window cleared manually (Replacement pair processed if applicable)' });
+    } catch (error) {
+        console.error('Error manual clearing window:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * ADMIN: Trigger the settlement check manually (instead of waiting for Cron)
+ */
+const runCheckManually = async (req, res) => {
+    try {
+        console.log(`[Manual Action] Settlement check triggered by ${req.user.username}`);
+        
+        // Find items that are delivered, passed return window, and unsettled
+        const [eligibleItems] = await db.query(`
+            SELECT oi.orderItemID, oi.orderID, oi.brandID, od.isReplacement, sod.relatedOrderItemId
+            FROM order_items oi
+            JOIN orderDetail od ON oi.orderID = od.orderID
+            LEFT JOIN settlement_order_details sod ON oi.orderItemID = sod.orderItemID AND sod.event = 'replacement_item'
+            WHERE oi.itemStatus = 'delivered'
+              AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+              AND (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
+              AND oi.settlementStatus = 'unsettled'
+              AND oi.brandID IS NOT NULL
+        `);
+
+        let processed = 0;
+        for (const item of eligibleItems) {
+            if (item.isReplacement && item.relatedOrderItemId) {
+                // Replacement Credit Flow
+                const recordRepl = await settlementService.recordEvent({
+                    orderItemID: item.orderItemID,
+                    event: 'return_window_cleared',
+                    effect: 'credit',
+                    notes: 'Manual check - replacement unit'
+                });
+                if (recordRepl.success) {
+                    await db.query(`UPDATE order_items SET settlementStatus = 'included' WHERE orderItemID = ?`, [item.orderItemID]);
+                    // Credit original too
+                    const [origStatus] = await db.query(`SELECT settlementStatus FROM order_items WHERE orderItemID = ?`, [item.relatedOrderItemId]);
+                    if (origStatus.length > 0 && origStatus[0].settlementStatus !== 'included') {
+                        const recordOrig = await settlementService.recordEvent({
+                            orderItemID: item.relatedOrderItemId,
+                            event: 'return_window_cleared',
+                            effect: 'credit',
+                            notes: `Manual check - original unit for replacement ${item.orderItemID}`
+                        });
+                        if (recordOrig.success) {
+                            await db.query(`UPDATE order_items SET settlementStatus = 'included' WHERE orderItemID = ?`, [item.relatedOrderItemId]);
+                        }
+                    }
+                    processed++;
+                }
+            } else {
+                // Normal Credit Flow
+                const record = await settlementService.recordEvent({
+                    orderItemID: item.orderItemID,
+                    event: 'return_window_cleared',
+                    effect: 'credit',
+                    notes: 'Manual check - return window expired'
+                });
+                if (record.success) {
+                    await db.query(`UPDATE order_items SET settlementStatus = 'included' WHERE orderItemID = ?`, [item.orderItemID]);
+                    processed++;
+                }
+            }
+        }
+
+        return res.json({ success: true, message: `Check complete. Processed ${processed} items.` });
+    } catch (error) {
+        console.error('Error running check manually:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = {
+    getAllSettlements,
+    getSettlementDetail,
+    recordPayment,
+    getMySettlements,
+    manualClearWindow,
+    runCheckManually
+};

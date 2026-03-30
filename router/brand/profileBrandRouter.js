@@ -12,7 +12,7 @@ profileBrandRouter.get('/profile', authBrandMiddleware.verifyAccessToken, async 
         const brandID = req.user.uid;
 
         const [brandRows] = await db.query(
-            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage
+            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage, shippingCharge
              FROM users
              WHERE uid = ? AND role = 'brand'`,
             [brandID]
@@ -35,7 +35,8 @@ profileBrandRouter.get('/profile', authBrandMiddleware.verifyAccessToken, async 
                 profilePhoto: brand.profilePhoto || null,
                 createdOn: brand.createdOn,
                 verifiedEmail: brand.verifiedEmail,
-                commissionPercentage: brand.commissionPercentage != null ? parseFloat(brand.commissionPercentage) : null
+                commissionPercentage: brand.commissionPercentage != null ? parseFloat(brand.commissionPercentage) : null,
+                shippingCharge: brand.shippingCharge != null ? parseFloat(brand.shippingCharge) : 0
             }
         });
     } catch (error) {
@@ -61,6 +62,7 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
         if (updateData.emailID !== undefined) mappedData.emailID = updateData.emailID || null;
         if (updateData.gstin !== undefined) mappedData.gstin = updateData.gstin && updateData.gstin.trim() !== '' ? updateData.gstin : null;
         if (updateData.profilePhoto !== undefined) mappedData.profilePhoto = updateData.profilePhoto || null;
+        if (updateData.shippingCharge !== undefined) mappedData.shippingCharge = updateData.shippingCharge || 0;
 
         // Don't allow updating sensitive fields
         delete mappedData.password;
@@ -91,7 +93,7 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
 
         // Fetch updated profile
         const [updatedBrand] = await db.query(
-            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage
+            `SELECT uid, username, name, emailID, gstin, profilePhoto, createdOn, verifiedEmail, commissionPercentage, shippingCharge
              FROM users
              WHERE uid = ? AND role = 'brand'`,
             [brandID]
@@ -109,7 +111,8 @@ profileBrandRouter.put('/profile', authBrandMiddleware.verifyAccessToken, async 
                 profilePhoto: updatedBrand[0].profilePhoto || null,
                 createdOn: updatedBrand[0].createdOn,
                 verifiedEmail: updatedBrand[0].verifiedEmail,
-                commissionPercentage: updatedBrand[0].commissionPercentage != null ? parseFloat(updatedBrand[0].commissionPercentage) : null
+                commissionPercentage: updatedBrand[0].commissionPercentage != null ? parseFloat(updatedBrand[0].commissionPercentage) : null,
+                shippingCharge: updatedBrand[0].shippingCharge != null ? parseFloat(updatedBrand[0].shippingCharge) : 0
             }
         });
     } catch (error) {

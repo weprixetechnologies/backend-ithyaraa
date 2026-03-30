@@ -90,8 +90,8 @@ async function createOrder(orderData) {
                     unitPriceBefore, unitPriceAfter,
                     lineTotalBefore, lineTotalAfter,
                     offerID, offerApplied, offerStatus, appliedOfferID,
-                    name, featuredImage, comboID, brandID, referBy, custom_inputs, earnedCoins, createdAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+                    name, featuredImage, comboID, brandID, brandShippingFee, referBy, custom_inputs, earnedCoins, createdAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
                 [
                     orderID,
                     orderData.uid,
@@ -114,6 +114,7 @@ async function createOrder(orderData) {
                     item.featuredImage ? JSON.stringify(item.featuredImage) : null,
                     item.comboID || null,
                     item.brandID,
+                    item.brandShippingFee || 0.00,
                     (item.referBy !== undefined && item.referBy !== null) ? item.referBy : '',
                     item.custom_inputs ? JSON.stringify(item.custom_inputs) : null,
                     earnedCoins
@@ -224,7 +225,7 @@ async function getOrderItemsByUid(uid) {
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
-                    oi.returnStatus, oi.returnRequestedAt, oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.itemStatus,
+                    oi.returnStatus, oi.returnRequestedAt, oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.brandShippingFee, oi.itemStatus,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
@@ -458,7 +459,7 @@ async function getOrderDetailsByOrderID(orderID, uid) {
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
                     oi.returnStatus, oi.returnRequestedAt, oi.replacementOrderItemID, oi.replacementOrderID, oi.refundQueryID,
                     oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
-                    oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID,
+                    oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.brandShippingFee,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
