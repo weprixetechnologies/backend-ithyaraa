@@ -30,6 +30,7 @@ async function notifyTicketUpdate({ ticket, reply, type }) {
         }
 
         if (subject && message) {
+            const baseUrl = (process.env.FRONTEND_URL || 'https://ithyaraa.com').replace(/\/$/, '');
             await addSendEmailJob({
                 to: user.emailID,
                 templateName: 'support_notification',
@@ -37,7 +38,7 @@ async function notifyTicketUpdate({ ticket, reply, type }) {
                     name: user.name || user.username || 'User',
                     ticketNo: ticket.ticket_no,
                     message,
-                    link: `${process.env.FRONTEND_URL || 'https://ithyaraa.com'}/support/details/${ticket.ticket_no}`
+                    link: `${baseUrl}/support/details/${ticket.ticket_no}`
                 },
                 subject
             });
