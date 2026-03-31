@@ -1361,9 +1361,8 @@ async function searchProducts(query) {
                 featuredImage, 
                 categories, 
                 createdAt 
-            FROM products 
-            WHERE (name LIKE ? OR description LIKE ?)
-            AND status = 'In Stock'
+            WHERE (name LIKE ?  OR productID LIKE ?)
+            AND status != 'deleted'
             ORDER BY 
                 CASE 
                     WHEN name LIKE ? THEN 1
@@ -1375,6 +1374,7 @@ async function searchProducts(query) {
         `;
 
         const [rows] = await db.query(searchQuery, [
+            searchTerm,
             searchTerm,
             searchTerm,
             startMatch, // Exact start match gets highest priority

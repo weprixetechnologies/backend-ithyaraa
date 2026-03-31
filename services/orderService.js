@@ -453,10 +453,62 @@ async function getOrderDetailsByOrderID(orderID, uid) {
         return { items: [], orderDetail: null };
     }
 
-    // Add handling fee fields to orderDetail if not present
+    // Add handling fee fields and shipping breakdown to orderDetail
     if (orderDetail) {
         orderDetail.handlingFee = orderDetail.handlingFee ? Boolean(Number(orderDetail.handlingFee)) : false;
         orderDetail.handFeeRate = Number(orderDetail.handFeeRate) || 0;
+
+        // Calculate historical itemTotal: based strictly on (regularPrice * quantity)
+        // or effectively subtotal + discount to keep it simple and accurate.
+        // It reflects the total value before any overall order level discount.
+        orderDetail.itemTotal = (Number(orderDetail.subtotal) || 0) + (Number(orderDetail.totalDiscount) || 0);
+
+        // Calculate shipping breakdown
+        const shippingBreakdownMap = new Map();
+        let inhouseShipping = 0;
+
+        // Fetch brand names if we have any brand IDs
+        const uniqueBrandIDs = [...new Set(items.filter(i => i.brandID).map(i => i.brandID))];
+        const brandNameMap = new Map();
+        
+        if (uniqueBrandIDs.length > 0) {
+            try {
+                const [brandRows] = await db.query(
+                    `SELECT uid, username FROM users WHERE uid IN (?) AND role = 'brand'`,
+                    [uniqueBrandIDs]
+                );
+                brandRows.forEach(b => brandNameMap.set(b.uid, b.username));
+            } catch (err) {
+                console.error('Error fetching brand names for shipping breakdown:', err);
+            }
+        }
+
+        items.forEach(item => {
+            const fee = Number(item.brandShippingFee) || 0;
+            if (item.brandID && fee > 0) {
+                if (!shippingBreakdownMap.has(item.brandID)) {
+                    shippingBreakdownMap.set(item.brandID, {
+                        brandID: item.brandID,
+                        brandName: brandNameMap.get(item.brandID) || 'Unknown Brand',
+                        fee: fee
+                    });
+                }
+            } else if (!item.brandID && fee > 0) {
+                // Inhouse or combo item shipping fee
+                inhouseShipping = Math.max(inhouseShipping, fee);
+            }
+        });
+
+        const shippingBreakdown = Array.from(shippingBreakdownMap.values());
+        if (inhouseShipping > 0) {
+            shippingBreakdown.push({
+                brandID: 'inhouse',
+                brandName: 'Inhouse',
+                fee: inhouseShipping
+            });
+        }
+
+        orderDetail.shippingBreakdown = shippingBreakdown;
     }
 
     return { items, orderDetail };

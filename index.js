@@ -60,6 +60,11 @@ const publicFaqRouter = require('./router/publicFaqRouter')
 const reelsRouter = require('./router/reelsRouter')
 const reelsAdminRouter = require('./router/admin/reelsAdminRouter')
 const cacheAdminRouter = require('./router/admin/cacheAdminRouter')
+
+// Support Routes
+const userSupportRouter = require('./router/userSupportRouter')
+const brandSupportRouter = require('./router/brand/supportBrandRouter')
+const adminSupportRouter = require('./router/admin/supportAdminRouter')
 // CORS setup (replace with your actual frontend domain)
 
 app.use(cors())
@@ -113,6 +118,7 @@ app.use('/api/home-categories', homeCategoryRouter)
 app.use('/api/size-charts', sizeChartRouter)
 app.use('/api/public', publicFaqRouter)
 app.use('/api/reels', reelsRouter)
+app.use('/api/support', userSupportRouter)
 // Alias for public newsletters feed: GET /api/newsletters
 app.get('/api/newsletters', newsletterController.listNewsletters)
 
@@ -134,6 +140,7 @@ app.use('/api/admin', settlementAdminRouter);
 app.use('/api/admin/reels', reelsAdminRouter);
 app.use('/api/admin', cacheAdminRouter);
 app.use('/api/admin', adminAuthRouter);
+app.use('/api/admin', adminSupportRouter);
 // Product groups (homepage grouping) - admin endpoints
 app.use('/api/admin/product-groups', productGroupsRouter);
 // Custom image sections
@@ -155,6 +162,7 @@ app.use('/api/brand', brandBankDetailsRouter)
 app.use('/api/brand', notificationBrandRouter)
 app.use('/api/brand', profileBrandRouter)
 app.use('/api/brand', settlementBrandRouter)
+app.use('/api/brand/support', brandSupportRouter)
 
 app.listen(process.env.PORT, () => {
   console.log('Server Started');

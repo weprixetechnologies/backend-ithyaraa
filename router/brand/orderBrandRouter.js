@@ -1064,7 +1064,7 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
 
         // Get order items for this brand (include return status and return AWB for return-initiated items)
         const itemsQuery = `
-            SELECT oi.orderItemID, oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl, oi.createdAt FROM order_items oi WHERE oi.orderID = ? AND oi.brandID = ?
+            SELECT oi.orderItemID, oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl, oi.createdAt, oi.brandShippingFee FROM order_items oi WHERE oi.orderID = ? AND oi.brandID = ?
             ORDER BY oi.createdAt ASC
         `;
 
@@ -1076,7 +1076,7 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
 
         // Get order details from orderDetail table
         const orderQuery = `
-            SELECT od.orderID, od.uid, od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt, od.subtotal, od.total, od.totalDiscount, od.couponCode, od.couponDiscount, od.addressID
+            SELECT od.orderID, od.uid, od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt, od.subtotal, od.total, od.totalDiscount, od.couponCode, od.couponDiscount, od.addressID, od.shippingFee
             FROM orderDetail od 
             WHERE od.orderID = ?
         `;
@@ -1118,8 +1118,25 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             }
         }
 
+        // Determine legacy order status for shipping
+        let totalBrandShippingInOrder = 0;
+        try {
+            const [shippingRows] = await db.query('SELECT SUM(brandShippingFee) as total FROM order_items WHERE orderID = ?', [id]);
+            totalBrandShippingInOrder = parseFloat(shippingRows[0]?.total || 0);
+        } catch (e) {
+            console.error('Error fetching global brand shipping total:', e);
+        }
+
         // Calculate total shipping fee acquired by this brand for this order
-        const brandShippingFee = processedItems.reduce((sum, item) => sum + (parseFloat(item.brandShippingFee) || 0), 0);
+        let brandShippingFee = processedItems.reduce((sum, item) => sum + (parseFloat(item.brandShippingFee) || 0), 0);
+        const overallShipping = parseFloat(order.shippingFee) || 0;
+
+        if (totalBrandShippingInOrder === 0 && overallShipping > 0) {
+            // Legacy fallback: Order had shipping but wasn't tracked per item. Assign overall shipping here for display.
+            brandShippingFee = overallShipping;
+        }
+
+        const itemTotal = (parseFloat(order.subtotal) || 0) + (parseFloat(order.totalDiscount) || 0);
 
         // Format the response
         const orderDetails = {
@@ -1130,9 +1147,11 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             orderStatus: order.orderStatus || 'Preparing',
             createdAt: order.createdAt,
             items: processedItems,
+            itemTotal: itemTotal,
             subtotal: parseFloat(order.subtotal) || 0,
             discount: parseFloat(order.totalDiscount) || 0,
             shipping: brandShippingFee,
+            overallShipping: parseFloat(order.shippingFee) || 0,
             total: parseFloat(order.total) || 0,
             deliveryAddress: deliveryAddress,
             couponCode: order.couponCode,

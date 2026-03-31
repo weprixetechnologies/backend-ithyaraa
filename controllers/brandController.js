@@ -92,6 +92,7 @@ const updateBrand = async (req, res) => {
         if (updateData.gstin !== undefined) mappedData.gstin = updateData.gstin || null;
         if (updateData.profilePhoto !== undefined) mappedData.profilePhoto = updateData.profilePhoto;
         if (updateData.shippingCharge !== undefined) mappedData.shippingCharge = updateData.shippingCharge;
+        if (updateData.commissionPercentage !== undefined) mappedData.commissionPercentage = updateData.commissionPercentage === '' ? null : updateData.commissionPercentage;
 
         // Don't allow updating sensitive fields
         delete mappedData.password;
