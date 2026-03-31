@@ -1361,6 +1361,7 @@ async function searchProducts(query) {
                 featuredImage, 
                 categories, 
                 createdAt 
+            FROM products
             WHERE (name LIKE ?  OR productID LIKE ?)
             AND status != 'deleted'
             ORDER BY 
@@ -1374,11 +1375,10 @@ async function searchProducts(query) {
         `;
 
         const [rows] = await db.query(searchQuery, [
-            searchTerm,
-            searchTerm,
-            searchTerm,
+            searchTerm, // name LIKE ?
+            searchTerm, // productID LIKE ?
             startMatch, // Exact start match gets highest priority
-            searchTerm
+            searchTerm  // Contains match gets priority 2
         ]);
 
         return {
