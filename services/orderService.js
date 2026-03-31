@@ -371,9 +371,9 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
                 item.offerID === '';
 
             // Eligible only when:
-            // - Variable product
+            // - Not a combo or make_combo product
             // - Not under any offer (offerID === null/undefined/"")
-            if (hasNoOffer && item.type === 'variable') {
+            if (hasNoOffer && item.productType !== 'combo' && item.productType !== 'make_combo') {
                 subtotal += lineBefore;
             }
         });
@@ -389,15 +389,15 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
         if (subtotal === 0) {
             return {
                 success: false,
-                message: 'No eligible products found for this coupon. Coupons can only be applied to variable products without offers.'
+                message: 'No eligible products found for this coupon. Coupons cannot be applied to combo products, make_combo products, or products with existing offers.'
             };
         }
 
         // Minimum order value (minOrderValue: NULL = no minimum) - based on eligible subtotal only
         const minOrder = coupon.minOrderValue != null ? Number(coupon.minOrderValue) : null;
         console.log('Order minOrderValue from DB:', minOrder);
-        if (minOrder != null && minOrder > 0 && subtotal < minOrder) {
-            console.log('Order coupon rejected due to minOrderValue. eligible subtotal:', subtotal);
+        if (minOrder != null && minOrder > 0 && orderSubtotal < minOrder) {
+            console.log('Order coupon rejected due to minOrderValue. orderSubtotal:', orderSubtotal);
             return {
                 success: false,
                 message: `Minimum order value of ₹${minOrder} required for this coupon`

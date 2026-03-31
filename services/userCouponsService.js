@@ -47,7 +47,7 @@ async function applyCouponToCart(couponCode, cartID, uid = null) {
             item.offerID === undefined ||
             item.offerID === '';
 
-        if (hasNoOffer && item.type === 'variable') {
+        if (hasNoOffer && item.productType !== 'combo' && item.productType !== 'make_combo') {
             subtotal += lineBefore;
             eligibleItemsCount++;
         }
@@ -87,8 +87,8 @@ async function applyCouponToCart(couponCode, cartID, uid = null) {
     // Minimum order value (backend enforcement) - based on eligible subtotal only
     const minOrder = coupon.minOrderValue != null ? Number(coupon.minOrderValue) : null;
     console.log('Cart minOrderValue from DB:', minOrder);
-    if (minOrder != null && minOrder > 0 && subtotal < minOrder) {
-        console.log('Cart coupon rejected due to minOrderValue. eligible subtotal:', subtotal);
+    if (minOrder != null && minOrder > 0 && orderSubtotal < minOrder) {
+        console.log('Cart coupon rejected due to minOrderValue. orderSubtotal:', orderSubtotal);
         throw new Error(`Minimum order value of ₹${minOrder} required for this coupon`);
     }
 
