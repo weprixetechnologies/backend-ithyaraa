@@ -59,7 +59,9 @@ const affiliateAdminRouter = require('./router/admin/affiliateAdminRouter')
 const publicFaqRouter = require('./router/publicFaqRouter')
 const reelsRouter = require('./router/reelsRouter')
 const reelsAdminRouter = require('./router/admin/reelsAdminRouter')
+const flashSalePublicRouter = require('./router/flashSalePublicRouter')
 const cacheAdminRouter = require('./router/admin/cacheAdminRouter')
+
 
 // Support Routes
 const userSupportRouter = require('./router/userSupportRouter')
@@ -111,7 +113,9 @@ app.use('/api/phonepe', phonepeRouter)
 app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
+app.use('/api/flash-sale-products', flashSalePublicRouter)
 app.use('/api/homepage-sections', homepageSectionsRouter)
+
 app.use('/api/slider-banners', sliderBannersRouter)
 app.use('/api/newsletter', newsletterRouter)
 app.use('/api/home-categories', homeCategoryRouter)

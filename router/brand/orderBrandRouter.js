@@ -1062,9 +1062,15 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
         const { id } = req.params;
         const brandID = req.user.uid; // Get brandID from JWT token
 
-        // Get order items for this brand (include return status and return AWB for return-initiated items)
+        // Get order items for this brand (include variation details, custom inputs, and product info)
         const itemsQuery = `
-            SELECT oi.orderItemID, oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl, oi.createdAt, oi.brandShippingFee FROM order_items oi WHERE oi.orderID = ? AND oi.brandID = ?
+            SELECT oi.orderItemID, oi.orderID, oi.uid, oi.name, oi.quantity, oi.unitPriceAfter, oi.lineTotalAfter, oi.featuredImage, oi.variationName, oi.variationID, oi.trackingCode, oi.deliveryCompany, oi.itemStatus, oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl, oi.replacementOrderID, oi.createdAt, oi.brandShippingFee, oi.custom_inputs, oi.comboID,
+            v.variationName AS fullVariationName, v.variationValues, v.variationPrice, v.variationStock, v.variationSalePrice,
+            p.type AS productType, p.custom_inputs AS productCustomInputs
+            FROM order_items oi 
+            LEFT JOIN variations v ON oi.variationID = v.variationID
+            LEFT JOIN products p ON oi.productID = p.productID
+            WHERE oi.orderID = ? AND oi.brandID = ?
             ORDER BY oi.createdAt ASC
         `;
 
@@ -1084,10 +1090,34 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
         const [orderResult] = await db.query(orderQuery, [id]);
         const order = orderResult[0];
 
-        // Parse featuredImage for each item
-        const processedItems = items.map(item => ({
-            ...item,
-            featuredImage: item.featuredImage ? JSON.parse(item.featuredImage) : [{ imgUrl: '/placeholder-product.jpg' }]
+        // Process each item (parse JSON fields and fetch combo items)
+        const processedItems = await Promise.all(items.map(async (item) => {
+            const processedItem = {
+                ...item,
+                featuredImage: item.featuredImage ? JSON.parse(item.featuredImage) : [{ imgUrl: '/placeholder-product.jpg' }]
+            };
+
+            // If it's a combo product, fetch its components
+            if (item.comboID) {
+                try {
+                    const comboItemsQuery = `
+                        SELECT ci.name, ci.quantity, ci.featuredImage, v.variationName, v.variationValues
+                        FROM combo_items ci
+                        LEFT JOIN variations v ON ci.variationID = v.variationID
+                        WHERE ci.comboID = ?
+                    `;
+                    const [comboDetails] = await db.query(comboItemsQuery, [item.comboID]);
+                    processedItem.comboItems = comboDetails.map(ci => ({
+                        ...ci,
+                        featuredImage: ci.featuredImage ? JSON.parse(ci.featuredImage) : [{ imgUrl: '/placeholder-product.jpg' }]
+                    }));
+                } catch (err) {
+                    console.error("Error fetching combo items for brand detail:", err);
+                    processedItem.comboItems = [];
+                }
+            }
+
+            return processedItem;
         }));
 
         // Get address details
@@ -1136,7 +1166,9 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             brandShippingFee = overallShipping;
         }
 
-        const itemTotal = (parseFloat(order.subtotal) || 0) + (parseFloat(order.totalDiscount) || 0);
+        // Calculate brand-specific totals (Item Total = Regular Price, Subtotal = Discounted/LineTotalAfter)
+        const itemTotal = processedItems.reduce((sum, item) => sum + (Number(item.regularPrice) || 0) * (Number(item.quantity) || 1), 0);
+        const subtotal = processedItems.reduce((sum, item) => sum + (Number(item.lineTotalAfter) || 0), 0);
 
         // Format the response
         const orderDetails = {
@@ -1148,8 +1180,8 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             createdAt: order.createdAt,
             items: processedItems,
             itemTotal: itemTotal,
-            subtotal: parseFloat(order.subtotal) || 0,
-            discount: parseFloat(order.totalDiscount) || 0,
+            subtotal: subtotal,
+            discount: itemTotal - subtotal,
             shipping: brandShippingFee,
             overallShipping: parseFloat(order.shippingFee) || 0,
             total: parseFloat(order.total) || 0,
@@ -1315,6 +1347,10 @@ orderBrandRouter.put('/orders/:id/items-tracking', authBrandMiddleware.verifyAcc
                 newReturnStatus = String(it.returnStatus);
                 params.push(newReturnStatus);
             }
+            if (it.returnType !== undefined) {
+                updates.push('returnType = ?');
+                params.push(it.returnType ?? null);
+            }
 
             if (updates.length === 0) continue;
 
@@ -1412,6 +1448,48 @@ orderBrandRouter.put('/orders/:id/items-tracking', authBrandMiddleware.verifyAcc
     } catch (error) {
         console.error('Error updating item tracking info:', error);
         res.status(500).json({ success: false, message: 'Failed to update tracking info', error: error.message });
+    }
+});
+
+// POST /api/brand/orders/approve-return/:orderItemID - Approve return request
+orderBrandRouter.post('/orders/approve-return/:orderItemID', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const { orderItemID } = req.params;
+        const brandID = req.user.uid;
+        const orderService = require('../../services/orderService');
+
+        // Verify ownership
+        const [verify] = await db.query('SELECT 1 FROM order_items WHERE orderItemID = ? AND brandID = ?', [orderItemID, brandID]);
+        if (verify.length === 0) {
+            return res.status(403).json({ success: false, message: 'Unauthorized or item not found' });
+        }
+
+        const result = await orderService.approveReturnRequest(orderItemID, 'approve');
+        res.json(result);
+    } catch (error) {
+        console.error('Error approving return:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// POST /api/brand/orders/reject-return/:orderItemID - Reject return request
+orderBrandRouter.post('/orders/reject-return/:orderItemID', authBrandMiddleware.verifyAccessToken, async (req, res) => {
+    try {
+        const { orderItemID } = req.params;
+        const brandID = req.user.uid;
+        const orderService = require('../../services/orderService');
+
+        // Verify ownership
+        const [verify] = await db.query('SELECT 1 FROM order_items WHERE orderItemID = ? AND brandID = ?', [orderItemID, brandID]);
+        if (verify.length === 0) {
+            return res.status(403).json({ success: false, message: 'Unauthorized or item not found' });
+        }
+
+        const result = await orderService.approveReturnRequest(orderItemID, 'reject');
+        res.json(result);
+    } catch (error) {
+        console.error('Error rejecting return:', error);
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 

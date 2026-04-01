@@ -223,11 +223,15 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
             const referrerUser = referrerUsers[0];
 
             if (referrerUser) {
-                // Calculate total commission for this referrer (10% of item amounts)
+                // Calculate total commission for this referrer (dynamic % or 10% default)
                 let totalCommission = 0;
+                const commissionRate = (referrerUser.commissionPercentage != null) 
+                    ? (Number(referrerUser.commissionPercentage) / 100) 
+                    : 0.10;
+                
                 for (const item of cartData.items) {
                     const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
-                    totalCommission += itemAmount * 0.10;
+                    totalCommission += itemAmount * commissionRate;
                 }
 
                 if (totalCommission > 0) {
@@ -268,11 +272,15 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                 const assignedUser = await usersModel.findUserByEmail(assignedUserEmail);
 
                 if (assignedUser && assignedUser.uid && !creditedUsers.has(assignedUser.uid)) {
-                    // 20% of order total (after discount)
+                    // Dynamic commission based on user settings (default 20%)
                     const orderTotal = Number(finalSummary.total) || 0;
                     console.log('Order total:', orderTotal);
 
-                    const commission = Math.round(orderTotal * 0.20 * 100) / 100;
+                    const commissionRate = (assignedUser.commissionPercentage != null)
+                        ? (Number(assignedUser.commissionPercentage) / 100)
+                        : 0.20;
+
+                    const commission = Math.round(orderTotal * commissionRate * 100) / 100;
                     console.log('Commission:', commission);
 
 
@@ -458,14 +466,19 @@ async function getOrderDetailsByOrderID(orderID, uid) {
         orderDetail.handlingFee = orderDetail.handlingFee ? Boolean(Number(orderDetail.handlingFee)) : false;
         orderDetail.handFeeRate = Number(orderDetail.handFeeRate) || 0;
 
-        // Calculate historical itemTotal: based strictly on (regularPrice * quantity)
-        // or effectively subtotal + discount to keep it simple and accurate.
-        // It reflects the total value before any overall order level discount.
-        orderDetail.itemTotal = (Number(orderDetail.subtotal) || 0) + (Number(orderDetail.totalDiscount) || 0);
+        // Calculate itemTotal (Regular Price sum) and subtotal (Discounted sum)
+        const itemTotal = items.reduce((sum, item) => sum + (Number(item.regularPrice) || 0) * (Number(item.quantity) || 1), 0);
+        const subtotal = items.reduce((sum, item) => sum + (Number(item.lineTotalAfter) || 0), 0);
+        const couponDiscount = Number(orderDetail.couponDiscount) || 0;
 
-        // Calculate shipping breakdown
+        orderDetail.itemTotal = itemTotal;
+        orderDetail.subtotal = subtotal;
+        orderDetail.totalDiscount = (itemTotal - subtotal) + couponDiscount;
+
+        // Calculate shipping breakdown and overall brand shipping total
         const shippingBreakdownMap = new Map();
         let inhouseShipping = 0;
+        let totalCalculatedShipping = 0;
 
         // Fetch brand names if we have any brand IDs
         const uniqueBrandIDs = [...new Set(items.filter(i => i.brandID).map(i => i.brandID))];
@@ -492,6 +505,7 @@ async function getOrderDetailsByOrderID(orderID, uid) {
                         brandName: brandNameMap.get(item.brandID) || 'Unknown Brand',
                         fee: fee
                     });
+                    totalCalculatedShipping += fee;
                 }
             } else if (!item.brandID && fee > 0) {
                 // Inhouse or combo item shipping fee
@@ -506,9 +520,15 @@ async function getOrderDetailsByOrderID(orderID, uid) {
                 brandName: 'Inhouse',
                 fee: inhouseShipping
             });
+            totalCalculatedShipping += inhouseShipping;
         }
 
         orderDetail.shippingBreakdown = shippingBreakdown;
+
+        // If stored shippingFee is 0 but we have a calculated breakdown total, use that
+        if ((Number(orderDetail.shippingFee) || 0) === 0 && totalCalculatedShipping > 0) {
+            orderDetail.shippingFee = totalCalculatedShipping;
+        }
     }
 
     return { items, orderDetail };
@@ -544,7 +564,9 @@ async function getOrderDetails(orderId, uid) {
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
-                    oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
+                    oi.brandID, oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos,
+                    oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
+                    p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
                     u.username AS brandName
@@ -650,7 +672,15 @@ async function getOrderDetails(orderId, uid) {
                 comboItems: processedComboItems,
                 variation: fullVariation,
                 brandID: item.brandID,
-                brandName: brandName
+                brandName: brandName,
+                returnStatus: item.returnStatus || 'none',
+                returnType: item.returnType || null,
+                returnReason: item.returnReason || null,
+                returnComments: item.returnComments || null,
+                returnPhotos: item.returnPhotos || null,
+                returnTrackingCode: item.returnTrackingCode || null,
+                returnDeliveryCompany: item.returnDeliveryCompany || null,
+                replacementOrderID: item.replacementOrderID || null
             });
         }
 
@@ -1063,7 +1093,8 @@ async function getAdminOrderDetails(orderId) {
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
-                    oi.returnStatus, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
+                    oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos,
+                    oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
                     oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
@@ -1165,6 +1196,10 @@ async function getAdminOrderDetails(orderId) {
                 deliveryCompany: item.deliveryCompany || null,
                 itemStatus: item.itemStatus || 'pending',
                 returnStatus: item.returnStatus || 'none',
+                returnType: item.returnType || null,
+                returnReason: item.returnReason || null,
+                returnComments: item.returnComments || null,
+                returnPhotos: item.returnPhotos || null,
                 returnTrackingCode: item.returnTrackingCode || null,
                 returnDeliveryCompany: item.returnDeliveryCompany || null,
                 replacementOrderID: item.replacementOrderID || null,
@@ -1212,24 +1247,63 @@ async function getAdminOrderDetails(orderId) {
             }
         }
 
+        // Calculate itemTotal (Regular Price sum) and subtotal (Discounted sum) from item-level line totals
+        const itemTotal = processedItems.reduce((sum, item) => sum + (Number(item.regularPrice) || 0) * (Number(item.quantity) || 1), 0);
+        const subtotal = processedItems.reduce((sum, item) => sum + (Number(item.lineTotalAfter) || 0), 0);
+        const couponDiscount = Number(order.couponDiscount) || 0;
+
+        // Calculate shipping breakdown and overall brand shipping total
+        const shippingBreakdownMap = new Map();
+        let inhouseShipping = 0;
+        let totalCalculatedShipping = 0;
+
+        processedItems.forEach(item => {
+            const fee = Number(item.brandShippingFee) || 0;
+            if (item.brandID && fee > 0) {
+                if (!shippingBreakdownMap.has(item.brandID)) {
+                    shippingBreakdownMap.set(item.brandID, {
+                        brandID: item.brandID,
+                        brandName: item.brandName || 'Unknown Brand',
+                        fee: fee
+                    });
+                    totalCalculatedShipping += fee;
+                }
+            } else if (!item.brandID && fee > 0) {
+                // Inhouse or combo item shipping fee
+                inhouseShipping = Math.max(inhouseShipping, fee);
+            }
+        });
+
+        const shippingBreakdown = Array.from(shippingBreakdownMap.values());
+        if (inhouseShipping > 0) {
+            shippingBreakdown.push({
+                brandID: 'inhouse',
+                brandName: 'Inhouse',
+                fee: inhouseShipping
+            });
+            totalCalculatedShipping += inhouseShipping;
+        }
+
         // Format the response
         const orderDetails = {
             orderID: order.orderID,
             uid: order.uid,
             paymentMode: order.paymentMode,
             paymentStatus: order.paymentStatus || 'successful',
-            orderStatus: order.orderStatus || 'Preparing', // Use orderStatus instead of status
+            orderStatus: order.orderStatus || 'Preparing',
             createdAt: order.createdAt,
             items: processedItems,
-            subtotal: parseFloat(order.subtotal) || 0,
-            discount: parseFloat(order.totalDiscount) || 0,
-            shipping: 0, // Shipping is not stored separately in current schema
+            itemTotal: itemTotal,
+            subtotal: subtotal,
+            discount: (itemTotal - subtotal) + couponDiscount,
+            shipping: (Number(order.shippingFee) || 0) || totalCalculatedShipping,
             total: parseFloat(order.total) || 0,
             deliveryAddress: deliveryAddress,
             couponCode: order.couponCode,
-            couponDiscount: parseFloat(order.couponDiscount) || 0,
+            couponDiscount: couponDiscount,
             handlingFee: order.handlingFee ? Boolean(Number(order.handlingFee)) : false,
-            handFeeRate: parseFloat(order.handFeeRate) || 0
+            handFeeRate: parseFloat(order.handFeeRate) || 0,
+            shippingBreakdown: shippingBreakdown
         };
 
         return orderDetails;
@@ -1374,8 +1448,8 @@ async function emailInvoiceToCustomer(orderId, uid) {
     }
 }
 
-// Partial return: validate 7-day window, replacement or refund_query, coin/affiliate reversal, order status
-async function returnOrder(uid, { orderID, orderItemID = null, reason = null }) {
+// Partial return: validate 7-day window, submit request for 'return_approval'
+async function returnOrder(uid, { orderID, orderItemID = null, returnType = 'replacement', returnReason = null, returnComments = null, returnPhotos = null }) {
     const orderModel = require('../model/orderModel');
     const refundQueryModel = require('../model/refundQueryModel');
 
@@ -1413,162 +1487,258 @@ async function returnOrder(uid, { orderID, orderItemID = null, reason = null }) 
     }
 
     const orderTotal = Number(order.total) || 0;
-    const refundPendingIds = [];
-    const itemsForReturnInitiatedEmail = [];
-    const itemsForRefundPendingEmail = [];
+    
+    const returnTypeStr = String(returnType).toLowerCase();
+    const isReplacement = returnTypeStr === 'replacement';
+    const approvalStatus = isReplacement ? 'replacement_approval' : 'refund_approval';
 
     for (const item of targetItems) {
-        const qty = Number(item.quantity) || 1;
-        const stock = item.variationID ? await orderModel.getVariationStock(item.variationID) : null;
-        const hasStock = stock != null && stock >= qty;
+        const returnUpdate = {
+            returnRequestedAt: new Date(),
+            returnType: returnTypeStr,
+            returnReason: returnReason,
+            returnComments: returnComments,
+            returnPhotos: typeof returnPhotos === 'string' ? returnPhotos : JSON.stringify(returnPhotos || [])
+        };
 
-        if (hasStock) {
-            const connection = await db.getConnection();
-            try {
-                await connection.beginTransaction();
-                if (!order.addressID) {
-                    throw new Error('Order address not found; cannot create replacement order');
-                }
-                const replacementOrderID = await orderModel.createReplacementOrder(connection, {
-                    uid: order.uid,
-                    addressID: order.addressID,
-                    items: [{
-                        productID: item.productID,
-                        quantity: item.quantity,
-                        variationID: item.variationID,
-                        variationName: item.variationName,
-                        name: item.name,
-                        featuredImage: item.featuredImage,
-                        brandID: item.brandID
-                    }]
-                });
-                await orderModel.updateOrderItemReturnStatus(
-                    item.orderItemID,
-                    {
-                        returnStatus: 'return_initiated',
-                        returnRequestedAt: new Date(),
-                        replacementOrderID
-                    },
-                    connection
-                );
-                await connection.commit();
-                itemsForReturnInitiatedEmail.push(item);
+        // Create a central "Return Query" row for the admin Return Queries page
+        const rq = await refundQueryModel.createRefundQuery({
+            orderID: order.orderID,
+            orderItemID: item.orderItemID,
+            productID: item.productID,
+            userID: String(order.uid),
+            brandID: item.brandID,
+            reason: returnReason || 'Requested by customer',
+            status: approvalStatus,
+            returnType: returnTypeStr,
+            comments: returnComments,
+            photos: returnUpdate.returnPhotos
+        });
 
-                // Settlement Hook: Record 'replacement_original' (Wait for admin Phase 1 credit)
-                const sResultOriginal = await settlementService.recordEvent({
-                    orderItemID: item.orderItemID,
-                    event: 'replacement_original',
-                    effect: 'hold', // Changed from 'debit' to 'hold' so it stays as eligible for Phase 1 credit
-                    notes: `Replacement initiated (Replacement Order: ${replacementOrderID}). Waiting for admin confirmation.`
-                });
-                if (!sResultOriginal.success) {
-                    await settlementService.logFailure(item.orderItemID, 'replacement_original', { replacementOrderID }, sResultOriginal.error);
-                }
-
-                // Settlement Hook: Record 'replacement_item' (Neutral) for the new item
-                const [newItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [replacementOrderID]);
-                for (const ni of newItems) {
-                    const sResultItem = await settlementService.recordEvent({
-                        orderItemID: ni.orderItemID,
-                        event: 'replacement_item',
-                        effect: 'neutral',
-                        notes: `Replacement item for item ${item.orderItemID}`,
-                        relatedOrderItemId: item.orderItemID // Track back to original
-                    });
-                    if (!sResultItem.success) {
-                        await settlementService.logFailure(ni.orderItemID, 'replacement_item', { originalItemID: item.orderItemID }, sResultItem.error);
-                    }
-                }
-            } catch (e) {
-                await connection.rollback();
-                throw e;
-            } finally {
-                connection.release();
-            }
-        } else {
-            const rq = await refundQueryModel.createRefundQuery({
-                orderID,
-                orderItemID: item.orderItemID,
-                productID: item.productID,
-                userID: String(uid),
-                brandID: item.brandID,
-                reason: reason || null
-            });
-            await orderModel.updateOrderItemReturnStatus(item.orderItemID, {
-                returnStatus: 'refund_pending',
-                returnRequestedAt: new Date(),
-                refundQueryID: rq.refundQueryID
-            });
-            refundPendingIds.push(item.orderItemID);
-            itemsForRefundPendingEmail.push(item);
-        }
-    }
-
-    try {
-        const [userRows] = await db.query('SELECT emailID, name, username FROM users WHERE uid = ? LIMIT 1', [order.uid]);
-        const user = userRows && userRows[0] ? userRows[0] : null;
-        const customerName = (user && (user.name || user.username)) || 'Customer';
-        const toEmail = user && user.emailID ? user.emailID : null;
-        if (toEmail) {
-            for (const item of itemsForReturnInitiatedEmail) {
-                await queueOrderStatusEmail({
-                    to: toEmail,
-                    customerName,
-                    orderID,
-                    itemName: item.name || 'Item',
-                    variationName: item.variationName || '',
-                    statusType: 'return_initiated'
-                });
-            }
-            for (const item of itemsForRefundPendingEmail) {
-                await queueOrderStatusEmail({
-                    to: toEmail,
-                    customerName,
-                    orderID,
-                    itemName: item.name || 'Item',
-                    variationName: item.variationName || '',
-                    statusType: 'refund_pending'
-                });
-            }
-        }
-    } catch (emailErr) {
-        console.error('[Return] Error queueing status emails:', emailErr);
-    }
-
-    for (const item of targetItems) {
-        const coins = Number(item.earnedCoins) || 0;
-        if (coins > 0 && !item.coinsReversed) {
-            try {
-                const revResult = await coinModel.reverseEarnedCoinsForItem(uid, orderID, item.orderItemID, coins);
-                if (revResult && revResult.success) {
-                    await db.query('UPDATE order_items SET coinsReversed = 1 WHERE orderItemID = ?', [item.orderItemID]);
-                }
-            } catch (e) {
-                console.error('[Return] Coin reversal error for item', item.orderItemID, e);
-            }
-        }
-        const referBy = item.referBy && String(item.referBy).trim();
-        if (referBy && orderTotal > 0) {
-            try {
-                await affiliateModel.deductAffiliateEarningsForReturnedItem(
-                    orderID,
-                    item.orderItemID,
-                    Number(item.lineTotalAfter) || 0,
-                    orderTotal,
-                    referBy
-                );
-            } catch (e) {
-                console.error('[Return] Affiliate deduction error for item', item.orderItemID, e);
-            }
-        }
+        await orderModel.updateOrderItemReturnStatus(item.orderItemID, {
+            ...returnUpdate,
+            returnStatus: approvalStatus,
+            refundQueryID: rq.refundQueryID
+        });
     }
 
     await orderModel.recomputeOrderStatusFromReturnItems(orderID);
 
-    const message = refundPendingIds.length > 0
-        ? 'Return requested. Some items could not be replaced; our executive will contact you for refund.'
-        : 'Return request submitted successfully.';
-    return { success: true, message, refundPending: refundPendingIds.length > 0 };
+    return { 
+        success: true, 
+        message: 'Return request submitted for approval. Our team will review it shortly.',
+        status: approvalStatus
+    };
+}
+
+// Approve/Reject a return request of an item
+async function approveReturnRequest(orderItemID, action = 'approve') {
+    const orderModel = require('../model/orderModel');
+    const refundQueryModel = require('../model/refundQueryModel');
+    const coinModel = require('../model/coinModel');
+    const affiliateModel = require('../model/affiliateModel');
+    const settlementService = require('../services/settlementService');
+    const { queueOrderStatusEmail } = require('../services/orderStatusEmailService');
+
+    const [itemRows] = await db.query('SELECT * FROM order_items WHERE orderItemID = ?', [orderItemID]);
+    const item = itemRows && itemRows[0] ? itemRows[0] : null;
+    if (!item) throw new Error('Order item not found');
+    
+    const validApprovalStates = ['return_approval', 'replacement_approval', 'refund_approval'];
+    if (!validApprovalStates.includes(item.returnStatus)) {
+        throw new Error('This item is not in an approval pending state');
+    }
+
+    if (action === 'reject') {
+        await orderModel.updateOrderItemReturnStatus(orderItemID, { returnStatus: 'returnRejected' });
+        if (item.refundQueryID) {
+            await refundQueryModel.resolveRefundQuery(item.refundQueryID, 'rejected');
+        }
+        return { success: true, message: 'Return request rejected' };
+    }
+
+    // Action === 'approve'
+    const returnType = item.returnType || 'replacement';
+    const orderID = item.orderID;
+    const uid = item.uid;
+
+    const order = await orderModel.getOrderByID(orderID);
+    if (!order) throw new Error('Order not found');
+
+    if (returnType === 'replacement') {
+        const stock = await orderModel.getVariationStock(item.variationID);
+        const hasStock = stock != null && stock >= item.quantity;
+        if (!hasStock) {
+            // Fallback to refund if no stock
+            await processRefundRequest(item, order, {}, 'No stock available for replacement');
+            return { success: true, message: 'Approved. No stock found, initiated refund query instead.' };
+        } else {
+            await processReplacementRequest(item, order);
+            return { success: true, message: 'Approved. Replacement order initiated.' };
+        }
+    } else {
+        // Refund
+        await processRefundRequest(item, order, {});
+        return { success: true, message: 'Approved. Refund query initiated.' };
+    }
+}
+
+// Internal Helper: Process replacement initiation
+async function processReplacementRequest(item, order, extraUpdates = {}) {
+    const orderModel = require('../model/orderModel');
+    const settlementService = require('../services/settlementService');
+    const { queueOrderStatusEmail } = require('../services/orderStatusEmailService');
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        if (!order.addressID) throw new Error('Order address not found');
+
+        const replacementOrderID = await orderModel.createReplacementOrder(connection, {
+            uid: order.uid,
+            addressID: order.addressID,
+            items: [{
+                productID: item.productID,
+                quantity: item.quantity,
+                variationID: item.variationID,
+                variationName: item.variationName,
+                name: item.name,
+                featuredImage: item.featuredImage,
+                brandID: item.brandID
+            }]
+        });
+
+        await orderModel.updateOrderItemReturnStatus(
+            item.orderItemID,
+            {
+                returnStatus: 'return_initiated',
+                replacementOrderID,
+                ...extraUpdates
+            },
+            connection
+        );
+        await connection.commit();
+
+        // Settlement Hooks
+        await settlementService.recordEvent({
+            orderItemID: item.orderItemID,
+            event: 'replacement_original',
+            effect: 'hold',
+            notes: `Replacement initiated (Replacement Order: ${replacementOrderID}).`
+        });
+
+        const [newItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [replacementOrderID]);
+        for (const ni of newItems) {
+            await settlementService.recordEvent({
+                orderItemID: ni.orderItemID,
+                event: 'replacement_item',
+                effect: 'neutral',
+                notes: `Replacement item for item ${item.orderItemID}`,
+                relatedOrderItemId: item.orderItemID
+            });
+        }
+
+        // Reversal (Coins/Affiliate)
+        await performReversals(item, order);
+
+        // Move to resolved query table
+        const refundQueryModel = require('../model/refundQueryModel');
+        if (item.refundQueryID) {
+            await refundQueryModel.resolveRefundQuery(item.refundQueryID, 'approved');
+        }
+
+        // Email
+        const [userRows] = await db.query('SELECT emailID, name, username FROM users WHERE uid = ? LIMIT 1', [order.uid]);
+        if (userRows?.[0]?.emailID) {
+            await queueOrderStatusEmail({
+                to: userRows[0].emailID,
+                customerName: userRows[0].name || userRows[0].username || 'Customer',
+                orderID: order.orderID,
+                itemName: item.name,
+                variationName: item.variationName || '',
+                statusType: 'return_initiated'
+            });
+        }
+    } catch (e) {
+        await connection.rollback();
+        throw e;
+    } finally {
+        connection.release();
+    }
+}
+
+// Internal Helper: Process refund initiation
+async function processRefundRequest(item, order, extraUpdates = {}, autoReason = null) {
+    const orderModel = require('../model/orderModel');
+    const refundQueryModel = require('../model/refundQueryModel');
+    const { queueOrderStatusEmail } = require('../services/orderStatusEmailService');
+
+    let refundQueryID = item.refundQueryID;
+    if (refundQueryID) {
+        await refundQueryModel.resolveRefundQuery(refundQueryID, 'approved');
+    } else {
+        const rq = await refundQueryModel.createRefundQuery({
+            orderID: order.orderID,
+            orderItemID: item.orderItemID,
+            productID: item.productID,
+            userID: String(order.uid),
+            brandID: item.brandID,
+            reason: autoReason || item.returnReason || 'Requested by customer',
+            status: 'pending'
+        });
+        refundQueryID = rq.refundQueryID;
+    }
+
+    await orderModel.updateOrderItemReturnStatus(item.orderItemID, {
+        returnStatus: 'return_initiated',
+        refundQueryID: refundQueryID,
+        ...extraUpdates
+    });
+
+    // Reversal (Coins/Affiliate)
+    await performReversals(item, order);
+
+    // Email
+    const [userRows] = await db.query('SELECT emailID, name, username FROM users WHERE uid = ? LIMIT 1', [order.uid]);
+    if (userRows?.[0]?.emailID) {
+        await queueOrderStatusEmail({
+            to: userRows[0].emailID,
+            customerName: userRows[0].name || userRows[0].username || 'Customer',
+            orderID: order.orderID,
+            itemName: item.name || 'Item',
+            variationName: item.variationName || '',
+            statusType: 'refund_pending'
+        });
+    }
+}
+
+// Internal Helper: Perform reversals
+async function performReversals(item, order) {
+    const coinModel = require('../model/coinModel');
+    const affiliateModel = require('../model/affiliateModel');
+
+    const coins = Number(item.earnedCoins) || 0;
+    if (coins > 0 && !item.coinsReversed) {
+        try {
+            const revResult = await coinModel.reverseEarnedCoinsForItem(order.uid, order.orderID, item.orderItemID, coins);
+            if (revResult && revResult.success) {
+                await db.query('UPDATE order_items SET coinsReversed = 1 WHERE orderItemID = ?', [item.orderItemID]);
+            }
+        } catch (e) { console.error('[Reversal] Coin error:', e); }
+    }
+    const referBy = item.referBy && String(item.referBy).trim();
+    const orderTotal = Number(order.total) || 0;
+    if (referBy && orderTotal > 0) {
+        try {
+            await affiliateModel.deductAffiliateEarningsForReturnedItem(
+                order.orderID,
+                item.orderItemID,
+                Number(item.lineTotalAfter) || 0,
+                orderTotal,
+                referBy
+            );
+        } catch (e) { console.error('[Reversal] Affiliate error:', e); }
+    }
 }
 
 module.exports.getAdminOrderDetails = getAdminOrderDetails;
@@ -1579,6 +1749,7 @@ module.exports.updatePaymentStatus = updatePaymentStatus;
 module.exports.generateInvoice = generateInvoice;
 module.exports.emailInvoice = emailInvoice;
 module.exports.emailInvoiceToCustomer = emailInvoiceToCustomer;
+module.exports.approveReturnRequest = approveReturnRequest;
 
 // HELPER FUNCTIONS
 

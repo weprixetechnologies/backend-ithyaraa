@@ -21,7 +21,10 @@ router.post('/email-invoice/:orderId', userAuth.verifyAccessToken, orderControll
 router.get('/admin/all', authAdminMiddleware.verifyAccessToken, orderController.getAllOrdersController);
 router.get('/admin/order-details/:orderId', authAdminMiddleware.verifyAccessToken, orderController.getAdminOrderDetailsController);
 router.get('/admin/refund-queries', authAdminMiddleware.verifyAccessToken, orderController.getRefundQueriesController);
+router.get('/admin/refund-queries-resolved', authAdminMiddleware.verifyAccessToken, orderController.getResolvedRefundQueriesController);
 router.put('/admin/refund-queries/:refundQueryID/status', authAdminMiddleware.verifyAccessToken, orderController.updateRefundQueryStatusController);
+router.post('/admin/approve-return/:orderItemID', authAdminMiddleware.verifyAccessToken, orderController.approveReturnRequestController);
+router.post('/admin/reject-return/:orderItemID', authAdminMiddleware.verifyAccessToken, orderController.rejectReturnRequestController);
 router.put('/admin/update-status/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updateOrderStatusController);
 router.put('/admin/update-payment-status/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updatePaymentStatusController);
 router.put('/admin/update-items-tracking/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updateOrderItemsTrackingController);

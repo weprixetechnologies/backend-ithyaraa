@@ -140,6 +140,33 @@ const getTransactionStatuses = async (req, res) => {
     }
 };
 
+// PUT /admin/affiliates/:uid/commission - Update affiliate commission percentage (admin only)
+const updateCommissionPercentage = async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { commissionPercentage } = req.body;
+        if (!uid || commissionPercentage == null) {
+            return res.status(400).json({ success: false, error: 'uid and commissionPercentage are required' });
+        }
+        
+        const usersService = require('../services/usersService');
+        const updatedUser = await usersService.updateUserByuid(uid, { commissionPercentage: parseFloat(commissionPercentage) });
+        
+        if (!updatedUser) {
+            return res.status(404).json({ success: false, error: 'User not found or update failed' });
+        }
+        
+        return res.status(200).json({
+            success: true,
+            message: 'Commission percentage updated successfully',
+            data: { commissionPercentage: updatedUser.commissionPercentage }
+        });
+    } catch (error) {
+        console.error('updateCommissionPercentage error:', error);
+        return res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
 module.exports = {
     listAffiliates,
     getAffiliateByUid,
@@ -147,5 +174,6 @@ module.exports = {
     rejectAffiliate,
     updateTransactionStatus,
     createManualTransaction,
-    getTransactionStatuses
+    getTransactionStatuses,
+    updateCommissionPercentage
 };

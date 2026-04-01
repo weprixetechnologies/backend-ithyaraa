@@ -1,4 +1,5 @@
 const orderService = require('../services/orderService');
+const settlementService = require('../services/settlementService');
 const orderModel = require('../model/orderModel');
 const { randomUUID } = require('crypto');
 const crypto = require('crypto');
@@ -482,13 +483,23 @@ const getMyReturnsController = async (req, res) => {
     }
 };
 
-module.exports = {
-    placeOrderController,
-    getOrderItemsByUidController,
-    getOrderSummariesController,
-    getOrderDetailsByOrderIDController,
-    getMyReturnsController
+const getResolvedRefundQueriesController = async (req, res) => {
+    try {
+        const { page, limit } = req.query;
+        const refundQueryModel = require('../model/refundQueryModel');
+        const result = await refundQueryModel.getResolvedQueriesList({ page, limit });
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Get resolved refund queries error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
 };
+
+module.exports.placeOrderController = placeOrderController;
+module.exports.getOrderItemsByUidController = getOrderItemsByUidController;
+module.exports.getOrderSummariesController = getOrderSummariesController;
+module.exports.getOrderDetailsByOrderIDController = getOrderDetailsByOrderIDController;
+module.exports.getMyReturnsController = getMyReturnsController;
 
 const updateOrderController = async (req, res) => {
     try {
@@ -639,9 +650,24 @@ const returnOrderController = async (req, res) => {
     try {
         const uid = req.user?.uid;
         if (!uid) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        const { orderID, orderItemID, reason } = req.body || {};
+        const { orderID, orderItemID, returnType, returnReason, reason, returnComments, remarks, returnPhotos, photos } = req.body || {};
         if (!orderID) return res.status(400).json({ success: false, message: 'orderID is required' });
-        const result = await orderService.returnOrder(uid, { orderID, orderItemID: orderItemID || null, reason: reason || null });
+
+        console.log('[Return Request Debug] UID:', uid, 'Payload:', {
+            returnType,
+            finalReason: returnReason || reason,
+            finalComments: returnComments || remarks,
+            finalPhotos: returnPhotos || photos
+        });
+
+        const result = await orderService.returnOrder(uid, {
+            orderID,
+            orderItemID,
+            returnType: returnType || 'refund',
+            returnReason: returnReason || reason || null,
+            returnComments: returnComments || remarks || null,
+            returnPhotos: returnPhotos || photos || []
+        });
         return res.status(200).json(result);
     } catch (error) {
         console.error('Return order error:', error);
@@ -659,9 +685,10 @@ const updateOrderStatusController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' });
         }
 
-        const validStatuses = ['Preparing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
-        if (!validStatuses.includes(orderStatus)) {
-            return res.status(400).json({ success: false, message: 'Invalid order status' });
+        const validStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
+        const normalizedStatus = String(orderStatus).toLowerCase();
+        if (!validStatuses.includes(normalizedStatus)) {
+            return res.status(400).json({ success: false, message: 'Invalid order status: ' + orderStatus });
         }
 
         const updated = await orderService.updateOrderStatus(orderId, orderStatus);
@@ -687,7 +714,8 @@ const updatePaymentStatusController = async (req, res) => {
         }
 
         const validStatuses = ['pending', 'successful', 'failed', 'refunded'];
-        if (!validStatuses.includes(paymentStatus)) {
+        const normalizedStatus = String(paymentStatus).toLowerCase();
+        if (!validStatuses.includes(normalizedStatus)) {
             return res.status(400).json({ success: false, message: 'Invalid payment status' });
         }
 
@@ -878,6 +906,10 @@ const updateOrderItemsTrackingController = async (req, res) => {
                 updates.push('returnStatus = ?');
                 params.push(it.returnStatus || 'none');
             }
+            if (it.returnType !== undefined) {
+                updates.push('returnType = ?');
+                params.push(it.returnType ?? null);
+            }
             if (updates.length === 0) continue;
 
             const setClause = updates.join(', ');
@@ -985,6 +1017,26 @@ const emailInvoiceToCustomerController = async (req, res) => {
     }
 };
 
+const approveReturnRequestController = async (req, res) => {
+    try {
+        const { orderItemID } = req.params;
+        const result = await orderService.approveReturnRequest(orderItemID, 'approve');
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const rejectReturnRequestController = async (req, res) => {
+    try {
+        const { orderItemID } = req.params;
+        const result = await orderService.approveReturnRequest(orderItemID, 'reject');
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports.updateOrderController = updateOrderController;
 module.exports.getOrderDetailsController = getOrderDetailsController;
 module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
@@ -1001,3 +1053,8 @@ module.exports.emailInvoiceToCustomerController = emailInvoiceToCustomerControll
 module.exports.updateOrderItemsTrackingController = updateOrderItemsTrackingController;
 module.exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
 module.exports.sendSellerNotificationEmails = sendSellerNotificationEmails;
+module.exports.getResolvedRefundQueriesController = getResolvedRefundQueriesController;
+module.exports.approveReturnRequestController = approveReturnRequestController;
+module.exports.rejectReturnRequestController = rejectReturnRequestController;
+module.exports.approveReturnRequestController = approveReturnRequestController;
+module.exports.rejectReturnRequestController = rejectReturnRequestController;

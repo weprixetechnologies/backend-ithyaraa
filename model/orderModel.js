@@ -736,13 +736,20 @@ async function getOrderItemById(orderItemID, orderID, uid) {
     return rows[0] || null;
 }
 
-async function updateOrderItemReturnStatus(orderItemID, { returnStatus, returnRequestedAt, replacementOrderItemID, replacementOrderID, refundQueryID }, connection = null) {
+async function updateOrderItemReturnStatus(orderItemID, updates, connection = null) {
+    const { returnStatus, returnRequestedAt, replacementOrderItemID, replacementOrderID, refundQueryID, returnType, returnReason, returnComments, returnPhotos } = updates;
     const fields = ['returnStatus = ?'];
     const values = [returnStatus];
-    if (returnRequestedAt != null) { fields.push('returnRequestedAt = ?'); values.push(returnRequestedAt); }
-    if (replacementOrderItemID != null) { fields.push('replacementOrderItemID = ?'); values.push(replacementOrderItemID); }
-    if (replacementOrderID != null) { fields.push('replacementOrderID = ?'); values.push(replacementOrderID); }
-    if (refundQueryID != null) { fields.push('refundQueryID = ?'); values.push(refundQueryID); }
+    
+    if (returnRequestedAt !== undefined) { fields.push('returnRequestedAt = ?'); values.push(returnRequestedAt); }
+    if (replacementOrderItemID !== undefined) { fields.push('replacementOrderItemID = ?'); values.push(replacementOrderItemID); }
+    if (replacementOrderID !== undefined) { fields.push('replacementOrderID = ?'); values.push(replacementOrderID); }
+    if (refundQueryID !== undefined) { fields.push('refundQueryID = ?'); values.push(refundQueryID); }
+    if (returnType !== undefined) { fields.push('returnType = ?'); values.push(returnType); }
+    if (returnReason !== undefined) { fields.push('returnReason = ?'); values.push(returnReason); }
+    if (returnComments !== undefined) { fields.push('returnComments = ?'); values.push(returnComments); }
+    if (returnPhotos !== undefined) { fields.push('returnPhotos = ?'); values.push(returnPhotos); }
+    
     values.push(orderItemID);
     const conn = connection || db;
     const [result] = await conn.query(
