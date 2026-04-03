@@ -223,6 +223,7 @@ const buyNowController = async (req, res) => {
         existingAddressID,
         uid: providedUid,
         selectedDressType,
+        referBy,
     } = payload;
 
     const paymentMode = String(rawPaymentMode || 'COD').toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
@@ -1006,7 +1007,7 @@ const buyNowController = async (req, res) => {
                     couponCode || null,
                     couponDiscount,
                     shippingFee,
-                    null, // referBy (Buy Now has no affiliate referBy today)
+                    referBy || null,
                     0,    // isWalletUsed
                     0.00, // paidWallet
                     handlingFee,
@@ -1054,7 +1055,7 @@ const buyNowController = async (req, res) => {
                     featuredImage,
                     comboInstanceID || null,
                     brandID,
-                    '', // referBy
+                    referBy || '',
                     productType === 'customproduct' ? JSON.stringify(customInputs || {}) : null,
                     coinsEarned,
                 ]
