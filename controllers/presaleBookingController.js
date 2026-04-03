@@ -104,11 +104,11 @@ const placePrebookingOrderController = async (req, res) => {
 
         const merchantOrderId = randomUUID();
         // Normalize FRONTEND_URL - remove trailing slashes
-        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         const redirectUrl = `${frontendUrlBase}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
         // Use presale-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;
 
         console.log('[PRESALE] PhonePe callback URL:', callbackUrl);
@@ -574,10 +574,10 @@ async function sendPreBookingOrderConfirmationEmail(user, booking, paymentMode, 
             total: booking.bookingData.summary.total,
             isCOD: paymentMode === 'COD',
             trackOrderUrl: (() => {
-                const baseUrl = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+                const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
                 return `${baseUrl}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
             })(),
-            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
+            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:7885'
         };
 
         // Generate invoice PDF for attachment

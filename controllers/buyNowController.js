@@ -863,18 +863,6 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            // assignedUser is an email or admin; ignore if set to admin address
-            if (coupon.assignedUser && coupon.assignedUser !== 'admin@ithyaraa.com') {
-                const email = userRow?.emailID || guestDetails?.email || addressPayload?.emailID;
-                if (!email || email !== coupon.assignedUser) {
-                    await connection.rollback();
-                    return res.status(400).json({
-                        success: false,
-                        error: 'INVALID_COUPON',
-                        message: 'Coupon not assigned to this user',
-                    });
-                }
-            }
 
             if (coupon.discountType === 'percentage') {
                 couponDiscount = Number((subtotal * Number(coupon.discountValue || 0) / 100).toFixed(2));
@@ -1254,8 +1242,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
@@ -1417,6 +1405,7 @@ const checkOffer = async (req, res) => {
         const productType = req.query.productType || 'variable';
         const selectedDressType = req.query.selectedDressType;
         const variationID = req.query.variationID;
+        const couponCode = req.query.couponCode;
 
         const qty = Math.max(1, Number(rawQuantity) || 1);
 
