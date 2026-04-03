@@ -672,45 +672,31 @@ const buyNowController = async (req, res) => {
             });
         }
 
-        // STEP 4 — Calculate pricing (single-line focus)
-        let unitPriceBefore = 0;
+        // STEP 4 — Calculate pricing (mirror cartService: Flash overrides Sale/Regular)
         let regularPrice = 0;
         let salePrice = null;
 
         if (productType === 'variable' || (productType === 'customproduct' && variationRow)) {
-            const baseRegular = Number(variationRow.variationPrice || 0);
-            const baseSale =
-                variationRow.variationSalePrice != null ? Number(variationRow.variationSalePrice) : null;
-            regularPrice = baseRegular;
-            unitPriceBefore = baseSale != null ? baseSale : baseRegular;
-            salePrice = baseSale;
+            regularPrice = Number(variationRow.variationPrice || 0);
+            salePrice = variationRow.variationSalePrice != null ? Number(variationRow.variationSalePrice) : null;
         } else if (productType === 'presale') {
-            const baseRegular = Number(presaleProductRow.regularPrice || 0);
-            const baseSale = presaleProductRow.salePrice != null ? Number(presaleProductRow.salePrice) : null;
-            regularPrice = baseRegular;
-            unitPriceBefore = baseSale != null ? baseSale : baseRegular;
-            salePrice = baseSale;
+            regularPrice = Number(presaleProductRow.regularPrice || 0);
+            salePrice = presaleProductRow.salePrice != null ? Number(presaleProductRow.salePrice) : null;
         } else {
-            const baseRegular = Number(productRow.regularPrice || 0);
-            const baseSale = productRow.salePrice != null ? Number(productRow.salePrice) : null;
-            regularPrice = baseRegular;
-            unitPriceBefore = baseSale != null ? baseSale : baseRegular;
-            salePrice = baseSale;
+            regularPrice = Number(productRow.regularPrice || 0);
+            salePrice = productRow.salePrice != null ? Number(productRow.salePrice) : null;
         }
 
         // [NEW] Apply Dress Type override for custom products (overrides variation/product prices)
         if (productType === 'customproduct' && matchedDressType) {
             regularPrice = Number(matchedDressType.price);
-            unitPriceBefore = regularPrice;
             salePrice = null; // Dress type price overrides any sale price
         }
 
+        let flashUnit = null;
         let isFlashSale = 0;
-        let offerID = null;
-        let offerApplied = 0;
-        let offerStatus = 'none';
 
-        // Flash sale (same as cart recompute)
+        // Flash sale lookup (strictly for non-presale products)
         if (productType !== 'presale') {
             const [fsRows] = await connection.query(
                 `SELECT fsi.*
@@ -724,22 +710,30 @@ const buyNowController = async (req, res) => {
             );
             if (fsRows && fsRows.length > 0) {
                 const fs = fsRows[0];
+                const dval = Number(fs.discountValue || 0);
                 if (fs.discountType === 'percentage') {
-                    unitPriceBefore = Number(
-                        (unitPriceBefore * (100 - Number(fs.discountValue || 0)) / 100).toFixed(2)
-                    );
-                } else if (fs.discountType === 'fixed') {
-                    unitPriceBefore = Math.max(
-                        0,
-                        Number((unitPriceBefore - Number(fs.discountValue || 0)).toFixed(2))
-                    );
+                    flashUnit = Number((regularPrice * (100 - dval) / 100).toFixed(2));
+                } else if (fs.discountType === 'fixed' || fs.discountType === 'flat') {
+                    flashUnit = Math.max(0, Number((regularPrice - dval).toFixed(2)));
                 }
                 isFlashSale = 1;
             }
         }
 
-        let unitPriceAfter = unitPriceBefore;
-        let lineTotalBefore = Number((regularPrice * qty).toFixed(2));
+        let unitPriceBefore = 0;
+        let unitPriceAfter = 0;
+
+        if (isFlashSale && flashUnit !== null) {
+            unitPriceBefore = regularPrice;
+            unitPriceAfter = flashUnit;
+            salePrice = flashUnit; // Ensure stored salePrice for order_items is flash price
+        } else {
+            const base = salePrice !== null ? salePrice : regularPrice;
+            unitPriceBefore = base;
+            unitPriceAfter = base;
+        }
+
+        let lineTotalBefore = Number((unitPriceBefore * qty).toFixed(2));
         let lineTotalAfter = Number((unitPriceAfter * qty).toFixed(2));
 
         // Offer application (strictly for variable products as per user request)
@@ -1242,8 +1236,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
@@ -1442,9 +1436,9 @@ const checkOffer = async (req, res) => {
         }
         const productRow = prodRows[0];
 
-        let unitPriceBefore = productRow.salePrice != null
-            ? Number(productRow.salePrice)
-            : Number(productRow.regularPrice || 0);
+        // Look up base prices first
+        let regularPrice = Number(productRow.regularPrice || 0);
+        let salePrice = productRow.salePrice != null ? Number(productRow.salePrice) : null;
 
         // [NEW] Handle variation price override for variable products
         if (variationID) {
@@ -1454,9 +1448,8 @@ const checkOffer = async (req, res) => {
             );
             if (varRows && varRows.length > 0) {
                 const v = varRows[0];
-                unitPriceBefore = v.variationSalePrice != null
-                    ? Number(v.variationSalePrice)
-                    : Number(v.variationPrice || 0);
+                regularPrice = Number(v.variationPrice || 0);
+                salePrice = v.variationSalePrice != null ? Number(v.variationSalePrice) : null;
             }
         }
 
@@ -1473,11 +1466,17 @@ const checkOffer = async (req, res) => {
 
             const matchedType = availableDressTypes.find(t => t.label === (selectedDressType.label || selectedDressType));
             if (matchedType && matchedType.price) {
-                unitPriceBefore = Number(matchedType.price);
+                regularPrice = Number(matchedType.price);
+                salePrice = null;
             }
         }
 
-        // Flash sale (for preview use same logic as buyNowController)
+        let unitPriceBefore = (salePrice !== null) ? salePrice : regularPrice;
+        let unitPriceAfter = unitPriceBefore;
+        let flashUnit = null;
+        let isFlashSale = 0;
+
+        // Flash sale lookup (preview)
         const [fsRows] = await db.query(
             `SELECT fsi.*
              FROM flash_sale_items fsi
@@ -1490,26 +1489,24 @@ const checkOffer = async (req, res) => {
         );
         if (fsRows && fsRows.length > 0) {
             const fs = fsRows[0];
-            console.log('[BuyNow][CheckOffer] Flash sale row found:', {
-                saleID: fs.saleID,
-                discountType: fs.discountType,
-                discountValue: fs.discountValue,
-            });
+            const dval = Number(fs.discountValue || 0);
             if (fs.discountType === 'percentage') {
-                unitPriceBefore = Number(
-                    (unitPriceBefore * (100 - Number(fs.discountValue || 0)) / 100).toFixed(2)
-                );
-            } else if (fs.discountType === 'fixed') {
-                unitPriceBefore = Math.max(
-                    0,
-                    Number((unitPriceBefore - Number(fs.discountValue || 0)).toFixed(2))
-                );
+                flashUnit = Number((regularPrice * (100 - dval) / 100).toFixed(2));
+            } else if (fs.discountType === 'fixed' || fs.discountType === 'flat') {
+                flashUnit = Math.max(0, Number((regularPrice - dval).toFixed(2)));
             }
+            isFlashSale = 1;
         }
 
-        const originalTotal = Number((unitPriceBefore * qty).toFixed(2));
+        if (isFlashSale && flashUnit !== null) {
+            unitPriceBefore = regularPrice;
+            unitPriceAfter = flashUnit;
+        }
+
+        const originalTotal = Number((unitPriceAfter * qty).toFixed(2));
         console.log('[BuyNow][CheckOffer] Base pricing after flash:', {
             unitPriceBefore,
+            unitPriceAfter,
             qty,
             originalTotal,
         });

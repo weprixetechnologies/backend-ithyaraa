@@ -59,8 +59,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:7885'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:7885'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
         };
 
         // Generate invoice PDF for attachment
@@ -304,11 +304,11 @@ const placeOrderController = async (req, res) => {
 
         const merchantOrderId = randomUUID();
         // Normalize FRONTEND_URL - remove trailing slashes
-        const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         const redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
         // Use order-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
         console.log('[ORDER] PhonePe callback URL:', callbackUrl);

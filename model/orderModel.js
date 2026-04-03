@@ -230,6 +230,7 @@ async function getOrderItemsByUid(uid) {
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
                     od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt as orderCreatedAt,
+                    od.total, od.subtotal, od.shippingFee, od.couponDiscount, od.handFeeRate,
                     od.addressID, od.deliveredAt, od.isReplacement, u.username, u.emailID as email, u.phoneNumber as contactNumber
              FROM order_items oi
              INNER JOIN orderDetail od ON oi.orderID = od.orderID
