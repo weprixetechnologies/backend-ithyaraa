@@ -693,6 +693,10 @@ const buyNowController = async (req, res) => {
             salePrice = null; // Dress type price overrides any sale price
         }
 
+        let offerID = null;
+        let offerApplied = 0;
+        let offerStatus = 'none';
+
         let flashUnit = null;
         let isFlashSale = 0;
 
@@ -1236,8 +1240,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
