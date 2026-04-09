@@ -413,6 +413,14 @@ async function getCart(uid) {
             buildComboMap(items),
         ]);
 
+        // Safety Check: Sync offerID with the latest product-level offer association
+        for (const item of items) {
+            if (item.productType !== 'combo' && item.offerID !== item.currentProductOfferID) {
+                console.log(`[Offer Safety] Syncing offer for product ${item.productID}: ${item.offerID} -> ${item.currentProductOfferID}`);
+                item.offerID = item.currentProductOfferID;
+            }
+        }
+
         // Normalize pricing for each item from current DB state (including flash)
         for (const item of items) {
             if (item.productType === 'combo') {
@@ -551,6 +559,15 @@ async function getCart(uid) {
     ]);
     let anyModifications = false;
     const processedOfferIDs = new Set();
+
+    // Safety Check: Sync offerID with the latest product-level offer association
+    for (const item of items) {
+        if (item.productType !== 'combo' && item.offerID !== item.currentProductOfferID) {
+            console.log(`[Offer Safety] Syncing offer for product ${item.productID}: ${item.offerID} -> ${item.currentProductOfferID}`);
+            item.offerID = item.currentProductOfferID;
+            anyModifications = true;
+        }
+    }
 
     // Initialize item flags and parse prices; recompute base/flash from current DB state
     for (const item of items) {

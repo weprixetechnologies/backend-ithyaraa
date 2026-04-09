@@ -206,7 +206,8 @@ async function getCartItems(uid) {
             ci.*,
             v.variationSlug AS variationName,
             v.variationValues,
-            p.type AS productType
+            p.type AS productType,
+            p.offerID AS currentProductOfferID
         FROM cart_items ci
         LEFT JOIN variations v ON ci.variationID = v.variationID
         LEFT JOIN products p ON ci.productID = p.productID
