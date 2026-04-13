@@ -127,6 +127,7 @@ const createUser = async (userData) => {
         createdOn: new Date(),
         name: userData.name,
         password: hashedPassword,
+        role: userData.role || 'user',
         referCode: userData.referCode,
         profilePhoto: userData.profilePhoto || ''
     };
@@ -227,7 +228,7 @@ const deleteUserByUID = async (uid) => {
 
 
 const getAllUsers = async (filters, limit = 10, page = 1) => {
-    const allowedColumns = ['uid', 'username', 'emailID', 'phonenumber', 'createdOn', 'verifiedEmail', 'verifiedPhone'];
+    const allowedColumns = ['uid', 'username', 'emailID', 'phonenumber', 'createdOn', 'verifiedEmail', 'verifiedPhone', 'role'];
 
     const whereClauses = [];
     const values = [];
@@ -252,6 +253,10 @@ const getAllUsers = async (filters, limit = 10, page = 1) => {
                     whereClauses.push(`createdOn <= ?`);
                     values.push(filters.dateTo);
                 }
+            } else if (key === 'role' && typeof value === 'string' && value.includes(',')) {
+                const roles = value.split(',').map(r => r.trim());
+                whereClauses.push(`${key} IN (${roles.map(() => '?').join(',')})`);
+                values.push(...roles);
             } else if (typeof value === 'string') {
                 whereClauses.push(`${key} LIKE ?`);
                 values.push(`%${value}%`);
@@ -263,7 +268,7 @@ const getAllUsers = async (filters, limit = 10, page = 1) => {
     }
 
     // Build the query
-    let sql = `SELECT uid, username, emailID, phonenumber, verifiedEmail, verifiedPhone, createdOn, lastLogin, balance FROM users`;
+    let sql = `SELECT uid, username, emailID, phonenumber, verifiedEmail, verifiedPhone, createdOn, lastLogin, balance, role FROM users`;
     let countSql = `SELECT COUNT(*) as total FROM users`;
 
     if (whereClauses.length > 0) {

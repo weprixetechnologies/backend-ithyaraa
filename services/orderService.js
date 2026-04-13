@@ -13,6 +13,23 @@ const cartModel = require('./../model/cartModel');
 const coinModel = require('../model/coinModel');
 const settlementService = require('./settlementService');
 
+function normalizeHandlingFeeFields(handlingFeeValue, handFeeRateValue) {
+    const handFeeRate = Number(handFeeRateValue);
+    if (!Number.isNaN(handFeeRate) && handFeeRate > 0) {
+        return { handlingFee: true, handFeeRate };
+    }
+
+    const legacyHandlingValue = Number(handlingFeeValue);
+    if (!Number.isNaN(legacyHandlingValue) && legacyHandlingValue > 1) {
+        return { handlingFee: true, handFeeRate: legacyHandlingValue };
+    }
+
+    return {
+        handlingFee: Boolean(legacyHandlingValue),
+        handFeeRate: 0
+    };
+}
+
 async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null, walletApplied = 0) {
     // Step 1: Process cart (offers, totals, summary)
     const cartData = await getCart.getCart(uid);
@@ -463,8 +480,9 @@ async function getOrderDetailsByOrderID(orderID, uid) {
 
     // Add handling fee fields and shipping breakdown to orderDetail
     if (orderDetail) {
-        orderDetail.handlingFee = orderDetail.handlingFee ? Boolean(Number(orderDetail.handlingFee)) : false;
-        orderDetail.handFeeRate = Number(orderDetail.handFeeRate) || 0;
+        const normalizedHandlingFee = normalizeHandlingFeeFields(orderDetail.handlingFee, orderDetail.handFeeRate);
+        orderDetail.handlingFee = normalizedHandlingFee.handlingFee;
+        orderDetail.handFeeRate = normalizedHandlingFee.handFeeRate;
 
         // Calculate itemTotal (Regular Price sum) and subtotal (Discounted sum)
         const itemTotal = items.reduce((sum, item) => sum + (Number(item.regularPrice) || 0) * (Number(item.quantity) || 1), 0);
@@ -564,7 +582,7 @@ async function getOrderDetails(orderId, uid) {
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
-                    oi.brandID, oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos,
+                    oi.brandID, oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos, oi.returnRejectionReason,
                     oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
                     p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
@@ -678,6 +696,7 @@ async function getOrderDetails(orderId, uid) {
                 returnReason: item.returnReason || null,
                 returnComments: item.returnComments || null,
                 returnPhotos: item.returnPhotos || null,
+                returnRejectionReason: item.returnRejectionReason || null,
                 returnTrackingCode: item.returnTrackingCode || null,
                 returnDeliveryCompany: item.returnDeliveryCompany || null,
                 replacementOrderID: item.replacementOrderID || null
@@ -734,6 +753,8 @@ async function getOrderDetails(orderId, uid) {
         }
 
         // Build final response
+        const normalizedHandlingFee = normalizeHandlingFeeFields(order.handlingFee, order.handFeeRate);
+
         return {
             orderID: order.orderID,
             uid: order.uid,
@@ -749,8 +770,8 @@ async function getOrderDetails(orderId, uid) {
             deliveryAddress,
             couponCode: order.couponCode,
             couponDiscount: Number(order.couponDiscount) || 0,
-            handlingFee: order.handlingFee ? Boolean(Number(order.handlingFee)) : false,
-            handFeeRate: Number(order.handFeeRate) || 0
+            handlingFee: normalizedHandlingFee.handlingFee,
+            handFeeRate: normalizedHandlingFee.handFeeRate
         };
     } catch (error) {
         console.error('Error in getOrderDetails service:', error);
@@ -1093,7 +1114,7 @@ async function getAdminOrderDetails(orderId) {
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
-                    oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos,
+                    oi.returnStatus, oi.returnType, oi.returnReason, oi.returnComments, oi.returnPhotos, oi.returnRejectionReason,
                     oi.returnTrackingCode, oi.returnDeliveryCompany, oi.replacementOrderID,
                     oi.brandID, p.brand AS productBrand, p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
@@ -1200,6 +1221,7 @@ async function getAdminOrderDetails(orderId) {
                 returnReason: item.returnReason || null,
                 returnComments: item.returnComments || null,
                 returnPhotos: item.returnPhotos || null,
+                returnRejectionReason: item.returnRejectionReason || null,
                 returnTrackingCode: item.returnTrackingCode || null,
                 returnDeliveryCompany: item.returnDeliveryCompany || null,
                 replacementOrderID: item.replacementOrderID || null,
@@ -1285,6 +1307,8 @@ async function getAdminOrderDetails(orderId) {
         }
 
         // Format the response
+        const normalizedHandlingFee = normalizeHandlingFeeFields(order.handlingFee, order.handFeeRate);
+
         const orderDetails = {
             orderID: order.orderID,
             uid: order.uid,
@@ -1301,8 +1325,8 @@ async function getAdminOrderDetails(orderId) {
             deliveryAddress: deliveryAddress,
             couponCode: order.couponCode,
             couponDiscount: couponDiscount,
-            handlingFee: order.handlingFee ? Boolean(Number(order.handlingFee)) : false,
-            handFeeRate: parseFloat(order.handFeeRate) || 0,
+            handlingFee: normalizedHandlingFee.handlingFee,
+            handFeeRate: normalizedHandlingFee.handFeeRate,
             shippingBreakdown: shippingBreakdown
         };
 
@@ -1532,7 +1556,7 @@ async function returnOrder(uid, { orderID, orderItemID = null, returnType = 'rep
 }
 
 // Approve/Reject a return request of an item
-async function approveReturnRequest(orderItemID, action = 'approve') {
+async function approveReturnRequest(orderItemID, action = 'approve', rejectionReason = null) {
     const orderModel = require('../model/orderModel');
     const refundQueryModel = require('../model/refundQueryModel');
     const coinModel = require('../model/coinModel');
@@ -1550,9 +1574,16 @@ async function approveReturnRequest(orderItemID, action = 'approve') {
     }
 
     if (action === 'reject') {
-        await orderModel.updateOrderItemReturnStatus(orderItemID, { returnStatus: 'returnRejected' });
+        const normalizedRejectionReason = typeof rejectionReason === 'string' && rejectionReason.trim()
+            ? rejectionReason.trim()
+            : null;
+        await orderModel.updateOrderItemReturnStatus(orderItemID, {
+            returnStatus: 'returnRejected',
+            returnRejectionReason: normalizedRejectionReason
+        });
         if (item.refundQueryID) {
-            await refundQueryModel.resolveRefundQuery(item.refundQueryID, 'rejected');
+            await refundQueryModel.updateRefundQueryAdminRejectionReason(item.refundQueryID, normalizedRejectionReason);
+            await refundQueryModel.resolveRefundQuery(item.refundQueryID, 'rejected', normalizedRejectionReason);
         }
         return { success: true, message: 'Return request rejected' };
     }

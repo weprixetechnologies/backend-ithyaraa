@@ -104,7 +104,7 @@ const register = async (data) => {
     return { accessToken, refreshToken };
 };
 
-const loginUser = async (email, password, deviceInfo) => {
+const loginAdmin = async (email, password, deviceInfo) => {
     // 1. Fetch user from DB
     console.log(email);
 
@@ -113,6 +113,11 @@ const loginUser = async (email, password, deviceInfo) => {
         console.log('Error 7');
 
         throw new Error('Invalid email or password');
+    }
+
+    // Check if user has admin or manager role
+    if (user.role !== 'admin' && user.role !== 'manager') {
+        throw new Error('Access denied: Admin or Manager only');
     }
 
     // 2. Validate password
@@ -221,4 +226,4 @@ const refreshTokens = async (refreshToken) => {
 };
 
 
-module.exports = { register, loginUser, refreshTokens }
+module.exports = { register, loginAdmin, refreshTokens }

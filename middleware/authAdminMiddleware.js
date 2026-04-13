@@ -2,40 +2,32 @@ const jwt = require('jsonwebtoken')
 
 const verifyAccessToken = (req, res, next) => {
     try {
-        // 1️⃣ Get token from cookies (or Authorization header)
-        const token =
-            req.headers?.authorization?.split(" ")[1]
+        const authHeader = req.headers?.authorization
 
-        console.log('Access Token 1', token);
-        console.log(req.params);
-
-
-        if (!token) {
-            return res.status(401).json({ message: "Access token missing. Please login." });
+        if (!authHeader?.startsWith("Bearer ")) {
+            return res.status(401).json({ message: "Access token missing. Please login." })
         }
 
-        // 2️⃣ Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        console.log(decoded);
+        const token = authHeader.split(" ")[1]
 
+        const decoded = jwt.verify(token, process.env.JWT_SECRET)
 
-        // 3️⃣ Check expiry manually (optional, jwt.verify already does it)
-        if (decoded.exp && decoded.exp * 1000 < Date.now()) {
-            return res.status(401).json({ message: "Access token expired. Please refresh token." });
+        if (decoded.role !== "admin" && decoded.role !== "manager") {
+            return res.status(403).json({ message: "Access denied: Insufficient permissions." })
         }
 
-        // 4️⃣ Attach user to req
-        req.user = decoded; // contains id, email, role, etc.
-        // console.log(decoded);
+        req.user = decoded
 
-        // 5️⃣ Move forward
-        next();
+        next()
     } catch (error) {
-        return res.status(401).json({
-            message: "invalid token",
-            error: error.message
-        });
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({ message: "Access token expired. Please refresh token." })
+        }
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({ message: "Invalid token." })
+        }
+        return res.status(500).json({ message: "Authentication error." })
     }
-};
+}
 
 module.exports = { verifyAccessToken }

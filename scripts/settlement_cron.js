@@ -20,7 +20,7 @@ async function runSettlementCron() {
             JOIN orderDetail od ON oi.orderID = od.orderID
             LEFT JOIN settlement_order_details sod ON oi.orderItemID = sod.orderItemID AND sod.event = 'replacement_item'
             WHERE oi.itemStatus = 'delivered'
-              AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+              AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none', 'returnRejected'))
               AND oi.coinLockUntil IS NOT NULL
               AND oi.coinLockUntil <= NOW()
               AND oi.settlementStatus = 'unsettled'

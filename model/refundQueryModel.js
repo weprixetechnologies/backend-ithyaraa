@@ -1,14 +1,14 @@
 const db = require('../utils/dbconnect');
 const { randomUUID } = require('crypto');
 
-async function createRefundQuery({ refundQueryID: manualID, orderID, orderItemID, productID, userID, brandID, reason, status = 'pending', returnType = 'refund', comments = null, photos = null }) {
+async function createRefundQuery({ refundQueryID: manualID, orderID, orderItemID, productID, userID, brandID, reason, status = 'pending', returnType = 'refund', comments = null, photos = null, adminRejectionReason = null }) {
     const refundQueryID = manualID || `RQ-${randomUUID().slice(0, 8).toUpperCase()}`;
     await db.query(
-        `INSERT INTO refund_queries (refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [refundQueryID, orderID, orderItemID, productID, userID, brandID || null, reason || null, status, returnType, comments, photos]
+        `INSERT INTO refund_queries (refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos, adminRejectionReason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [refundQueryID, orderID, orderItemID, productID, userID, brandID || null, reason || null, status, returnType, comments, photos, adminRejectionReason]
     );
-    return { refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos };
+    return { refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos, adminRejectionReason };
 }
 
 async function getRefundQueriesList({ page = 1, limit = 20, status = null } = {}) {
@@ -20,7 +20,7 @@ async function getRefundQueriesList({ page = 1, limit = 20, status = null } = {}
         params.push(status);
     }
     const [rows] = await db.query(
-        `SELECT rq.refundQueryID, rq.orderID, rq.orderItemID, rq.productID, rq.userID, rq.brandID, rq.reason, rq.status, rq.createdAt, rq.updatedAt, rq.returnType, rq.comments, rq.photos
+        `SELECT rq.refundQueryID, rq.orderID, rq.orderItemID, rq.productID, rq.userID, rq.brandID, rq.reason, rq.status, rq.createdAt, rq.updatedAt, rq.returnType, rq.comments, rq.photos, rq.adminRejectionReason
          FROM refund_queries rq
          WHERE ${where}
          ORDER BY rq.createdAt DESC
@@ -44,15 +44,23 @@ async function updateRefundQueryStatus(refundQueryID, status) {
     return { success: true };
 }
 
-async function resolveRefundQuery(refundQueryID, finalStatus) {
+async function updateRefundQueryAdminRejectionReason(refundQueryID, adminRejectionReason) {
+    await db.query(
+        `UPDATE refund_queries SET adminRejectionReason = ? WHERE refundQueryID = ?`,
+        [adminRejectionReason || null, refundQueryID]
+    );
+    return { success: true };
+}
+
+async function resolveRefundQuery(refundQueryID, finalStatus, adminRejectionReason = null) {
     try {
         // Copy to resolved table
         await db.query(
             `INSERT INTO refund_queries_resolved 
-             (refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos, createdAt)
-             SELECT refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, ?, returnType, comments, photos, createdAt 
+             (refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, status, returnType, comments, photos, adminRejectionReason, createdAt)
+             SELECT refundQueryID, orderID, orderItemID, productID, userID, brandID, reason, ?, returnType, comments, photos, COALESCE(?, adminRejectionReason), createdAt
              FROM refund_queries WHERE refundQueryID = ?`,
-            [finalStatus, refundQueryID]
+            [finalStatus, adminRejectionReason, refundQueryID]
         );
         // Delete from active table
         await db.query(`DELETE FROM refund_queries WHERE refundQueryID = ?`, [refundQueryID]);
@@ -82,5 +90,6 @@ module.exports.createRefundQuery = createRefundQuery;
 module.exports.getRefundQueriesList = getRefundQueriesList;
 module.exports.getRefundQueryByID = getRefundQueryByID;
 module.exports.updateRefundQueryStatus = updateRefundQueryStatus;
+module.exports.updateRefundQueryAdminRejectionReason = updateRefundQueryAdminRejectionReason;
 module.exports.resolveRefundQuery = resolveRefundQuery;
 module.exports.getResolvedQueriesList = getResolvedQueriesList;

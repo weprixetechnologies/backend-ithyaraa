@@ -956,9 +956,10 @@ const buyNowController = async (req, res) => {
             const pm = paymentMode;
             const paymentStatus = pm === 'PREPAID' ? 'pending' : 'successful';
 
-            // Handle handling fee for COD
-            // handlingFee is already defined at higher scope for normal orders
-            const handFeeRate = 0;
+            // Store handling fee consistently with the regular checkout flow:
+            // `handlingFee` is a flag and `handFeeRate` is the rupee amount.
+            const handlingFeeFlag = handlingFee > 0 ? 1 : 0;
+            const handFeeRate = handlingFee > 0 ? handlingFee : 0;
 
             const [detailResult] = await connection.query(
                 `INSERT INTO orderDetail (
@@ -996,7 +997,7 @@ const buyNowController = async (req, res) => {
                     referBy || null,
                     0,    // isWalletUsed
                     0.00, // paidWallet
-                    handlingFee,
+                    handlingFeeFlag,
                     handFeeRate,
                     1 // isBuyNow
                 ]
@@ -1757,4 +1758,3 @@ module.exports = {
     checkOffer,
     getShippingFee,
 };
-

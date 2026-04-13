@@ -5,6 +5,86 @@ const db = require('../utils/dbconnect');
  * Handles the append-only ledger (settlement_order_details) and period totals.
  */
 
+const SHIPPING_EVENT = 'shipping_credit';
+const SETTLEMENT_CREDIT_EVENTS = new Set(['return_window_cleared', 'replacement_complete']);
+
+const recordBrandShippingCredit = async ({
+    conn,
+    brandID,
+    orderID,
+    settlementMonth,
+    createdBy = 'system'
+}) => {
+    if (!brandID || brandID === 'inhouse') {
+        return { success: true, skipped: true };
+    }
+
+    const [shippingRows] = await conn.query(`
+        SELECT COALESCE(SUM(brandShippingFee), 0) AS shippingAmount
+        FROM order_items
+        WHERE orderID = ? AND brandID = ?
+    `, [orderID, brandID]);
+
+    const shippingAmount = Number(shippingRows?.[0]?.shippingAmount || 0);
+    if (shippingAmount <= 0) {
+        return { success: true, skipped: true };
+    }
+
+    const [existing] = await conn.query(`
+        SELECT id
+        FROM settlement_order_details
+        WHERE brandID = ? AND orderID = ? AND event = ?
+        LIMIT 1
+    `, [brandID, orderID, SHIPPING_EVENT]);
+
+    if (existing.length > 0) {
+        return { success: true, skipped: true };
+    }
+
+    const [baseItems] = await conn.query(`
+        SELECT orderItemID, productID, productName, variationName
+        FROM order_items
+        WHERE orderID = ? AND brandID = ?
+        ORDER BY brandShippingFee DESC, orderItemID ASC
+        LIMIT 1
+    `, [orderID, brandID]);
+
+    const baseItem = baseItems[0] || {};
+
+    await conn.query(`
+        INSERT INTO settlement_order_details (
+            brandID, orderItemID, orderID, productID, productName, variationName,
+            quantity, lineTotalAfter, commissionPct, commissionAmount, brandEarning,
+            settlementMonth, event, effect, effectAmount, isReplacement, wasCarriedForward,
+            refundQueryID, notes, createdBy, relatedOrderItemId
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        brandID,
+        baseItem.orderItemID || 0,
+        orderID,
+        baseItem.productID || 'shipping',
+        'Shipping Charge',
+        baseItem.variationName || null,
+        1,
+        shippingAmount,
+        0,
+        0,
+        shippingAmount,
+        settlementMonth,
+        SHIPPING_EVENT,
+        'credit',
+        shippingAmount,
+        0,
+        0,
+        null,
+        'Brand shipping fee released after return window',
+        createdBy,
+        null
+    ]);
+
+    return { success: true, shippingAmount };
+};
+
 const recordEvent = async ({
     orderItemID,
     event,
@@ -128,6 +208,17 @@ const recordEvent = async ({
             isReplacement: item.isReplacement || 0, wasCarriedForward: item.wasCarriedForward || 0,
             refundQueryID, notes: finalNotes, createdBy, relatedOrderItemId
         });
+
+        // 6.1. Release shipping exactly once per brand/order when the item becomes payable
+        if (finalEffect === 'credit' && SETTLEMENT_CREDIT_EVENTS.has(finalEvent)) {
+            await recordBrandShippingCredit({
+                conn,
+                brandID,
+                orderID,
+                settlementMonth,
+                createdBy
+            });
+        }
 
         // 7. Recalculate Period Totals
         await recalculatePeriodTotals(brandID, settlementMonth, conn);
@@ -272,6 +363,14 @@ const manualReplacementCredit = async (originalOrderItemId, recordedBy = 'admin'
             SET event = 'replacement_complete', effect = 'credit', effectAmount = brandEarning, createdBy = ?
             WHERE id = ?
         `, [recordedBy, entry.id]);
+
+        await recordBrandShippingCredit({
+            conn,
+            brandID: entry.brandID,
+            orderID: entry.orderID,
+            settlementMonth: entry.settlementMonth,
+            createdBy: recordedBy
+        });
 
         // 3. Recalculate
         await recalculatePeriodTotals(entry.brandID, entry.settlementMonth, conn);

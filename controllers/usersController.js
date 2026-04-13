@@ -22,7 +22,7 @@ const sendVerificationEmail = async (req, res) => {
 
 const createUser = async (req, res) => {
     try {
-        const { email, phonenumber, name, password, wallet, referCode, profilePhoto, phoneVerified } = req.body;
+        const { email, phonenumber, name, password, wallet, referCode, profilePhoto, phoneVerified, role } = req.body;
         console.log(req.body);
 
 
@@ -39,7 +39,8 @@ const createUser = async (req, res) => {
             referCode: referCode || 'ITHY-ADMIN',
             profilePhoto: profilePhoto || '',
             deviceInfo: req.headers['user-agent'] || 'unknown', // ✅ simple user-agent capture
-            phoneVerified: phoneVerified === true // Only true if explicitly passed and is true
+            phoneVerified: phoneVerified === true, // Only true if explicitly passed and is true
+            role: role || 'user'
         });
 
         if (!result.success) {

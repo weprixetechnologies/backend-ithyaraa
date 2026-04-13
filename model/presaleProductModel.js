@@ -69,6 +69,7 @@ const createPresaleProduct = async (productData) => {
             brandID,
             custom_inputs,
             allowCustomerImageUpload = 0,
+            sizeChartUrl,
             expectedDeliveryDate,
             minOrderQuantity = 1,
             maxOrderQuantity,
@@ -85,11 +86,11 @@ const createPresaleProduct = async (productData) => {
                 presaleProductID, name, description, regularPrice, salePrice,
                 discountType, discountValue, type, status, offerID, overridePrice,
                 tab1, tab2, featuredImage, productAttributes, categories,
-                brand, galleryImage, brandID, custom_inputs, allowCustomerImageUpload,
+                brand, galleryImage, brandID, custom_inputs, allowCustomerImageUpload, sizeChartUrl,
                 expectedDeliveryDate, minOrderQuantity, maxOrderQuantity,
                 totalAvailableQuantity, reservedQuantity, preSaleStartDate,
                 preSaleEndDate, earlyBirdDiscount, earlyBirdEndDate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
@@ -114,6 +115,7 @@ const createPresaleProduct = async (productData) => {
             brandID || null,
             custom_inputs ? JSON.stringify(custom_inputs) : null,
             allowCustomerImageUpload ? 1 : 0,
+            sizeChartUrl || null,
             toMySQLDate(expectedDeliveryDate),
             minOrderQuantity,
             maxOrderQuantity || null,
@@ -455,4 +457,3 @@ module.exports = {
     bulkDeletePresaleProducts,
     searchPresaleProducts
 };
-

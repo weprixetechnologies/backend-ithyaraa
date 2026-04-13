@@ -1085,7 +1085,7 @@ async function getShopProductsPublic(query) {
     let baseQuery = `
         SELECT productID, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
-               brand, featuredImage, categories, sectionid, createdAt
+               brand, brandID, featuredImage, categories, sectionid, createdAt
         FROM products
     `;
 

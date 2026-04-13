@@ -225,7 +225,7 @@ async function getOrderItemsByUid(uid) {
                     oi.lineTotalBefore, oi.lineTotalAfter,
                     oi.offerID, oi.offerApplied, oi.offerStatus, oi.appliedOfferID,
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
-                    oi.returnStatus, oi.returnRequestedAt, oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.brandShippingFee, oi.itemStatus,
+                    oi.returnStatus, oi.returnRequestedAt, oi.returnRejectionReason, oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.brandShippingFee, oi.itemStatus,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
                     v.variationName AS fullVariationName, v.variationSlug, v.variationValues,
                     v.variationPrice, v.variationStock, v.variationSalePrice,
@@ -459,6 +459,7 @@ async function getOrderDetailsByOrderID(orderID, uid) {
                     oi.name, oi.featuredImage, oi.comboID, oi.referBy, oi.custom_inputs, oi.createdAt,
                     oi.trackingCode, oi.deliveryCompany, oi.itemStatus,
                     oi.returnStatus, oi.returnRequestedAt, oi.replacementOrderItemID, oi.replacementOrderID, oi.refundQueryID,
+                    oi.returnRejectionReason,
                     oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
                     oi.earnedCoins, oi.coinLockUntil, oi.coinsReversed, oi.brandID, oi.brandShippingFee,
                     p.type AS productType, p.custom_inputs AS productCustomInputs,
@@ -701,7 +702,7 @@ async function getOrderItemsForReturn(orderID, uid) {
     const [rows] = await db.query(
         `SELECT oi.orderItemID, oi.orderID, oi.productID, oi.quantity, oi.variationID, oi.variationName,
                 oi.lineTotalAfter, oi.name, oi.featuredImage, oi.brandID, oi.referBy,
-                oi.returnStatus, oi.earnedCoins, oi.coinsReversed, oi.itemStatus
+                oi.returnStatus, oi.returnRejectionReason, oi.earnedCoins, oi.coinsReversed, oi.itemStatus
          FROM order_items oi
          INNER JOIN orderDetail od ON oi.orderID = od.orderID
          WHERE oi.orderID = ? AND od.uid = ?
@@ -716,7 +717,7 @@ async function getMyReturns(uid) {
     const [rows] = await db.query(
         `SELECT od.orderID, od.createdAt AS orderCreatedAt, od.deliveredAt, od.orderStatus,
                 oi.orderItemID, oi.productID, oi.name, oi.featuredImage, oi.quantity, oi.variationName, oi.lineTotalAfter,
-                oi.returnStatus, oi.returnRequestedAt, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
+                oi.returnStatus, oi.returnRequestedAt, oi.returnRejectionReason, oi.returnTrackingCode, oi.returnDeliveryCompany, oi.returnTrackingUrl,
                 oi.replacementOrderID, oi.refundQueryID
          FROM order_items oi
          INNER JOIN orderDetail od ON oi.orderID = od.orderID
@@ -738,7 +739,7 @@ async function getOrderItemById(orderItemID, orderID, uid) {
 }
 
 async function updateOrderItemReturnStatus(orderItemID, updates, connection = null) {
-    const { returnStatus, returnRequestedAt, replacementOrderItemID, replacementOrderID, refundQueryID, returnType, returnReason, returnComments, returnPhotos } = updates;
+    const { returnStatus, returnRequestedAt, replacementOrderItemID, replacementOrderID, refundQueryID, returnType, returnReason, returnComments, returnPhotos, returnRejectionReason } = updates;
     const fields = ['returnStatus = ?'];
     const values = [returnStatus];
     
@@ -750,6 +751,7 @@ async function updateOrderItemReturnStatus(orderItemID, updates, connection = nu
     if (returnReason !== undefined) { fields.push('returnReason = ?'); values.push(returnReason); }
     if (returnComments !== undefined) { fields.push('returnComments = ?'); values.push(returnComments); }
     if (returnPhotos !== undefined) { fields.push('returnPhotos = ?'); values.push(returnPhotos); }
+    if (returnRejectionReason !== undefined) { fields.push('returnRejectionReason = ?'); values.push(returnRejectionReason); }
     
     values.push(orderItemID);
     const conn = connection || db;

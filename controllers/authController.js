@@ -27,7 +27,7 @@ const login = async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
 
-        const { accessToken, refreshToken, user } = await authService.loginUser(email, password, deviceInfo);
+        const { accessToken, refreshToken, user } = await authService.loginAdmin(email, password, deviceInfo);
         console.log({
             accessToken, refreshToken, user
         });

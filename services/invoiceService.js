@@ -15,6 +15,20 @@ class InvoiceService {
         };
     }
 
+    _getHandlingFeeAmount(orderData = {}) {
+        const explicitAmount = Number(orderData.handFeeRate);
+        if (!Number.isNaN(explicitAmount) && explicitAmount > 0) {
+            return explicitAmount;
+        }
+
+        const legacyHandlingValue = Number(orderData.handlingFee);
+        if (!Number.isNaN(legacyHandlingValue) && legacyHandlingValue > 1) {
+            return legacyHandlingValue;
+        }
+
+        return 0;
+    }
+
     // Generate PDF invoice buffer using PDFKit with careful layout and page-break handling
     async generateInvoicePDF(orderData) {
         return new Promise((resolve, reject) => {
@@ -196,10 +210,14 @@ class InvoiceService {
             };
       
             const shipping = Number(orderData.shipping || 0);
-            const totalDue = itemTotal + shipping;
+            const handlingFee = this._getHandlingFeeAmount(orderData);
+            const totalDue = itemTotal + shipping + handlingFee;
             advance(10);
             row('Item Total', `Rs. ${itemTotal.toFixed(2)}`);
             row('Shipping (Incl. Taxes)', `Rs. ${shipping.toFixed(2)}`);
+            if (handlingFee > 0) {
+              row('Handling Fee (COD)', `Rs. ${handlingFee.toFixed(2)}`);
+            }
             doc.moveTo(sx, cursorY).lineTo(sx + 260, cursorY).stroke(); advance(6);
             row('Invoice Total', `Rs. ${totalDue.toFixed(2)}`, true);
             doc.moveTo(sx, cursorY).lineTo(sx + 260, cursorY).stroke();
@@ -296,7 +314,8 @@ class InvoiceService {
         // Calculate totals
         const itemTotal = orderData.items.reduce((sum, item) => sum + item.lineTotalAfter, 0);
         const shipping = orderData.shipping || 0;
-        const balanceDue = itemTotal + shipping;
+        const handlingFee = this._getHandlingFeeAmount(orderData);
+        const balanceDue = itemTotal + shipping + handlingFee;
 
         return `
 <!DOCTYPE html>
@@ -488,6 +507,12 @@ class InvoiceService {
                         <span>Shipping Charge (Inclusive of Taxes)</span>
                         <span>₹${shipping.toFixed(2)}</span>
                     </div>
+                    ${handlingFee > 0 ? `
+                    <div class="summary-row">
+                        <span>Handling Fee (COD)</span>
+                        <span>₹${handlingFee.toFixed(2)}</span>
+                    </div>
+                    ` : ''}
                     <div class="summary-row balance-due">
                         <span>Invoice Value</span>
                         <span>₹${balanceDue.toFixed(2)}</span>
@@ -511,6 +536,8 @@ class InvoiceService {
     generateInvoiceData(orderData) {
         const invoiceNumber = `INV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(orderData.orderID).padStart(3, '0')}`;
 
+        const normalizedHandlingFee = this._getHandlingFeeAmount(orderData);
+
         return {
             invoiceNumber,
             orderID: orderData.orderID,
@@ -522,7 +549,9 @@ class InvoiceService {
             total: orderData.total || 0,
             deliveryAddress: orderData.deliveryAddress || {},
             paymentMode: orderData.paymentMode || 'COD',
-            status: orderData.status || 'confirmed'
+            status: orderData.status || 'confirmed',
+            handlingFee: normalizedHandlingFee > 0,
+            handFeeRate: normalizedHandlingFee
         };
     }
 }

@@ -105,14 +105,38 @@ const getSettlementDetail = async (req, res) => {
 /**
  * ADMIN: Record a payment
  */
+const normalizePaymentMode = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    const map = {
+        bank_transfer: 'bank_transfer',
+        'bank transfer': 'bank_transfer',
+        upi: 'upi',
+        neft: 'neft',
+        rtgs: 'rtgs',
+        cheque: 'cheque',
+        check: 'cheque',
+        cash: 'other',
+        adjustment: 'adjustment',
+        other: 'other'
+    };
+    return map[raw] || null;
+};
+
 const recordPayment = async (req, res) => {
     try {
         const { id } = req.params; // brand_settlement_periods.id
         const { amount, paymentMode, utrReference, paymentDate, remarks } = req.body;
         const recordedBy = req.user.username || req.user.uid;
+        const normalizedPaymentMode = normalizePaymentMode(paymentMode);
 
         if (!amount || !paymentMode || !paymentDate) {
             return res.status(400).json({ success: false, message: 'Amount, paymentMode, and paymentDate are required' });
+        }
+        if (!normalizedPaymentMode) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid paymentMode. Use bank_transfer, upi, neft, rtgs, cheque, adjustment, or other.'
+            });
         }
 
         // 1. Get period info
@@ -125,7 +149,7 @@ const recordPayment = async (req, res) => {
             INSERT INTO brand_settlement_payments (
                 settlementPeriodID, brandID, amount, paymentMode, utrReference, paymentDate, remarks, recordedBy
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [id, period.brandID, amount, paymentMode, utrReference, paymentDate, remarks, recordedBy]);
+        `, [id, period.brandID, amount, normalizedPaymentMode, utrReference, paymentDate, remarks, recordedBy]);
 
         // 3. Update period totals
         await db.query(`
@@ -280,7 +304,7 @@ const runCheckManually = async (req, res) => {
             JOIN orderDetail od ON oi.orderID = od.orderID
             LEFT JOIN settlement_order_details sod ON oi.orderItemID = sod.orderItemID AND sod.event = 'replacement_item'
             WHERE oi.itemStatus = 'delivered'
-              AND (oi.returnStatus IS NULL OR oi.returnStatus = 'none')
+              AND (oi.returnStatus IS NULL OR oi.returnStatus IN ('none', 'returnRejected'))
               AND (oi.coinLockUntil IS NOT NULL AND oi.coinLockUntil <= NOW())
               AND oi.settlementStatus = 'unsettled'
               AND oi.brandID IS NOT NULL

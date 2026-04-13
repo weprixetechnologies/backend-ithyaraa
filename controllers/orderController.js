@@ -468,6 +468,7 @@ const getMyReturnsController = async (req, res) => {
                 lineTotalAfter: row.lineTotalAfter,
                 returnStatus: row.returnStatus,
                 returnRequestedAt: row.returnRequestedAt,
+                returnRejectionReason: row.returnRejectionReason,
                 returnTrackingCode: row.returnTrackingCode,
                 returnDeliveryCompany: row.returnDeliveryCompany,
                 returnTrackingUrl: row.returnTrackingUrl,
@@ -1030,7 +1031,8 @@ const approveReturnRequestController = async (req, res) => {
 const rejectReturnRequestController = async (req, res) => {
     try {
         const { orderItemID } = req.params;
-        const result = await orderService.approveReturnRequest(orderItemID, 'reject');
+        const rejectionReason = req.body?.rejectionReason;
+        const result = await orderService.approveReturnRequest(orderItemID, 'reject', rejectionReason);
         res.json(result);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
