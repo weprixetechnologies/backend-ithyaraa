@@ -8,7 +8,7 @@ const coinModel = require('../model/coinModel');
 // PhonePe config – mirror existing integration
 const crypto = require('crypto');
 
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
+const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
 const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 
@@ -1261,9 +1261,15 @@ const buyNowController = async (req, res) => {
                 callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
             }
 
+            // Audit Logging Part 1: Source and Incoming Headers
+            const source = (req.headers['origin'] || '').includes('ithyaraa.com') ? 'WEB' : 'APP';
+            console.log("=== FLOW TYPE ===", source);
+            console.log("INCOMING HEADERS:", JSON.stringify(req.headers, null, 2));
+
             const payloadObj = {
                 merchantId,
                 merchantTransactionId: merchantOrderId,
+                merchantUserId: String(uid), // Mandatory field for PhonePe
                 amount: amountPaise,
                 redirectUrl,
                 callbackUrl,
@@ -1271,8 +1277,25 @@ const buyNowController = async (req, res) => {
                 paymentInstrument: { type: 'PAY_PAGE' },
             };
 
-            const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
+            const jsonPayload = JSON.stringify(payloadObj);
+            const base64Payload = Buffer.from(jsonPayload).toString('base64');
             const checksum = generateChecksum(base64Payload);
+            const requestBody = JSON.stringify({ request: base64Payload });
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-VERIFY': checksum,
+                'X-MERCHANT-ID': merchantId,
+            };
+
+            // Audit Logging Part 2: Payload Snapshot
+            console.log("RAW PAYLOAD:", payloadObj);
+            console.log("STRINGIFIED:", jsonPayload);
+            console.log("BASE64:", base64Payload);
+            console.log("X-VERIFY:", checksum);
+            console.log("TXN ID:", merchantOrderId);
+            console.log("FINAL REQUEST BODY:", requestBody);
+            console.log("HEADERS:", JSON.stringify(headers, null, 2));
+            console.log("PHONEPE API URL:", phonePeUrl);
 
             const fetch = require('node-fetch');
             // Use global AbortController if available (Node 18+), otherwise skip timeout signal.
@@ -1284,15 +1307,18 @@ const buyNowController = async (req, res) => {
             try {
                 const response = await fetch(phonePeUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-VERIFY': checksum,
-                        'X-MERCHANT-ID': merchantId,
-                    },
-                    body: JSON.stringify({ request: base64Payload }),
+                    headers: headers,
+                    body: requestBody,
                     signal: controller ? controller.signal : undefined,
                 });
                 phonePeResponse = await response.json();
+                console.log("[BUY-NOW] PhonePe API Response:", JSON.stringify(phonePeResponse, null, 2));
+
+                if (phonePeResponse.success && phonePeResponse.data) {
+                    const returnedUrl = phonePeResponse?.data?.instrumentResponse?.redirectInfo?.url || phonePeResponse?.data?.redirectUrl;
+                    console.log("RETURNED REDIRECT URL:", returnedUrl);
+                    console.log("URL LENGTH:", returnedUrl?.length);
+                }
             } catch (fetchErr) {
                 clearTimeout(timeoutId);
                 console.error('[BuyNow][PhonePe] Fetch failed after order committed:', fetchErr.message);

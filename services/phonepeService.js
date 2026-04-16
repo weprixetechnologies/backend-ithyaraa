@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 // Load from environment
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
+const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
 const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 

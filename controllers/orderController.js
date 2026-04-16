@@ -10,7 +10,7 @@ const db = require('../utils/dbconnect');
 const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
 
 // Load from environment only
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
+const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
 const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 
@@ -311,47 +311,55 @@ const placeOrderController = async (req, res) => {
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
-        console.log('[ORDER] PhonePe callback URL:', callbackUrl);
-        console.log('[ORDER] PhonePe redirect URL:', redirectUrl);
+        // Audit Logging Part 1: Source and Incoming Headers
+        const source = (req.headers['origin'] || '').includes('ithyaraa.com') ? 'WEB' : 'APP';
+        console.log("=== FLOW TYPE ===", source);
+        console.log("INCOMING HEADERS:", JSON.stringify(req.headers, null, 2));
 
         const payload = {
             merchantId,
             merchantTransactionId: merchantOrderId,
+            merchantUserId: String(uid), // Mandatory field for PhonePe
             amount: amountPaise, // integer paise
             redirectUrl,
-            callbackUrl, // PhonePe will call this URL for webhook notifications
+            callbackUrl,
             redirectMode: "REDIRECT",
             paymentInstrument: { type: "PAY_PAGE" }
         };
 
-        console.log('[ORDER] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
-        console.log('[ORDER] PhonePe API URL:', phonePeUrl);
-        console.log('[ORDER] Callback URL being sent to PhonePe:', callbackUrl);
-        console.log('[ORDER] Redirect URL being sent to PhonePe:', redirectUrl);
-        console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
-
-        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+        const jsonPayload = JSON.stringify(payload);
+        const base64Payload = Buffer.from(jsonPayload).toString("base64");
         const checksum = generateChecksum(base64Payload);
+        const requestBody = JSON.stringify({ request: base64Payload });
+        const headers = {
+            "Content-Type": "application/json",
+            "X-VERIFY": checksum,
+            "X-MERCHANT-ID": merchantId
+        };
+
+        // Audit Logging Part 2: Payload Snapshot
+        console.log("RAW PAYLOAD:", payload);
+        console.log("STRINGIFIED:", jsonPayload);
+        console.log("BASE64:", base64Payload);
+        console.log("X-VERIFY:", checksum);
+        console.log("TXN ID:", merchantOrderId);
+        console.log("FINAL REQUEST BODY:", requestBody);
+        console.log("HEADERS:", JSON.stringify(headers, null, 2));
+        console.log("PHONEPE API URL:", phonePeUrl);
 
         const response = await fetch(phonePeUrl, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-VERIFY": checksum,
-                "X-MERCHANT-ID": merchantId
-            },
-            body: JSON.stringify({ request: base64Payload })
+            headers: headers,
+            body: requestBody
         });
 
         const data = await response.json();
         console.log("[ORDER] PhonePe API Response:", JSON.stringify(data, null, 2));
 
-        // Check if PhonePe accepted the callback URL
         if (data.success && data.data) {
-            console.log('[ORDER] PhonePe accepted the payment request');
-            console.log('[ORDER] Check PhonePe dashboard for webhook delivery logs');
-        } else {
-            console.error('[ORDER] PhonePe payment request may have failed or callback URL not accepted');
+            const returnedUrl = data?.data?.instrumentResponse?.redirectInfo?.url || data?.data?.redirectUrl;
+            console.log("RETURNED REDIRECT URL:", returnedUrl);
+            console.log("URL LENGTH:", returnedUrl?.length);
         }
 
         if (data.success) {

@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 // Load from environment only
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
+const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
 const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 
@@ -111,40 +111,56 @@ const placePrebookingOrderController = async (req, res) => {
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;
 
-        console.log('[PRESALE] PhonePe callback URL:', callbackUrl);
-        console.log('[PRESALE] PhonePe redirect URL:', redirectUrl);
+        // Audit Logging Part 1: Source and Incoming Headers
+        const source = (req.headers['origin'] || '').includes('ithyaraa.com') ? 'WEB' : 'APP';
+        console.log("=== FLOW TYPE ===", source);
+        console.log("INCOMING HEADERS:", JSON.stringify(req.headers, null, 2));
 
         const payload = {
             merchantId,
             merchantTransactionId: merchantOrderId,
+            merchantUserId: String(uid), // Mandatory field for PhonePe
             amount: amountPaise, // integer paise
             redirectUrl,
-            callbackUrl, // PhonePe will call this URL for webhook notifications
+            callbackUrl,
             redirectMode: "REDIRECT",
             paymentInstrument: { type: "PAY_PAGE" }
         };
 
-        console.log('[PRESALE] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
-        console.log('[PRESALE] PhonePe API URL:', phonePeUrl);
-        console.log('[PRESALE] Callback URL being sent to PhonePe:', callbackUrl);
-        console.log('[PRESALE] Redirect URL being sent to PhonePe:', redirectUrl);
-        console.log('[PRESALE] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
-
-        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+        const jsonPayload = JSON.stringify(payload);
+        const base64Payload = Buffer.from(jsonPayload).toString("base64");
         const checksum = generateChecksum(base64Payload);
+        const requestBody = JSON.stringify({ request: base64Payload });
+        const headers = {
+            "Content-Type": "application/json",
+            "X-VERIFY": checksum,
+            "X-MERCHANT-ID": merchantId
+        };
+
+        // Audit Logging Part 2: Payload Snapshot
+        console.log("RAW PAYLOAD:", payload);
+        console.log("STRINGIFIED:", jsonPayload);
+        console.log("BASE64:", base64Payload);
+        console.log("X-VERIFY:", checksum);
+        console.log("TXN ID:", merchantOrderId);
+        console.log("FINAL REQUEST BODY:", requestBody);
+        console.log("HEADERS:", JSON.stringify(headers, null, 2));
+        console.log("PHONEPE API URL:", phonePeUrl);
 
         const response = await fetch(phonePeUrl, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-VERIFY": checksum,
-                "X-MERCHANT-ID": merchantId
-            },
-            body: JSON.stringify({ request: base64Payload })
+            headers: headers,
+            body: requestBody
         });
 
         const data = await response.json();
         console.log("[PRESALE] PhonePe API Response:", JSON.stringify(data, null, 2));
+
+        if (data.success && data.data) {
+            const returnedUrl = data?.data?.instrumentResponse?.redirectInfo?.url || data?.data?.redirectUrl;
+            console.log("RETURNED REDIRECT URL:", returnedUrl);
+            console.log("URL LENGTH:", returnedUrl?.length);
+        }
 
         // Check if PhonePe accepted the callback URL
         if (data.success && data.data) {
