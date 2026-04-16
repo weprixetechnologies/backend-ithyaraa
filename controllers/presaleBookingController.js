@@ -8,9 +8,12 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 // Load from environment only
-const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
-const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
-const keyIndex = process.env.KEY_INDEX || '1';
+const merchantId = process.env.MERCHANT_ID;
+if (!merchantId) throw new Error("MERCHANT_ID is missing in environment variables");
+const key = process.env.KEY;
+if (!key) throw new Error("KEY (Salt Key) is missing in environment variables");
+const keyIndex = process.env.KEY_INDEX;
+if (!keyIndex) throw new Error("KEY_INDEX is missing in environment variables");
 
 if (process.env.NODE_ENV === "production") {
     if (!merchantId || !key || !keyIndex) {
