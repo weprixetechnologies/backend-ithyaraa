@@ -218,6 +218,7 @@ const buyNowController = async (req, res) => {
         uid: providedUid,
         selectedDressType,
         referBy,
+        device, // Step 0: Extract device flag
     } = payload;
 
     const paymentMode = String(rawPaymentMode || 'COD').toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
@@ -1270,6 +1271,27 @@ const buyNowController = async (req, res) => {
 
             const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
             const checksum = phonepeService.generateChecksum('/pg/v1/pay', base64Payload);
+
+            // 🟢 STEP 1: APP FLOW (NEW - SDK)
+            if (device === "app") {
+                console.log("=== PHONEPE FLOW ===");
+                console.log("DEVICE: APP");
+                console.log("TXN:", merchantOrderId);
+                console.log("AMOUNT:", amountPaise);
+                console.log("SDK PAYLOAD LENGTH:", base64Payload.length);
+
+                return res.json({
+                    success: true,
+                    flow: "SDK",
+                    data: {
+                        request: base64Payload,
+                        checksum: checksum,
+                        merchantId: merchantId
+                    }
+                });
+            }
+
+            // 🔵 STEP 2: WEBSITE FLOW (UNCHANGED)
 
             const fetch = require('node-fetch');
             // Use global AbortController if available (Node 18+), otherwise skip timeout signal.

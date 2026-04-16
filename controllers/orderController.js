@@ -253,6 +253,7 @@ const placeOrderController = async (req, res) => {
         const uid = req.user.uid; // JWT payload uses uid
         const rawMode = (req.body && req.body.paymentMode) ? String(req.body.paymentMode) : 'COD';
         const paymentMode = rawMode.toUpperCase() === 'PREPAID' ? 'PREPAID' : 'COD';
+        const { device } = req.body; // Step 0: Extract device flag
         const walletApplied = Math.max(0, Number(req.body?.walletApplied || 0));
 
         // Extract addressID and couponCode from req.body
@@ -327,6 +328,27 @@ const placeOrderController = async (req, res) => {
 
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
+
+        // 🟢 STEP 1: APP FLOW (NEW - SDK)
+        if (device === "app") {
+            console.log("=== PHONEPE FLOW ===");
+            console.log("DEVICE: APP");
+            console.log("TXN:", merchantOrderId);
+            console.log("AMOUNT:", amountPaise);
+            console.log("SDK PAYLOAD LENGTH:", base64Payload.length);
+
+            return res.json({
+                success: true,
+                flow: "SDK",
+                data: {
+                    request: base64Payload,
+                    checksum: checksum,
+                    merchantId: merchantId
+                }
+            });
+        }
+
+        // 🔵 STEP 2: WEBSITE FLOW (UNCHANGED)
 
         const response = await fetch(phonePeUrl, {
             method: "POST",
