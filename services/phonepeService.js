@@ -43,48 +43,6 @@ function generateChecksum(path, payload = '') {
 }
 
 /**
- * Initiate payment by calling PhonePe API with Request Context Forwarding
- * @param {Object} payload - Raw payload object (before base64)
- * @param {string} clientIp - Original requester IP address
- * @param {string} userAgent - Original requester User-Agent string
- * @returns {Object} - PhonePe API response
- */
-async function initiatePayment(payload, clientIp, userAgent) {
-    const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-    const checksum = generateChecksum("/pg/v1/pay", base64Payload);
-    const phonePeUrl = process.env.NODE_ENV === "production"
-        ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
-        : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay";
-
-    // Standard Browser User-Agent fallback to ensure "High Trust" fingerprinting
-    const defaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-    
-    // Clean and normalize IP (extract first IP if list, fallback to local if missing)
-    const forwardedIp = clientIp ? clientIp.split(',')[0].trim() : "127.0.0.1";
-    const finalUA = userAgent || defaultUA;
-
-    console.log(`[PhonePe API Request] Calling Pay API with context forwarding:`);
-    console.log(`[PhonePe API Request] X-FORWARDED-FOR: ${forwardedIp}`);
-    console.log(`[PhonePe API Request] User-Agent: ${finalUA}`);
-
-    const response = await fetch(phonePeUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-VERIFY": checksum,
-            "X-MERCHANT-ID": payload.merchantId,
-            "X-FORWARDED-FOR": forwardedIp,
-            "User-Agent": finalUA
-        },
-        body: JSON.stringify({ request: base64Payload })
-    });
-
-    const data = await response.json();
-    console.log(`[PhonePe API Request] Response Success: ${data.success}`);
-    return data;
-}
-
-/**
  * Check payment status using PhonePe Status API
  * @param {string} merchantID - Merchant transaction ID
  * @returns {Object} - Payment status response
@@ -430,6 +388,5 @@ module.exports = {
     checkPaymentStatus,
     verifyWebhookSignature,
     processPaymentStatus,
-    generateChecksum,
-    initiatePayment
+    generateChecksum
 };

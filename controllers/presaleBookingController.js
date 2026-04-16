@@ -105,11 +105,8 @@ const placePrebookingOrderController = async (req, res) => {
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;
 
+        console.log('[PRESALE] PhonePe callback URL:', callbackUrl);
         console.log('[PRESALE] PhonePe redirect URL:', redirectUrl);
-
-        // Capture client context for Request Context Forwarding
-        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-        const userAgent = req.headers['user-agent'];
 
         const payload = {
             merchantId,
@@ -123,12 +120,36 @@ const placePrebookingOrderController = async (req, res) => {
         };
 
         console.log('[PRESALE] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
+        console.log('[PRESALE] PhonePe API URL:', phonePeUrl);
         console.log('[PRESALE] Callback URL being sent to PhonePe:', callbackUrl);
         console.log('[PRESALE] Redirect URL being sent to PhonePe:', redirectUrl);
         console.log('[PRESALE] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
-        const data = await phonepeService.initiatePayment(payload, clientIp, userAgent);
-        console.log("[PRESALE] PhonePe API Response:", JSON.stringify(data, null, 2));
+        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+        const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
+
+        const headers = {
+            "Content-Type": "application/json",
+            "X-VERIFY": checksum,
+            "X-MERCHANT-ID": merchantId,
+
+            // FORCE BROWSER IDENTITY (CRITICAL)
+            "User-Agent":
+                "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        };
+
+        console.log("[PhonePe FIX] Using forced browser headers");
+        console.log("User-Agent:", headers["User-Agent"]);
+
+        const response = await fetch(phonePeUrl, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ request: base64Payload })
+        });
+
+        const data = await response.json();
         console.log("[PRESALE] PhonePe API Response:", JSON.stringify(data, null, 2));
 
         // Check if PhonePe accepted the callback URL
