@@ -58,6 +58,15 @@ const handleOrderWebhookController = async (req, res) => {
         console.log('[WEBHOOK-ORDER] Headers:', JSON.stringify(req.headers, null, 2));
         console.log('[WEBHOOK-ORDER] Body type:', typeof req.body);
         console.log('[WEBHOOK-ORDER] Body is Buffer:', Buffer.isBuffer(req.body));
+        
+        // Detailed Meta for Debugging
+        console.log('[WEBHOOK-ORDER] --- SIGNATURE META START ---');
+        console.log(`[WEBHOOK-ORDER] Path: ${req.originalUrl}`);
+        console.log(`[WEBHOOK-ORDER] X-VERIFY Header: ${req.headers['x-verify'] || req.headers['X-VERIFY']}`);
+        console.log(`[WEBHOOK-ORDER] X-MERCHANT-ID (if sent by PhonePe): ${req.headers['x-merchant-id'] || req.headers['X-MERCHANT-ID']}`);
+        console.log(`[WEBHOOK-ORDER] Content-Type: ${req.headers['content-type']}`);
+        console.log(`[WEBHOOK-ORDER] Content-Length: ${req.headers['content-length']}`);
+        console.log('[WEBHOOK-ORDER] --- SIGNATURE META END ---');
 
         // ====================================================================
         // STEP 1: EXTRACT RAW BODY AND VERIFY WEBHOOK SIGNATURE
@@ -246,6 +255,15 @@ const handlePresaleWebhookController = async (req, res) => {
         console.log('[WEBHOOK-PRESALE] Headers:', JSON.stringify(req.headers, null, 2));
         console.log('[WEBHOOK-PRESALE] Body type:', typeof req.body);
         console.log('[WEBHOOK-PRESALE] Body is Buffer:', Buffer.isBuffer(req.body));
+
+        // Detailed Meta for Debugging
+        console.log('[WEBHOOK-PRESALE] --- SIGNATURE META START ---');
+        console.log(`[WEBHOOK-PRESALE] Path: ${req.originalUrl}`);
+        console.log(`[WEBHOOK-PRESALE] X-VERIFY Header: ${req.headers['x-verify'] || req.headers['X-VERIFY']}`);
+        console.log(`[WEBHOOK-PRESALE] X-MERCHANT-ID (if sent by PhonePe): ${req.headers['x-merchant-id'] || req.headers['X-MERCHANT-ID']}`);
+        console.log(`[WEBHOOK-PRESALE] Content-Type: ${req.headers['content-type']}`);
+        console.log(`[WEBHOOK-PRESALE] Content-Length: ${req.headers['content-length']}`);
+        console.log('[WEBHOOK-PRESALE] --- SIGNATURE META END ---');
 
         // ====================================================================
         // STEP 1: EXTRACT RAW BODY AND VERIFY WEBHOOK SIGNATURE

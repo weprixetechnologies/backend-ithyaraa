@@ -1,4 +1,5 @@
 const presaleBookingService = require('../services/presaleBookingService');
+const phonepeService = require('../services/phonepeService');
 const presaleBookingModel = require('../model/presaleBookingModel');
 const usersModel = require('../model/usersModel');
 const invoiceService = require('../services/invoiceService');
@@ -21,13 +22,6 @@ if (process.env.NODE_ENV === "production") {
 const phonePeUrl = process.env.NODE_ENV === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
     : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay";
-
-function generateChecksum(base64Payload) {
-    const path = "/pg/v1/pay";
-    const raw = base64Payload + path + key;
-    const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
-    return `${sha256}###${keyIndex}`;
-}
 
 /**
  * Place a presale booking order
@@ -117,6 +111,7 @@ const placePrebookingOrderController = async (req, res) => {
         const payload = {
             merchantId,
             merchantTransactionId: merchantOrderId,
+            merchantUserId: uid,
             amount: amountPaise, // integer paise
             redirectUrl,
             callbackUrl, // PhonePe will call this URL for webhook notifications
@@ -131,7 +126,7 @@ const placePrebookingOrderController = async (req, res) => {
         console.log('[PRESALE] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-        const checksum = generateChecksum(base64Payload);
+        const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
 
         const response = await fetch(phonePeUrl, {
             method: "POST",

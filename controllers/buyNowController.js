@@ -4,6 +4,7 @@ const db = require('../utils/dbconnect');
 const { generateAccessToken } = require('../utils/tokenUtils');
 const orderModel = require('../model/orderModel');
 const coinModel = require('../model/coinModel');
+const phonepeService = require('../services/phonepeService');
 
 // PhonePe config – mirror existing integration
 const crypto = require('crypto');
@@ -22,13 +23,6 @@ const phonePeUrl =
     process.env.NODE_ENV === 'production'
         ? 'https://api.phonepe.com/apis/hermes/pg/v1/pay'
         : 'https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay';
-
-function generateChecksum(base64Payload) {
-    const path = '/pg/v1/pay';
-    const raw = base64Payload + path + key;
-    const sha256 = crypto.createHash('sha256').update(raw).digest('hex');
-    return `${sha256}###${keyIndex}`;
-}
 
 // Helpers
 function generateRandomString(length, charset) {
@@ -1264,15 +1258,18 @@ const buyNowController = async (req, res) => {
             const payloadObj = {
                 merchantId,
                 merchantTransactionId: merchantOrderId,
+                merchantUserId: uid,
                 amount: amountPaise,
                 redirectUrl,
                 callbackUrl,
                 redirectMode: 'REDIRECT',
                 paymentInstrument: { type: 'PAY_PAGE' },
             };
+            
+            console.log('[BuyNow] PhonePe Payment Request Payload:', JSON.stringify(payloadObj, null, 2));
 
             const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
-            const checksum = generateChecksum(base64Payload);
+            const checksum = phonepeService.generateChecksum('/pg/v1/pay', base64Payload);
 
             const fetch = require('node-fetch');
             // Use global AbortController if available (Node 18+), otherwise skip timeout signal.

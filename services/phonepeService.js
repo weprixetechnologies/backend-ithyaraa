@@ -31,7 +31,15 @@ const phonePeWebhookUrl = process.env.NODE_ENV === "production"
 function generateChecksum(path, payload = '') {
     const raw = payload + path + key;
     const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
-    return `${sha256}###${keyIndex}`;
+    const checksum = `${sha256}###${keyIndex}`;
+
+    console.log('[PhonePe Signature] Generating checksum for request:');
+    console.log(`[PhonePe Signature] Path: ${path}`);
+    console.log(`[PhonePe Signature] Payload length: ${payload.length}`);
+    console.log(`[PhonePe Signature] Salt Index: ${keyIndex}`);
+    console.log(`[PhonePe Signature] Result: ${checksum}`);
+    
+    return checksum;
 }
 
 /**
@@ -205,54 +213,84 @@ async function checkPaymentStatus(merchantID) {
  */
 function verifyWebhookSignature(signature, payload) {
     try {
+        console.log('[PhonePe Webhook] Verifying signature...');
+        console.log(`[PhonePe Webhook] Received Signature: ${signature}`);
+
         if (!signature || typeof signature !== 'string') {
-            console.error('Webhook signature verification error: missing or invalid signature header');
+            console.error('[PhonePe Webhook] Error: missing or invalid signature header');
             return false;
         }
 
         // Split received signature into hash and index parts
         const [receivedHash, receivedIndex] = signature.split('###');
         if (!receivedHash || !receivedIndex) {
-            console.error('Webhook signature verification error: malformed X-VERIFY header');
+            console.error('[PhonePe Webhook] Error: malformed X-VERIFY header');
             return false;
         }
+
+        console.log(`[PhonePe Webhook] Salt Index: ${receivedIndex}`);
 
         // Optional: enforce expected key index
         if (String(receivedIndex) !== String(keyIndex)) {
             console.error(
-                `Webhook signature verification error: unexpected key index. Expected=${keyIndex}, received=${receivedIndex}`
+                `[PhonePe Webhook] Error: unexpected key index. Expected=${keyIndex}, received=${receivedIndex}`
             );
             return false;
         }
 
         // Parse payload to extract base64-encoded "response" field
         let base64Response;
+        let originalPayload;
         try {
-            const parsed = JSON.parse(payload);
-            base64Response = parsed?.response;
+            originalPayload = JSON.parse(payload);
+            base64Response = originalPayload?.response;
         } catch (e) {
-            console.error('Webhook signature verification error: failed to parse payload JSON for response field', e);
+            console.error('[PhonePe Webhook] Error: failed to parse payload JSON', e);
             return false;
         }
 
         if (!base64Response || typeof base64Response !== 'string') {
-            console.error('Webhook signature verification error: missing or invalid response field in payload');
+            console.error('[PhonePe Webhook] Error: missing or invalid response field in payload');
             return false;
         }
 
-        // Compute expected hash as per PhonePe docs: SHA256(base64_response + salt_key)
+        // 1. EXTRACT MERCHANT ID AND VERIFY
+        try {
+            const decodedString = Buffer.from(base64Response, 'base64').toString('utf8');
+            const decodedData = JSON.parse(decodedString);
+            
+            const payloadMerchantId = decodedData?.merchantId || decodedData?.data?.merchantId;
+            
+            console.log(`[PhonePe Webhook] Payload Merchant ID: ${payloadMerchantId}`);
+            console.log(`[PhonePe Webhook] Configured Merchant ID: ${merchantId}`);
+
+            if (payloadMerchantId && payloadMerchantId !== merchantId) {
+                console.error(`[PhonePe Webhook] Error: merchantId mismatch! Expected ${merchantId}, got ${payloadMerchantId}`);
+                return false; 
+            }
+        } catch (decodeErr) {
+            console.warn('[PhonePe Webhook] Warning: Could not decode base64 response for merchantId check during signature verification', decodeErr.message);
+        }
+
+        // 2. COMPUTE AND COMPARE HASH
         const computedHash = crypto
             .createHash('sha256')
             .update(base64Response + key)
             .digest('hex');
 
         const isValid = computedHash === receivedHash;
+        
         if (!isValid) {
-            console.error('Webhook signature verification error: hash mismatch');
+            console.error('[PhonePe Webhook] Error: Hash mismatch!');
+            console.error(`[PhonePe Webhook] Computed Hash: ${computedHash}`);
+            console.error(`[PhonePe Webhook] Received Hash: ${receivedHash}`);
+        } else {
+            console.log('[PhonePe Webhook] Signature verified successfully.');
         }
+
         return isValid;
     } catch (error) {
-        console.error('Webhook signature verification error:', error);
+        console.error('[PhonePe Webhook] Fatal Error:', error);
         return false;
     }
 }

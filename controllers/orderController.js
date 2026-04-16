@@ -1,4 +1,5 @@
 const orderService = require('../services/orderService');
+const phonepeService = require('../services/phonepeService');
 const settlementService = require('../services/settlementService');
 const orderModel = require('../model/orderModel');
 const { randomUUID } = require('crypto');
@@ -23,13 +24,6 @@ if (process.env.NODE_ENV === "production") {
 const phonePeUrl = process.env.NODE_ENV === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
     : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay";
-
-function generateChecksum(base64Payload) {
-    const path = "/pg/v1/pay";
-    const raw = base64Payload + path + key;
-    const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
-    return `${sha256}###${keyIndex}`;
-}
 
 // Helper function to send order confirmation email
 async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrderId = null) {
@@ -317,6 +311,7 @@ const placeOrderController = async (req, res) => {
         const payload = {
             merchantId,
             merchantTransactionId: merchantOrderId,
+            merchantUserId: uid,
             amount: amountPaise, // integer paise
             redirectUrl,
             callbackUrl, // PhonePe will call this URL for webhook notifications
@@ -331,7 +326,7 @@ const placeOrderController = async (req, res) => {
         console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-        const checksum = generateChecksum(base64Payload);
+        const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
 
         const response = await fetch(phonePeUrl, {
             method: "POST",
