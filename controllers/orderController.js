@@ -10,12 +10,9 @@ const db = require('../utils/dbconnect');
 const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
 
 // Load from environment only
-const merchantId = process.env.MERCHANT_ID;
-if (!merchantId) throw new Error("MERCHANT_ID is missing in environment variables");
-const key = process.env.KEY;
-if (!key) throw new Error("KEY (Salt Key) is missing in environment variables");
-const keyIndex = process.env.KEY_INDEX;
-if (!keyIndex) throw new Error("KEY_INDEX is missing in environment variables");
+const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
+const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
+const keyIndex = process.env.KEY_INDEX || '1';
 
 if (process.env.NODE_ENV === "production") {
     if (!merchantId || !key || !keyIndex) {
@@ -314,61 +311,47 @@ const placeOrderController = async (req, res) => {
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
-        // Audit Logging Part 1: Source and Incoming Headers
-        const source = (req.headers['origin'] || '').includes('ithyaraa.com') ? 'WEB' : 'APP';
-        console.log("=== FLOW TYPE ===", source);
-        console.log("INCOMING HEADERS:", JSON.stringify(req.headers, null, 2));
+        console.log('[ORDER] PhonePe callback URL:', callbackUrl);
+        console.log('[ORDER] PhonePe redirect URL:', redirectUrl);
 
         const payload = {
             merchantId,
             merchantTransactionId: merchantOrderId,
-            merchantUserId: String(uid), // Mandatory field for PhonePe
             amount: amountPaise, // integer paise
             redirectUrl,
-            callbackUrl,
+            callbackUrl, // PhonePe will call this URL for webhook notifications
             redirectMode: "REDIRECT",
             paymentInstrument: { type: "PAY_PAGE" }
         };
 
-        const jsonPayload = JSON.stringify(payload);
-        const base64Payload = Buffer.from(jsonPayload).toString("base64");
-        const checksum = generateChecksum(base64Payload);
-        const requestBody = JSON.stringify({ request: base64Payload });
-        const headers = {
-            "Content-Type": "application/json",
-            "X-VERIFY": checksum,
-            "X-MERCHANT-ID": merchantId,
-            // FORCE browser-like fingerprint to avoid risk engine rejection
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Connection": "keep-alive"
-        };
+        console.log('[ORDER] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
+        console.log('[ORDER] PhonePe API URL:', phonePeUrl);
+        console.log('[ORDER] Callback URL being sent to PhonePe:', callbackUrl);
+        console.log('[ORDER] Redirect URL being sent to PhonePe:', redirectUrl);
+        console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
-        // Audit Logging Part 2: Payload Snapshot
-        console.log("RAW PAYLOAD:", payload);
-        console.log("STRINGIFIED:", jsonPayload);
-        console.log("BASE64:", base64Payload);
-        console.log("X-VERIFY:", checksum);
-        console.log("TXN ID:", merchantOrderId);
-        console.log("FINAL REQUEST BODY:", requestBody);
-        console.log("[PhonePe] Outgoing Headers:", JSON.stringify(headers, null, 2));
-        console.log("PHONEPE API URL:", phonePeUrl);
+        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
+        const checksum = generateChecksum(base64Payload);
 
         const response = await fetch(phonePeUrl, {
             method: "POST",
-            headers: headers,
-            body: requestBody
+            headers: {
+                "Content-Type": "application/json",
+                "X-VERIFY": checksum,
+                "X-MERCHANT-ID": merchantId
+            },
+            body: JSON.stringify({ request: base64Payload })
         });
 
         const data = await response.json();
-        console.log("[PhonePe] Response Code:", data.code);
         console.log("[ORDER] PhonePe API Response:", JSON.stringify(data, null, 2));
 
+        // Check if PhonePe accepted the callback URL
         if (data.success && data.data) {
-            const returnedUrl = data?.data?.instrumentResponse?.redirectInfo?.url || data?.data?.redirectUrl;
-            console.log("RETURNED REDIRECT URL:", returnedUrl);
-            console.log("URL LENGTH:", returnedUrl?.length);
+            console.log('[ORDER] PhonePe accepted the payment request');
+            console.log('[ORDER] Check PhonePe dashboard for webhook delivery logs');
+        } else {
+            console.error('[ORDER] PhonePe payment request may have failed or callback URL not accepted');
         }
 
         if (data.success) {
