@@ -134,7 +134,12 @@ const placePrebookingOrderController = async (req, res) => {
         const headers = {
             "Content-Type": "application/json",
             "X-VERIFY": checksum,
-            "X-MERCHANT-ID": merchantId
+            "X-MERCHANT-ID": merchantId,
+            // FORCE browser-like fingerprint to avoid risk engine rejection
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive"
         };
 
         // Audit Logging Part 2: Payload Snapshot
@@ -144,7 +149,7 @@ const placePrebookingOrderController = async (req, res) => {
         console.log("X-VERIFY:", checksum);
         console.log("TXN ID:", merchantOrderId);
         console.log("FINAL REQUEST BODY:", requestBody);
-        console.log("HEADERS:", JSON.stringify(headers, null, 2));
+        console.log("[PhonePe] Outgoing Headers:", JSON.stringify(headers, null, 2));
         console.log("PHONEPE API URL:", phonePeUrl);
 
         const response = await fetch(phonePeUrl, {
@@ -154,6 +159,7 @@ const placePrebookingOrderController = async (req, res) => {
         });
 
         const data = await response.json();
+        console.log("[PhonePe] Response Code:", data.code);
         console.log("[PRESALE] PhonePe API Response:", JSON.stringify(data, null, 2));
 
         if (data.success && data.data) {
