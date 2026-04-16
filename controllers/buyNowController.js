@@ -1268,31 +1268,14 @@ const buyNowController = async (req, res) => {
             
             console.log('[BuyNow] PhonePe Payment Request Payload:', JSON.stringify(payloadObj, null, 2));
 
-            const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
-            const checksum = phonepeService.generateChecksum('/pg/v1/pay', base64Payload);
+            // Capture client context for Request Context Forwarding
+            const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            const userAgent = req.headers['user-agent'];
 
-            const fetch = require('node-fetch');
-            // Use global AbortController if available (Node 18+), otherwise skip timeout signal.
-            const AbortCtrl = global.AbortController || global.abortController || null;
-            const controller = AbortCtrl ? new AbortCtrl() : null;
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            const phonePeResponse = await phonepeService.initiatePayment(payloadObj, clientIp, userAgent);
 
-            let phonePeResponse;
-            try {
-                const response = await fetch(phonePeUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-VERIFY': checksum,
-                        'X-MERCHANT-ID': merchantId,
-                    },
-                    body: JSON.stringify({ request: base64Payload }),
-                    signal: controller ? controller.signal : undefined,
-                });
-                phonePeResponse = await response.json();
-            } catch (fetchErr) {
-                clearTimeout(timeoutId);
-                console.error('[BuyNow][PhonePe] Fetch failed after order committed:', fetchErr.message);
+            if (!phonePeResponse?.success) {
+                console.error('[BuyNow][PhonePe] Initiation failed:', phonePeResponse);
                 return res.status(200).json({
                     success: true,
                     orderID,
@@ -1305,32 +1288,6 @@ const buyNowController = async (req, res) => {
                     paymentStatus: 'pending',
                     phonePeRedirectURL: null,
                     phonePeError: 'PAYMENT_INIT_FAILED',
-                    redirectURL:
-                        productType === 'presale'
-                            ? preBookingID != null
-                                ? `/presale/order-status/${preBookingID}`
-                                : null
-                            : orderID != null
-                                ? `/order-status/order-summary/${orderID}`
-                                : null,
-                });
-            }
-            clearTimeout(timeoutId);
-
-            if (!phonePeResponse?.success) {
-                console.error('[BuyNow][PhonePe] PhonePe returned failure:', phonePeResponse);
-                return res.status(200).json({
-                    success: true,
-                    orderID,
-                    preBookingID,
-                    txnID,
-                    uid,
-                    isNewUser,
-                    sessionToken: sessionToken || null,
-                    paymentMode,
-                    paymentStatus: 'pending',
-                    phonePeRedirectURL: null,
-                    phonePeError: 'PAYMENT_GATEWAY_FAILED',
                     redirectURL:
                         productType === 'presale'
                             ? preBookingID != null

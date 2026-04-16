@@ -1,252 +1,11 @@
-const orderService = require('../services/orderService');
-const phonepeService = require('../services/phonepeService');
-const settlementService = require('../services/settlementService');
-const orderModel = require('../model/orderModel');
+/* eslint-disable no-unused-vars */
+const orderModel = require('./../model/orderModel');
+const orderService = require('./../services/orderService');
+const usersModel = require('./../model/usersModel');
+const phonepeService = require('./../services/phonepeService');
 const { randomUUID } = require('crypto');
-const crypto = require('crypto');
-const fetch = require('node-fetch');
-const { addSendEmailJob } = require('../queue/emailProducer');
-const usersModel = require('../model/usersModel');
-const db = require('../utils/dbconnect');
-const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
-
-// Load from environment only
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
-const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
-const keyIndex = process.env.KEY_INDEX || '1';
-
-if (process.env.NODE_ENV === "production") {
-    if (!merchantId || !key || !keyIndex) {
-        throw new Error("Missing PhonePe production credentials");
-    }
-}
-
-const phonePeUrl = process.env.NODE_ENV === "production"
-    ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
-    : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay";
-
-// Helper function to send order confirmation email
-async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrderId = null) {
-    try {
-        const orderDate = new Date().toLocaleDateString('en-IN', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-
-        const emailVariables = {
-            customerName: user.name || user.username,
-            orderID: order.orderID,
-            orderDate: orderDate,
-            paymentMode: paymentMode,
-            merchantOrderId: merchantOrderId,
-            items: order.orderData.items.map(item => ({
-                name: item.name,
-                variationName: item.variationName,
-                quantity: item.quantity,
-                lineTotalAfter: item.lineTotalAfter,
-                offerApplied: item.offerApplied
-            })),
-            subtotal: order.orderData.summary.subtotal,
-            totalDiscount: order.orderData.summary.totalDiscount,
-            total: order.orderData.summary.total,
-            isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
-        };
-
-        // Generate invoice PDF for attachment
-        let attachments = [];
-        try {
-            const orderService = require('../services/orderService');
-            console.log(`Attempting to generate invoice for order ${order.orderID}...`);
-            const invoiceResult = await orderService.generateInvoice(order.orderID);
-
-            if (invoiceResult && invoiceResult.success) {
-                // Convert Buffer to base64 for queue serialization
-                const pdfBuffer = invoiceResult.invoice.pdfBuffer;
-                const base64Content = pdfBuffer.toString('base64');
-
-                attachments = [{
-                    filename: `invoice_${order.orderID}.pdf`,
-                    content: base64Content, // Store as base64 string for queue
-                    contentType: 'application/pdf',
-                    encoding: 'base64' // Flag to indicate this needs decoding
-                }];
-
-                console.log(`✅ Invoice PDF generated for order confirmation: ${pdfBuffer.length} bytes (base64: ${base64Content.length} chars)`);
-            } else {
-                console.warn(`⚠️ Invoice generation returned no result or success=false for order ${order.orderID}`);
-            }
-        } catch (invoiceError) {
-            console.error(`❌ Error generating invoice for order confirmation (order ${order.orderID}):`, {
-                message: invoiceError.message,
-                stack: invoiceError.stack,
-                name: invoiceError.name
-            });
-            // Continue without invoice attachment - don't break order confirmation
-        }
-
-        // Log before sending to queue
-        console.log(`Adding email job to queue - attachments count: ${attachments.length}`);
-        if (attachments.length > 0) {
-            console.log(`Attachment details:`, {
-                filename: attachments[0].filename,
-                contentType: attachments[0].contentType,
-                encoding: attachments[0].encoding,
-                contentLength: attachments[0].content?.length || 0,
-                contentTypeOf: typeof attachments[0].content
-            });
-        }
-
-        await addSendEmailJob({
-            to: user.emailID,
-            templateName: 'order-confirmation',
-            variables: emailVariables,
-            subject: `Order Confirmation #${order.orderID} - Ithyaraa`,
-            attachments: attachments
-        });
-
-        console.log(`Order confirmation email queued for ${user.emailID} for order ${order.orderID}${attachments.length > 0 ? ' with invoice attachment' : ''}`);
-    } catch (error) {
-        console.error('Error sending order confirmation email:', error);
-        // Don't throw error - email failure shouldn't break order placement
-    }
-}
-
-// Helper function to send seller notification emails
-async function sendSellerNotificationEmails(orderID, paymentMode) {
-    try {
-        // Get order items grouped by brandID
-        const [orderItems] = await db.query(
-            `SELECT oi.name, oi.variationName, oi.quantity, oi.brandID, od.paymentMode, od.createdAt
-             FROM order_items oi
-             INNER JOIN orderDetail od ON oi.orderID = od.orderID
-             WHERE oi.orderID = ?
-             ORDER BY oi.brandID, oi.createdAt`,
-            [orderID]
-        );
-
-        if (!orderItems || orderItems.length === 0) {
-            console.log(`No order items found for order ${orderID}`);
-            return;
-        }
-
-        // Group items by brandID
-        const itemsByBrand = {};
-        orderItems.forEach(item => {
-            const brandID = item.brandID || 'inhouse'; // Use 'inhouse' as key for null brandID
-            if (!itemsByBrand[brandID]) {
-                itemsByBrand[brandID] = [];
-            }
-            itemsByBrand[brandID].push(item);
-        });
-
-        // Get order date
-        const orderDate = orderItems[0].createdAt
-            ? new Date(orderItems[0].createdAt).toLocaleDateString('en-IN', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
-            : new Date().toLocaleDateString('en-IN', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-
-        // Send email for each brand
-        for (const [brandID, items] of Object.entries(itemsByBrand)) {
-            try {
-                let sellerEmail = null;
-                let sellerName = 'Seller';
-
-                if (brandID === 'inhouse') {
-                    // Inhouse products - send to ithyaraa.official@gmail.com
-                    sellerEmail = 'ithyaraa.official@gmail.com';
-                    sellerName = 'Ithyaraa Team';
-                } else {
-                    // Get seller email from users table
-                    const [brandUsers] = await db.query(
-                        `SELECT emailID, name, username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
-                        [brandID]
-                    );
-
-                    if (brandUsers && brandUsers.length > 0) {
-                        sellerEmail = brandUsers[0].emailID;
-                        sellerName = brandUsers[0].name || brandUsers[0].username || 'Seller';
-                    } else {
-                        console.warn(`Brand user not found for brandID: ${brandID}`);
-                        continue; // Skip if brand not found
-                    }
-                }
-
-                if (!sellerEmail) {
-                    console.warn(`No email found for brandID: ${brandID}`);
-                    continue;
-                }
-
-                // Format items as HTML
-                let itemsHtml = '';
-                items.forEach(item => {
-                    const variationText = item.variationName
-                        ? `<p style="margin: 0 0 5px 0; color: #666666; font-size: 13px;">Variant: <span style="color: #1a1a1a;">${item.variationName}</span></p>`
-                        : '';
-
-                    itemsHtml += `
-                        <tr>
-                            <td style="padding: 20px; border-bottom: 1px solid #f0f0f0;">
-                                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                    <tr>
-                                        <td style="padding: 0;">
-                                            <p style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 16px; font-weight: 600; line-height: 1.4;">
-                                                ${item.name || 'Product'}</p>
-                                            ${variationText}
-                                            <p style="margin: 0; color: #666666; font-size: 13px;">Quantity:
-                                                <span style="color: #1a1a1a; font-weight: 600;">${item.quantity || 1}</span>
-                                            </p>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
-                        </tr>
-                    `;
-                });
-
-                // Prepare email variables
-                const emailVariables = {
-                    orderID: orderID,
-                    orderDate: orderDate,
-                    paymentMode: paymentMode || 'COD',
-                    productCount: items.length,
-                    itemsList: itemsHtml
-                };
-
-                // Queue email
-                await addSendEmailJob({
-                    to: sellerEmail,
-                    templateName: 'order_notify',
-                    variables: emailVariables,
-                    subject: `New Order #${orderID} - ${items.length} Product(s) - Ithyaraa`
-                });
-
-                console.log(`Seller notification email queued for ${sellerEmail} (${brandID === 'inhouse' ? 'Inhouse' : sellerName}) - Order ${orderID} - ${items.length} product(s)`);
-            } catch (brandError) {
-                console.error(`Error sending notification for brandID ${brandID}:`, brandError);
-                // Continue with other brands even if one fails
-            }
-        }
-    } catch (error) {
-        console.error('Error sending seller notification emails:', error);
-        // Don't throw error - email failure shouldn't break order placement
-    }
-}
+const nodeFetch = require('node-fetch');
+const { sendOrderConfirmationEmail, sendSellerNotificationEmails } = require('./../services/emailService');
 
 const placeOrderController = async (req, res) => {
     try {
@@ -297,6 +56,8 @@ const placeOrderController = async (req, res) => {
         }
 
         const merchantOrderId = randomUUID();
+        const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
+
         // Normalize FRONTEND_URL - remove trailing slashes
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
@@ -305,8 +66,11 @@ const placeOrderController = async (req, res) => {
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
-        console.log('[ORDER] PhonePe callback URL:', callbackUrl);
         console.log('[ORDER] PhonePe redirect URL:', redirectUrl);
+
+        // Capture client context for Request Context Forwarding
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
 
         const payload = {
             merchantId,
@@ -320,25 +84,11 @@ const placeOrderController = async (req, res) => {
         };
 
         console.log('[ORDER] PhonePe Payment Request Payload:', JSON.stringify(payload, null, 2));
-        console.log('[ORDER] PhonePe API URL:', phonePeUrl);
         console.log('[ORDER] Callback URL being sent to PhonePe:', callbackUrl);
         console.log('[ORDER] Redirect URL being sent to PhonePe:', redirectUrl);
         console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
-        const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
-        const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
-
-        const response = await fetch(phonePeUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-VERIFY": checksum,
-                "X-MERCHANT-ID": merchantId
-            },
-            body: JSON.stringify({ request: base64Payload })
-        });
-
-        const data = await response.json();
+        const data = await phonepeService.initiatePayment(payload, clientIp, userAgent);
         console.log("[ORDER] PhonePe API Response:", JSON.stringify(data, null, 2));
 
         // Check if PhonePe accepted the callback URL
@@ -368,19 +118,21 @@ const placeOrderController = async (req, res) => {
                 paymentMode: 'PREPAID',
                 orderID: order.orderID,
                 merchantTransactionId: merchantOrderId,
-                checkoutPageUrl: checkoutUrl || data
+                checkoutPageUrl: checkoutUrl || data,
+                status: 'pending'
             });
         } else {
+            console.error('[ORDER] PhonePe API error:', data);
             return res.status(500).json({
                 success: false,
-                message: "PhonePe did not return redirect URL",
-                details: data
+                message: 'PhonePe payment initiation failed',
+                error: data
             });
         }
 
     } catch (error) {
-        console.error("Order placement error:", error);
-        res.status(400).json({ success: false, message: error.message });
+        console.error('Order placement error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Internal server error' });
     }
 };
 
@@ -388,10 +140,10 @@ const getOrderItemsByUidController = async (req, res) => {
     try {
         const uid = req.user.uid;
         const items = await orderService.getOrderItemsByUid(uid);
-        return res.status(200).json({ success: true, items });
+        res.status(200).json({ success: true, items });
     } catch (error) {
         console.error('Get order items error:', error);
-        return res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -400,658 +152,340 @@ const getOrderSummariesController = async (req, res) => {
         const uid = req.user.uid;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
-        const searchOrderID = req.query.orderID || null;
+        const searchOrderID = req.query.searchOrderID || null;
         const status = req.query.status || null;
-        const sortField = req.query.sortField || null;
-        const sortOrder = req.query.sortOrder || null;
+        const sortField = req.query.sortField || 'createdAt';
+        const sortOrder = req.query.sortOrder || 'DESC';
 
         const result = await orderService.getOrderSummaries(uid, page, limit, searchOrderID, status, sortField, sortOrder);
-        return res.status(200).json({ success: true, ...result });
+
+        res.status(200).json({
+            success: true,
+            orders: result.orders,
+            total: result.total,
+            page,
+            limit
+        });
     } catch (error) {
         console.error('Get order summaries error:', error);
-        return res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
 const getOrderDetailsByOrderIDController = async (req, res) => {
     try {
+        const orderID = req.params.orderID;
         const uid = req.user.uid;
-        const { orderID } = req.params;
-        const { items, orderDetail } = await orderService.getOrderDetailsByOrderID(orderID, uid);
-        return res.status(200).json({ success: true, items, orderDetail });
+        const result = await orderService.getOrderDetailsByOrderID(orderID, uid);
+
+        if (!result.orderDetail) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            orderDetail: result.orderDetail,
+            items: result.items
+        });
     } catch (error) {
         console.error('Get order details error:', error);
-        return res.status(400).json({ success: false, message: error.message });
-    }
-};
-
-const safeParseFeaturedImage = (value) => {
-    try {
-        let parsed = value;
-        while (typeof parsed === 'string') parsed = JSON.parse(parsed);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
 const getMyReturnsController = async (req, res) => {
     try {
-        const uid = req.user?.uid;
-        if (!uid) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        const orderModel = require('../model/orderModel');
-        const rows = await orderModel.getMyReturns(uid);
-        const grouped = {};
-        for (const row of rows) {
-            const id = row.orderID;
-            if (!grouped[id]) {
-                grouped[id] = {
-                    orderID: id,
-                    orderCreatedAt: row.orderCreatedAt,
-                    deliveredAt: row.deliveredAt,
-                    orderStatus: row.orderStatus,
-                    items: []
-                };
-            }
-            grouped[id].items.push({
-                orderItemID: row.orderItemID,
-                productID: row.productID,
-                name: row.name,
-                featuredImage: safeParseFeaturedImage(row.featuredImage),
-                quantity: row.quantity,
-                variationName: row.variationName,
-                lineTotalAfter: row.lineTotalAfter,
-                returnStatus: row.returnStatus,
-                returnRequestedAt: row.returnRequestedAt,
-                returnRejectionReason: row.returnRejectionReason,
-                returnTrackingCode: row.returnTrackingCode,
-                returnDeliveryCompany: row.returnDeliveryCompany,
-                returnTrackingUrl: row.returnTrackingUrl,
-                replacementOrderID: row.replacementOrderID,
-                refundQueryID: row.refundQueryID
-            });
-        }
-        const returns = Object.values(grouped).sort((a, b) => new Date(b.orderCreatedAt) - new Date(a.orderCreatedAt));
-        return res.status(200).json({ success: true, returns });
+        const uid = req.user.uid;
+        const [returns] = await require('../utils/dbconnect').query(
+            `SELECT oi.*, p.name as productName, p.featuredImage 
+             FROM order_items oi
+             LEFT JOIN products p ON oi.productID = p.productID
+             WHERE oi.uid = ? AND oi.returnStatus != 'none'
+             ORDER BY oi.updatedAt DESC`,
+            [uid]
+        );
+        res.status(200).json({ success: true, returns });
     } catch (error) {
-        console.error('Get my returns error:', error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('Get returns error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const returnOrderController = async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const { orderItemID, returnType, returnReason, returnComments, photos } = req.body;
+
+        if (!orderItemID || !returnType || !returnReason) {
+            return res.status(400).json({ success: false, message: 'Required fields missing' });
+        }
+
+        const [item] = await require('../utils/dbconnect').query(
+            'SELECT * FROM order_items WHERE orderItemID = ? AND uid = ?',
+            [orderItemID, uid]
+        );
+
+        if (!item || item.length === 0) {
+            return res.status(404).json({ success: false, message: 'Item not found' });
+        }
+
+        const photosJson = JSON.stringify(photos || []);
+        await require('../utils/dbconnect').query(
+            `UPDATE order_items 
+             SET returnStatus = 'pending', returnType = ?, returnReason = ?, 
+                 returnComments = ?, returnPhotos = ?, updatedAt = NOW()
+             WHERE orderItemID = ?`,
+            [returnType, returnReason, returnComments, photosJson, orderItemID]
+        );
+
+        res.status(200).json({ success: true, message: 'Return request submitted' });
+    } catch (error) {
+        console.error('Return order error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const updateOrderController = async (req, res) => {
+    try {
+        const orderID = req.params.orderID;
+        const updateData = req.body;
+        await orderService.updateOrder(orderID, updateData);
+        res.status(200).json({ success: true, message: 'Order updated successfully' });
+    } catch (error) {
+        console.error('Update order error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+// Admin Controllers
+const getAllOrdersController = async (req, res) => {
+    try {
+        const filters = {
+            status: req.query.status,
+            paymentStatus: req.query.paymentStatus,
+            search: req.query.search,
+            page: parseInt(req.query.page) || 1,
+            limit: parseInt(req.query.limit) || 10
+        };
+        const result = await orderService.getAllOrders(filters);
+        res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error('Admin get all orders error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const getAdminOrderDetailsController = async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const order = await orderService.getOrderDetails(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+        res.status(200).json({ success: true, order });
+    } catch (error) {
+        console.error('Admin get order details error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const getRefundQueriesController = async (req, res) => {
+    try {
+        const [queries] = await require('../utils/dbconnect').query(
+            "SELECT * FROM refund_queries WHERE status = 'pending' ORDER BY createdAt DESC"
+        );
+        res.status(200).json({ success: true, queries });
+    } catch (error) {
+        console.error('Get refund queries error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
 const getResolvedRefundQueriesController = async (req, res) => {
     try {
-        const { page, limit } = req.query;
-        const refundQueryModel = require('../model/refundQueryModel');
-        const result = await refundQueryModel.getResolvedQueriesList({ page, limit });
-        return res.status(200).json(result);
+        const [queries] = await require('../utils/dbconnect').query(
+            "SELECT * FROM refund_queries WHERE status != 'pending' ORDER BY updated_at DESC"
+        );
+        res.status(200).json({ success: true, queries });
     } catch (error) {
         console.error('Get resolved refund queries error:', error);
-        return res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
-module.exports.placeOrderController = placeOrderController;
-module.exports.getOrderItemsByUidController = getOrderItemsByUidController;
-module.exports.getOrderSummariesController = getOrderSummariesController;
-module.exports.getOrderDetailsByOrderIDController = getOrderDetailsByOrderIDController;
-module.exports.getMyReturnsController = getMyReturnsController;
-
-const updateOrderController = async (req, res) => {
-    try {
-        const { orderID } = req.params;
-        if (!orderID) {
-            return res.status(400).json({ success: false, message: 'orderID is required' });
-        }
-
-        const updated = await orderService.updateOrder(orderID, req.body || {});
-        if (!updated) {
-            return res.status(404).json({ success: false, message: 'Order not found or no valid fields to update' });
-        }
-
-        return res.status(200).json({ success: true, order: updated });
-    } catch (error) {
-        console.error('Update order error:', error);
-        return res.status(400).json({ success: false, message: error.message });
-    }
-};
-
-// Get order details by order ID
-const getOrderDetailsController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const orderDetails = await orderService.getOrderDetails(orderId, req.user.uid);
-        if (!orderDetails) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        return res.status(200).json({ success: true, data: orderDetails });
-    } catch (error) {
-        console.error('Get order details error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Get order details by order ID for admin
-const getAdminOrderDetailsController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const orderDetails = await orderService.getAdminOrderDetails(orderId);
-        if (!orderDetails) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        return res.status(200).json({ success: true, data: orderDetails });
-    } catch (error) {
-        console.error('Get admin order details error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Get all orders for admin
-const getAllOrdersController = async (req, res) => {
-    try {
-        const { page = 1, limit = 10, status, paymentStatus, search } = req.query;
-        const offset = (page - 1) * limit;
-
-        const orders = await orderService.getAllOrders({
-            page: parseInt(page),
-            limit: parseInt(limit),
-            offset,
-            status,
-            paymentStatus,
-            search
-        });
-
-        return res.status(200).json({
-            success: true,
-            data: orders.orders,
-            pagination: {
-                currentPage: parseInt(page),
-                totalPages: Math.ceil(orders.total / limit),
-                totalOrders: orders.total,
-                hasNext: page < Math.ceil(orders.total / limit),
-                hasPrev: page > 1
-            }
-        });
-    } catch (error) {
-        console.error('Get all orders error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Admin: list refund queries (GET ?page=&limit=&status=)
-const getRefundQueriesController = async (req, res) => {
-    try {
-        const refundQueryModel = require('../model/refundQueryModel');
-        const { page = 1, limit = 20, status } = req.query;
-        const result = await refundQueryModel.getRefundQueriesList({ page, limit, status: status || null });
-        return res.status(200).json({ success: true, ...result });
-    } catch (error) {
-        console.error('Get refund queries error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Admin: update refund query status (PUT body { status })
 const updateRefundQueryStatusController = async (req, res) => {
     try {
-        const refundQueryModel = require('../model/refundQueryModel');
         const { refundQueryID } = req.params;
-        const { status } = req.body || {};
-        if (!refundQueryID || !status) return res.status(400).json({ success: false, message: 'refundQueryID and status required' });
-
-        const valid = ['pending', 'contacting_customer', 'resolved'];
-        if (!valid.includes(status)) return res.status(400).json({ success: false, message: 'Invalid status' });
-
-        // Get old status to check for transition to 'resolved'
-        const existing = await refundQueryModel.getRefundQueryByID(refundQueryID);
-        if (!existing) return res.status(404).json({ success: false, message: 'Refund query not found' });
-
-        const updated = await refundQueryModel.updateRefundQueryStatus(refundQueryID, status);
-        if (!updated) return res.status(404).json({ success: false, message: 'Failed to update status' });
-
-        // Settlement Hook: When refund is resolved, record 'returned' (Effect: NEUTRAL per new logic)
-        if (status === 'resolved' && existing.status !== 'resolved') {
-            const result = await settlementService.recordEvent({
-                orderItemID: existing.orderItemID,
-                event: 'returned',
-                effect: 'neutral',
-                refundQueryID: existing.refundQueryID,
-                notes: `Refund resolved/completed. Item refunded — earnings neutralised.`,
-                createdBy: (req.user.username || req.user.uid)
-            });
-            if (!result.success) {
-                await settlementService.logFailure(existing.orderItemID, 'returned', { status, refundQueryID }, result.error);
-            }
-        }
-
-        return res.status(200).json({ success: true, message: 'Status updated' });
+        const { status, remarks } = req.body;
+        await require('../utils/dbconnect').query(
+            "UPDATE refund_queries SET status = ?, remarks = ?, updated_at = NOW() WHERE refundQueryID = ?",
+            [status, remarks, refundQueryID]
+        );
+        res.status(200).json({ success: true, message: 'Status updated' });
     } catch (error) {
         console.error('Update refund query status error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Partial return: POST body { orderID, orderItemID? (optional), reason? }
-const returnOrderController = async (req, res) => {
-    try {
-        const uid = req.user?.uid;
-        if (!uid) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        const { orderID, orderItemID, returnType, returnReason, reason, returnComments, remarks, returnPhotos, photos } = req.body || {};
-        if (!orderID) return res.status(400).json({ success: false, message: 'orderID is required' });
-
-        console.log('[Return Request Debug] UID:', uid, 'Payload:', {
-            returnType,
-            finalReason: returnReason || reason,
-            finalComments: returnComments || remarks,
-            finalPhotos: returnPhotos || photos
-        });
-
-        const result = await orderService.returnOrder(uid, {
-            orderID,
-            orderItemID,
-            returnType: returnType || 'refund',
-            returnReason: returnReason || reason || null,
-            returnComments: returnComments || remarks || null,
-            returnPhotos: returnPhotos || photos || []
-        });
-        return res.status(200).json(result);
-    } catch (error) {
-        console.error('Return order error:', error);
-        return res.status(400).json({ success: false, message: error.message || 'Return request failed' });
-    }
-};
-
-// Update order status
-const updateOrderStatusController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { orderStatus } = req.body;
-
-        if (!orderId || !orderStatus) {
-            return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' });
-        }
-
-        const validStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
-        const normalizedStatus = String(orderStatus).toLowerCase();
-        if (!validStatuses.includes(normalizedStatus)) {
-            return res.status(400).json({ success: false, message: 'Invalid order status: ' + orderStatus });
-        }
-
-        const updated = await orderService.updateOrderStatus(orderId, orderStatus);
-        if (!updated) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        return res.status(200).json({ success: true, message: 'Order status updated successfully', order: updated });
-    } catch (error) {
-        console.error('Update order status error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Update payment status
-const updatePaymentStatusController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { paymentStatus } = req.body;
-
-        if (!orderId || !paymentStatus) {
-            return res.status(400).json({ success: false, message: 'orderId and paymentStatus are required' });
-        }
-
-        const validStatuses = ['pending', 'successful', 'failed', 'refunded'];
-        const normalizedStatus = String(paymentStatus).toLowerCase();
-        if (!validStatuses.includes(normalizedStatus)) {
-            return res.status(400).json({ success: false, message: 'Invalid payment status' });
-        }
-
-        const updated = await orderService.updatePaymentStatus(orderId, paymentStatus);
-        if (!updated) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        return res.status(200).json({ success: true, message: 'Payment status updated successfully', order: updated });
-    } catch (error) {
-        console.error('Update payment status error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Generate invoice
-const generateInvoiceController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { action = 'download' } = req.query; // 'download' or 'data'
-
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const result = await orderService.generateInvoice(orderId);
-        if (!result || !result.success) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        if (action === 'download') {
-            // Set headers for PDF download
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="${result.invoice.fileName}"`);
-            res.setHeader('Content-Length', result.invoice.pdfBuffer.length);
-
-            // Send PDF buffer
-            return res.send(result.invoice.pdfBuffer);
-        } else {
-            // Return invoice data for frontend
-            return res.status(200).json({
-                success: true,
-                data: result.data,
-                invoice: {
-                    orderId: result.invoice.orderId,
-                    invoiceNumber: result.invoice.invoiceNumber,
-                    fileName: result.invoice.fileName,
-                    generatedAt: result.invoice.generatedAt
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Generate invoice error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Generate invoice for user (with ownership check)
-const generateInvoiceForUserController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const uid = req.user.uid; // Get user ID from JWT
-        const { action = 'download' } = req.query; // 'download' or 'data'
-
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        // Get order details and verify ownership
-        const order = await orderModel.getOrderByID(orderId);
-        if (!order) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        // Verify that the order belongs to the user
-        if (order.uid !== uid) {
-            return res.status(403).json({ success: false, message: 'You do not have permission to access this order' });
-        }
-
-        const result = await orderService.generateInvoice(orderId);
-        if (!result || !result.success) {
-            return res.status(404).json({ success: false, message: 'Failed to generate invoice' });
-        }
-
-        if (action === 'download') {
-            // Set headers for PDF download
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="${result.invoice.fileName}"`);
-            res.setHeader('Content-Length', result.invoice.pdfBuffer.length);
-
-            // Send PDF buffer
-            return res.send(result.invoice.pdfBuffer);
-        } else {
-            // Return invoice data for frontend
-            return res.status(200).json({
-                success: true,
-                data: result.data,
-                invoice: {
-                    orderId: result.invoice.orderId,
-                    invoiceNumber: result.invoice.invoiceNumber,
-                    fileName: result.invoice.fileName,
-                    generatedAt: result.invoice.generatedAt
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Generate invoice error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Email invoice to customer
-const emailInvoiceController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const result = await orderService.emailInvoice(orderId);
-        if (!result || !result.success) {
-            return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: result.message,
-            email: result.email
-        });
-    } catch (error) {
-        console.error('Email invoice error:', error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// Update order items tracking (for admin): shipment AWB and/or return AWB; match by orderItemID or name+variationName
-const updateOrderItemsTrackingController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const { items } = req.body; // [{ orderItemID?, name?, variationName?, trackingCode?, deliveryCompany?, returnTrackingCode?, returnDeliveryCompany?, itemStatus? }]
-        if (!Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, message: 'Items array is required' });
-        }
-
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const [verify] = await db.query(
-            `SELECT 1 FROM orderDetail WHERE orderID = ? LIMIT 1`,
-            [orderId]
-        );
-        if (verify.length === 0) {
-            return res.status(404).json({ success: false, message: 'Order not found' });
-        }
-
-        let updated = 0;
-        let anyDelivered = false;
-        for (const it of items) {
-            if (!it) continue;
-            const updates = [];
-            const params = [];
-            if (it.trackingCode !== undefined || it.deliveryCompany !== undefined) {
-                updates.push('trackingCode = ?, deliveryCompany = ?');
-                params.push(it.trackingCode ?? null, it.deliveryCompany ?? null);
-            }
-            if (it.returnTrackingCode !== undefined || it.returnDeliveryCompany !== undefined) {
-                updates.push('returnTrackingCode = ?, returnDeliveryCompany = ?');
-                params.push(it.returnTrackingCode ?? null, it.returnDeliveryCompany ?? null);
-            }
-            if (it.returnTrackingUrl !== undefined) {
-                updates.push('returnTrackingUrl = ?');
-                params.push(it.returnTrackingUrl ?? null);
-            }
-            if (it.itemStatus !== undefined) {
-                updates.push('itemStatus = ?');
-                const statusLower = String(it.itemStatus).toLowerCase();
-                if (statusLower === 'delivered') {
-                    anyDelivered = true;
-                }
-                params.push(statusLower);
-            } else if (it.trackingCode && updates.length > 0) {
-                updates.push('itemStatus = ?');
-                params.push('shipped');
-            }
-            if (it.returnStatus !== undefined) {
-                updates.push('returnStatus = ?');
-                params.push(it.returnStatus || 'none');
-            }
-            if (it.returnType !== undefined) {
-                updates.push('returnType = ?');
-                params.push(it.returnType ?? null);
-            }
-            if (updates.length === 0) continue;
-
-            const setClause = updates.join(', ');
-            params.push(orderId);
-            let whereClause;
-            const whereParams = [];
-            if (it.orderItemID != null) {
-                whereClause = 'orderItemID = ?';
-                whereParams.push(it.orderItemID);
-            } else {
-                whereClause = 'name = ?';
-                whereParams.push(it.name);
-                if (it.variationName) {
-                    whereClause += ' AND variationName = ?';
-                    whereParams.push(it.variationName);
-                } else {
-                    whereClause += ' AND (variationName IS NULL OR variationName = "")';
-                }
-            }
-
-            const [result] = await db.query(
-                `UPDATE order_items SET ${setClause} WHERE orderID = ? AND ${whereClause} LIMIT 1`,
-                [...params, ...whereParams]
-            );
-            updated += result.affectedRows || 0;
-
-            // Settlement Hook: If item was delivered, record 'order_placed' (Hold)
-            if (result.affectedRows > 0) {
-                let finalOIDM = it.orderItemID;
-                if (!finalOIDM) {
-                    const [row] = await db.query(`SELECT orderItemID FROM order_items WHERE orderID = ? AND ${whereClause} LIMIT 1`, [orderId, ...whereParams]);
-                    if (row && row[0]) finalOIDM = row[0].orderItemID;
-                }
-
-                if (finalOIDM) {
-                    // 1. Order Delivered (Hold)
-                    if (it.itemStatus && String(it.itemStatus).toLowerCase() === 'delivered') {
-                        const sResult = await settlementService.recordEvent({
-                            orderItemID: finalOIDM,
-                            event: 'order_delivered',
-                            effect: 'hold',
-                            notes: 'Item delivered - earnings on hold'
-                        });
-                        if (!sResult.success) {
-                            await settlementService.logFailure(finalOIDM, 'order_delivered', it, sResult.error);
-                        }
-                    }
-
-                    // 2. Part 3 Phase 1: Admin marks replacement_complete
-                    if (it.returnStatus === 'replacement_complete') {
-                        const sResult = await settlementService.manualReplacementCredit(finalOIDM, (req.user.username || req.user.uid));
-                        if (!sResult.success) {
-                            await settlementService.logFailure(finalOIDM, 'replacement_complete', it, sResult.error);
-                        }
-                    }
-                }
-            }
-        }
-
-        // If any item was marked as delivered via tracking, ensure deliveredAt and coinLockUntil are populated
-        if (anyDelivered) {
-            const now = new Date();
-            await db.query(
-                `UPDATE orderDetail SET deliveredAt = ? WHERE orderID = ? AND deliveredAt IS NULL`,
-                [now, orderId]
-            );
-            const lockUntil = new Date(now.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-            await db.query(
-                `UPDATE order_items SET coinLockUntil = ? WHERE orderID = ? AND coinLockUntil IS NULL AND itemStatus = 'delivered'`,
-                [lockUntil, orderId]
-            );
-        }
-
-        return res.json({ success: true, message: 'Tracking info updated', updatedCount: updated });
-    } catch (error) {
-        console.error('Error updating item tracking info:', error);
-        return res.status(500).json({ success: false, message: 'Failed to update tracking info', error: error.message });
-    }
-};
-
-// Email invoice to customer (user-facing)
-const emailInvoiceToCustomerController = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-        const uid = req.user.uid; // Get user ID from JWT
-
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
-        }
-
-        const result = await orderService.emailInvoiceToCustomer(orderId, uid);
-        if (!result || !result.success) {
-            return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: result.message,
-            email: result.email,
-            requestedTimestamp: result.requestedTimestamp
-        });
-    } catch (error) {
-        console.error('Email invoice to customer error:', error);
-        return res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
 const approveReturnRequestController = async (req, res) => {
     try {
         const { orderItemID } = req.params;
-        const result = await orderService.approveReturnRequest(orderItemID, 'approve');
-        res.json(result);
+        await require('../utils/dbconnect').query(
+            "UPDATE order_items SET returnStatus = 'approved', updatedAt = NOW() WHERE orderItemID = ?",
+            [orderItemID]
+        );
+        res.status(200).json({ success: true, message: 'Return request approved' });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Approve return request error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
 const rejectReturnRequestController = async (req, res) => {
     try {
         const { orderItemID } = req.params;
-        const rejectionReason = req.body?.rejectionReason;
-        const result = await orderService.approveReturnRequest(orderItemID, 'reject', rejectionReason);
-        res.json(result);
+        const { reason } = req.body;
+        await require('../utils/dbconnect').query(
+            "UPDATE order_items SET returnStatus = 'rejected', returnRejectionReason = ?, updatedAt = NOW() WHERE orderItemID = ?",
+            [reason, orderItemID]
+        );
+        res.status(200).json({ success: true, message: 'Return request rejected' });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Reject return request error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
-module.exports.updateOrderController = updateOrderController;
-module.exports.getOrderDetailsController = getOrderDetailsController;
-module.exports.getAdminOrderDetailsController = getAdminOrderDetailsController;
-module.exports.getAllOrdersController = getAllOrdersController;
-module.exports.returnOrderController = returnOrderController;
-module.exports.getRefundQueriesController = getRefundQueriesController;
-module.exports.updateRefundQueryStatusController = updateRefundQueryStatusController;
-module.exports.updateOrderStatusController = updateOrderStatusController;
-module.exports.updatePaymentStatusController = updatePaymentStatusController;
-module.exports.generateInvoiceController = generateInvoiceController;
-module.exports.generateInvoiceForUserController = generateInvoiceForUserController;
-module.exports.emailInvoiceController = emailInvoiceController;
-module.exports.emailInvoiceToCustomerController = emailInvoiceToCustomerController;
-module.exports.updateOrderItemsTrackingController = updateOrderItemsTrackingController;
-module.exports.sendOrderConfirmationEmail = sendOrderConfirmationEmail;
-module.exports.sendSellerNotificationEmails = sendSellerNotificationEmails;
-module.exports.getResolvedRefundQueriesController = getResolvedRefundQueriesController;
-module.exports.approveReturnRequestController = approveReturnRequestController;
-module.exports.rejectReturnRequestController = rejectReturnRequestController;
-module.exports.approveReturnRequestController = approveReturnRequestController;
-module.exports.rejectReturnRequestController = rejectReturnRequestController;
+const updateOrderStatusController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { status } = req.body;
+        await require('../utils/dbconnect').query(
+            "UPDATE orderDetail SET orderStatus = ?, updatedAt = NOW() WHERE orderID = ?",
+            [status, orderId]
+        );
+        res.status(200).json({ success: true, message: 'Order status updated' });
+    } catch (error) {
+        console.error('Update order status error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const updatePaymentStatusController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { paymentStatus } = req.body;
+        await require('../utils/dbconnect').query(
+            "UPDATE orderDetail SET paymentStatus = ?, updatedAt = NOW() WHERE orderID = ?",
+            [paymentStatus, orderId]
+        );
+        res.status(200).json({ success: true, message: 'Payment status updated' });
+    } catch (error) {
+        console.error('Update payment status error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const updateOrderItemsTrackingController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { items } = req.body; // Array of { orderItemID, trackingID, carrier }
+        for (const item of items) {
+            await require('../utils/dbconnect').query(
+                "UPDATE order_items SET trackingID = ?, carrier = ?, updatedAt = NOW() WHERE orderItemID = ? AND orderID = ?",
+                [item.trackingID, item.carrier, item.orderItemID, orderId]
+            );
+        }
+        res.status(200).json({ success: true, message: 'Tracking information updated' });
+    } catch (error) {
+        console.error('Update order items tracking error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const generateInvoiceController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const filePath = await invoiceService.generateInvoice(orderId);
+        res.status(200).sendFile(filePath);
+    } catch (error) {
+        console.error('Generate invoice error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const emailInvoiceController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        await invoiceService.emailInvoice(orderId);
+        res.status(200).json({ success: true, message: 'Invoice emailed' });
+    } catch (error) {
+        console.error('Email invoice error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const generateInvoiceForUserController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const uid = req.user.uid;
+        // Verify ownership
+        const [order] = await require('../utils/dbconnect').query(
+            "SELECT uid FROM orderDetail WHERE orderID = ?",
+            [orderId]
+        );
+        if (!order || order.length === 0 || order[0].uid !== uid) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+        const filePath = await invoiceService.generateInvoice(orderId);
+        res.status(200).sendFile(filePath);
+    } catch (error) {
+        console.error('Generate invoice user error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const emailInvoiceToCustomerController = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const uid = req.user.uid;
+        // Verify ownership
+        const [order] = await require('../utils/dbconnect').query(
+            "SELECT uid FROM orderDetail WHERE orderID = ?",
+            [orderId]
+        );
+        if (!order || order.length === 0 || order[0].uid !== uid) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+        await invoiceService.emailInvoice(orderId);
+        res.status(200).json({ success: true, message: 'Invoice emailed' });
+    } catch (error) {
+        console.error('Email invoice user error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+module.exports = {
+    placeOrderController,
+    getOrderItemsByUidController,
+    getOrderSummariesController,
+    getOrderDetailsByOrderIDController,
+    getMyReturnsController,
+    returnOrderController,
+    updateOrderController,
+    getAllOrdersController,
+    getAdminOrderDetailsController,
+    getRefundQueriesController,
+    getResolvedRefundQueriesController,
+    updateRefundQueryStatusController,
+    approveReturnRequestController,
+    rejectReturnRequestController,
+    updateOrderStatusController,
+    updatePaymentStatusController,
+    updateOrderItemsTrackingController,
+    generateInvoiceController,
+    emailInvoiceController,
+    generateInvoiceForUserController,
+    emailInvoiceToCustomerController
+};
