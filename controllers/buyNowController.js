@@ -1265,7 +1265,7 @@ const buyNowController = async (req, res) => {
                 redirectMode: 'REDIRECT',
                 paymentInstrument: { type: 'PAY_PAGE' },
             };
-            
+
             console.log('[BuyNow] PhonePe Payment Request Payload:', JSON.stringify(payloadObj, null, 2));
 
             const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
@@ -1277,26 +1277,15 @@ const buyNowController = async (req, res) => {
             const controller = AbortCtrl ? new AbortCtrl() : null;
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const headers = {
-                'Content-Type': 'application/json',
-                'X-VERIFY': checksum,
-                'X-MERCHANT-ID': merchantId,
-
-                // FORCE BROWSER IDENTITY (CRITICAL)
-                'User-Agent':
-                    'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                Accept: 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
-            };
-
-            console.log('[PhonePe FIX] Using forced browser headers');
-            console.log('User-Agent:', headers['User-Agent']);
-
             let phonePeResponse;
             try {
                 const response = await fetch(phonePeUrl, {
                     method: 'POST',
-                    headers: headers,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-VERIFY': checksum,
+                        'X-MERCHANT-ID': merchantId,
+                    },
                     body: JSON.stringify({ request: base64Payload }),
                     signal: controller ? controller.signal : undefined,
                 });

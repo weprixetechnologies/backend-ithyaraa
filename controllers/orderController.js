@@ -328,24 +328,13 @@ const placeOrderController = async (req, res) => {
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
 
-        const headers = {
-            "Content-Type": "application/json",
-            "X-VERIFY": checksum,
-            "X-MERCHANT-ID": merchantId,
-
-            // FORCE BROWSER IDENTITY (CRITICAL)
-            "User-Agent":
-                "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-        };
-
-        console.log("[PhonePe FIX] Using forced browser headers");
-        console.log("User-Agent:", headers["User-Agent"]);
-
         const response = await fetch(phonePeUrl, {
             method: "POST",
-            headers: headers,
+            headers: {
+                "Content-Type": "application/json",
+                "X-VERIFY": checksum,
+                "X-MERCHANT-ID": merchantId
+            },
             body: JSON.stringify({ request: base64Payload })
         });
 

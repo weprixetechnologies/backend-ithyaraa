@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 // Load from environment
-const merchantId = process.env.MERCHANT_ID || 'ITHYARAAONLINE';
+const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
 const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
 const keyIndex = process.env.KEY_INDEX || '1';
 
@@ -38,7 +38,7 @@ function generateChecksum(path, payload = '') {
     console.log(`[PhonePe Signature] Payload length: ${payload.length}`);
     console.log(`[PhonePe Signature] Salt Index: ${keyIndex}`);
     console.log(`[PhonePe Signature] Result: ${checksum}`);
-    
+
     return checksum;
 }
 
@@ -258,15 +258,15 @@ function verifyWebhookSignature(signature, payload) {
         try {
             const decodedString = Buffer.from(base64Response, 'base64').toString('utf8');
             const decodedData = JSON.parse(decodedString);
-            
+
             const payloadMerchantId = decodedData?.merchantId || decodedData?.data?.merchantId;
-            
+
             console.log(`[PhonePe Webhook] Payload Merchant ID: ${payloadMerchantId}`);
             console.log(`[PhonePe Webhook] Configured Merchant ID: ${merchantId}`);
 
             if (payloadMerchantId && payloadMerchantId !== merchantId) {
                 console.error(`[PhonePe Webhook] Error: merchantId mismatch! Expected ${merchantId}, got ${payloadMerchantId}`);
-                return false; 
+                return false;
             }
         } catch (decodeErr) {
             console.warn('[PhonePe Webhook] Warning: Could not decode base64 response for merchantId check during signature verification', decodeErr.message);
@@ -279,7 +279,7 @@ function verifyWebhookSignature(signature, payload) {
             .digest('hex');
 
         const isValid = computedHash === receivedHash;
-        
+
         if (!isValid) {
             console.error('[PhonePe Webhook] Error: Hash mismatch!');
             console.error(`[PhonePe Webhook] Computed Hash: ${computedHash}`);
