@@ -1,6 +1,8 @@
 const presaleBookingService = require('../services/presaleBookingService');
 const phonepeService = require('../services/phonepeService');
 const presaleBookingModel = require('../model/presaleBookingModel');
+const paymentTokenModel = require('./../model/paymentTokenModel');
+const { v4: uuidv4 } = require('uuid');
 const usersModel = require('../model/usersModel');
 const invoiceService = require('../services/invoiceService');
 const { addSendEmailJob } = require('../queue/emailProducer');
@@ -125,6 +127,33 @@ const placePrebookingOrderController = async (req, res) => {
         console.log('[PRESALE] Redirect URL being sent to PhonePe:', redirectUrl);
         console.log('[PRESALE] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
 
+        // CHECK: IF DEVICE IS APP, USE TOKEN FLOW - BRANCH EARLY
+        if (req.body && req.body.device === 'app') {
+            const token = uuidv4();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+            await paymentTokenModel.createToken({
+                token,
+                orderID: booking.preBookingID,
+                merchantTransactionId: merchantOrderId,
+                type: 'presale',
+                expiresAt
+            });
+
+            console.log(`[PAY TOKEN] Created token for PRESALE APP flow: ${token}`);
+
+            return res.json({
+                success: true,
+                flow: 'TOKEN',
+                preBookingID: booking.preBookingID,
+                merchantID: merchantOrderId,
+                payUrl: `${frontendUrlBase}/pay/${token}`,
+                orderStatus: booking.orderStatus,
+                status: booking.status,
+                paymentStatus: booking.paymentStatus
+            });
+        }
+
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
 
@@ -155,7 +184,6 @@ const placePrebookingOrderController = async (req, res) => {
                 await presaleBookingModel.addmerchantID(booking.preBookingID, merchantOrderId, merchantId);
             } catch (updateError) {
                 console.error('Error storing merchant transaction ID:', updateError);
-                // Don't fail the response, just log the error
             }
 
             // Try to extract the redirect URL if present

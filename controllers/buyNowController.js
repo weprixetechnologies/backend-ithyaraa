@@ -5,6 +5,8 @@ const { generateAccessToken } = require('../utils/tokenUtils');
 const orderModel = require('../model/orderModel');
 const coinModel = require('../model/coinModel');
 const phonepeService = require('../services/phonepeService');
+const paymentTokenModel = require('./../model/paymentTokenModel');
+const { v4: uuidv4 } = require('uuid');
 
 // PhonePe config – mirror existing integration
 const crypto = require('crypto');
@@ -1270,6 +1272,35 @@ const buyNowController = async (req, res) => {
 
             const base64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
             const checksum = phonepeService.generateChecksum('/pg/v1/pay', base64Payload);
+
+            // CHECK: IF DEVICE IS APP, USE TOKEN FLOW
+            if (req.body && req.body.device === 'app') {
+                const token = uuidv4();
+                const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+                await paymentTokenModel.createToken({
+                    token,
+                    orderID: productType === 'presale' ? preBookingID : orderID,
+                    merchantTransactionId: merchantOrderId,
+                    type: productType === 'presale' ? 'presale' : 'buy_now',
+                    expiresAt
+                });
+
+                console.log(`[PAY TOKEN] Created token for BUY NOW APP flow: ${token}`);
+
+                return res.status(200).json({
+                    success: true,
+                    flow: 'TOKEN',
+                    orderID: orderID,
+                    preBookingID: preBookingID,
+                    txnID: txnID,
+                    uid: uid,
+                    isNewUser: isNewUser,
+                    sessionToken: sessionToken || null,
+                    paymentMode: 'PREPAID',
+                    payUrl: `${frontendUrlBase}/pay/${token}`
+                });
+            }
 
             const fetch = require('node-fetch');
             // Use global AbortController if available (Node 18+), otherwise skip timeout signal.

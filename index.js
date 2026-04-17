@@ -31,7 +31,8 @@ const userCouponsRouter = require('./router/userCouponRouter')
 const orderRouter = require('./router/orderRouter')
 const buyNowRouter = require('./router/buyNowRouter')
 const phonepeRouter = require('./router/phonepeRouter')
-const reviewRouter = require('./router/reviewRouter')
+const paymentRouter = require('./router/paymentRouter');
+const contactRouter = require('./router/contactRouter');
 const coinRouter = require('./router/coinRouter')
 const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
 const flashSaleAdminRouter = require('./router/admin/flashSaleRouter')
@@ -110,6 +111,8 @@ app.use('/api/user-coupon', userCouponsRouter)
 app.use('/api/order', orderRouter)
 app.use('/api/order', buyNowRouter)
 app.use('/api/phonepe', phonepeRouter)
+app.use('/api/payment', paymentRouter);
+app.use('/api/contact', contactRouter);
 app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)

@@ -1,5 +1,7 @@
 const orderService = require('../services/orderService');
-const phonepeService = require('../services/phonepeService');
+const phonepeService = require('./../services/phonepeService');
+const paymentTokenModel = require('./../model/paymentTokenModel');
+const { v4: uuidv4 } = require('uuid');
 const settlementService = require('../services/settlementService');
 const orderModel = require('../model/orderModel');
 const { randomUUID } = require('crypto');
@@ -323,7 +325,30 @@ const placeOrderController = async (req, res) => {
         console.log('[ORDER] PhonePe API URL:', phonePeUrl);
         console.log('[ORDER] Callback URL being sent to PhonePe:', callbackUrl);
         console.log('[ORDER] Redirect URL being sent to PhonePe:', redirectUrl);
-        console.log('[ORDER] IMPORTANT: Ensure this callback URL is accessible and whitelisted in PhonePe dashboard');
+
+        // CHECK: IF DEVICE IS APP, USE TOKEN FLOW - BRANCH EARLY
+        if (req.body && req.body.device === 'app') {
+            const token = uuidv4();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+            await paymentTokenModel.createToken({
+                token,
+                orderID: order.orderID,
+                merchantTransactionId: merchantOrderId,
+                type: 'order',
+                expiresAt
+            });
+
+            console.log(`[PAY TOKEN] Created token for APP flow: ${token}`);
+
+            return res.json({
+                success: true,
+                flow: 'TOKEN',
+                orderID: order.orderID,
+                merchantTransactionId: merchantOrderId,
+                payUrl: `${frontendUrlBase}/pay/${token}`
+            });
+        }
 
         const base64Payload = Buffer.from(JSON.stringify(payload)).toString("base64");
         const checksum = phonepeService.generateChecksum("/pg/v1/pay", base64Payload);
@@ -350,16 +375,12 @@ const placeOrderController = async (req, res) => {
         }
 
         if (data.success) {
-            // Store merchant transaction ID in the order
+            // STORE merchantTransactionId in the order
             try {
                 await orderModel.addmerchantID(order.orderID, merchantOrderId);
             } catch (updateError) {
                 console.error('Error storing merchant transaction ID:', updateError);
-                // Don't fail the response, just log the error
             }
-
-            // DO NOT send confirmation emails here - wait for webhook confirmation
-            // Emails will be sent after successful payment via webhook
 
             // Try to extract the redirect URL if present
             const checkoutUrl = data?.data?.instrumentResponse?.redirectInfo?.url || data?.data?.redirectUrl || null;
@@ -368,7 +389,7 @@ const placeOrderController = async (req, res) => {
                 paymentMode: 'PREPAID',
                 orderID: order.orderID,
                 merchantTransactionId: merchantOrderId,
-                checkoutPageUrl: checkoutUrl || data
+                url: checkoutUrl
             });
         } else {
             return res.status(500).json({
