@@ -32,6 +32,7 @@ const orderRouter = require('./router/orderRouter')
 const buyNowRouter = require('./router/buyNowRouter')
 const phonepeRouter = require('./router/phonepeRouter')
 const paymentRouter = require('./router/paymentRouter');
+const reviewRouter = require('./router/reviewRouter')
 const coinRouter = require('./router/coinRouter')
 const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
 const flashSaleAdminRouter = require('./router/admin/flashSaleRouter')
