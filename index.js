@@ -92,6 +92,9 @@ app.use((req, res, next) => {
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+const phoneFormatterMiddleware = require('./middlewares/phoneFormatter');
+app.use(phoneFormatterMiddleware);
+
 app.use('/api/', commonRouter)
 app.use('/api/user', userRouter); //user apis
 app.use('/api/admin', userAdminRouter); //admin user management apis

@@ -95,7 +95,7 @@ const listItems = async ({ type = null } = {}) => {
           const [groupProducts] = await db.query(
             `SELECT gp.groupID, gp.productID, gp.position,
                     p.name AS productName, p.productID AS prodProductID, p.regularPrice, p.salePrice,
-                    p.offerID, p.featuredImage, p.brand AS brandName
+                    p.offerID, p.featuredImage, p.brand AS brandName, p.type
              FROM group_products gp
              LEFT JOIN products p ON p.productID = gp.productID
              WHERE gp.groupID IN (${ph})
@@ -123,7 +123,8 @@ const listItems = async ({ type = null } = {}) => {
               salePrice: gp.salePrice,
               offerID: gp.offerID,
               featuredImage: parsedFeatured,
-              brandName: gp.brandName
+              brandName: gp.brandName,
+              type: gp.type
             });
             return acc;
           }, {});
@@ -249,7 +250,7 @@ const listItems = async ({ type = null } = {}) => {
         const [groupProducts] = await db.query(
           `SELECT gp.groupID, gp.productID, gp.position,
                   p.name AS productName, p.productID AS prodProductID, p.regularPrice, p.salePrice,
-                  p.offerID, p.featuredImage, p.brand AS brandName
+                  p.offerID, p.featuredImage, p.brand AS brandName, p.type
            FROM group_products gp
            LEFT JOIN products p ON p.productID = gp.productID
            WHERE gp.groupID IN (${placeholders})
@@ -276,7 +277,8 @@ const listItems = async ({ type = null } = {}) => {
             salePrice: gp.salePrice,
             offerID: gp.offerID,
             featuredImage: parsedFeatured,
-            brandName: gp.brandName
+            brandName: gp.brandName,
+            type: gp.type
           });
           return acc;
         }, {});
@@ -382,7 +384,7 @@ const getItemById = async (id) => {
         const [groupProducts] = await db.query(
           `SELECT gp.groupID, gp.productID, gp.position,
                   p.name AS productName, p.productID AS prodProductID, p.regularPrice, p.salePrice,
-                  p.offerID, p.featuredImage, p.brand AS brandName
+                  p.offerID, p.featuredImage, p.brand AS brandName, p.type
            FROM group_products gp
            LEFT JOIN products p ON p.productID = gp.productID
            WHERE gp.groupID = ?
@@ -405,7 +407,8 @@ const getItemById = async (id) => {
             salePrice: gp.salePrice,
             offerID: gp.offerID,
             featuredImage: parsedFeatured,
-            brandName: gp.brandName
+            brandName: gp.brandName,
+            type: gp.type
           };
         });
       }

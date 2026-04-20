@@ -90,7 +90,8 @@ const sendPhoneVerificationOtp = async (req, res) => {
         }
 
         // Send OTP to phone
-        const result = await otpService.sendOtp(`+91${user.phonenumber}`);
+        let phoneForOtp = String(user.phonenumber).replace(/\D/g, '').slice(-10);
+        const result = await otpService.sendOtp(`+91${phoneForOtp}`);
 
         if (result.success) {
             return res.status(200).json(result);
@@ -122,7 +123,8 @@ const verifyPhoneOtp = async (req, res) => {
             return res.status(400).json({ success: false, message: 'OTP is required' });
         }
 
-        const result = await otpService.verifyOtp(`+91${user.phonenumber}`, otp);
+        let phoneForOtp = String(user.phonenumber).replace(/\D/g, '').slice(-10);
+        const result = await otpService.verifyOtp(`+91${phoneForOtp}`, otp);
 
         if (result.success) {
             // Mark phone as verified

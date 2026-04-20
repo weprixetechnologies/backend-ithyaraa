@@ -442,7 +442,8 @@ const sendAdminPhoneVerificationOtp = async (req, res) => {
 
         // Import otpService
         const otpService = require('../services/otpService');
-        const result = await otpService.sendOtp(`+91${user.phonenumber}`);
+        let phoneForOtp = String(user.phonenumber).replace(/\D/g, '').slice(-10);
+        const result = await otpService.sendOtp(`+91${phoneForOtp}`);
 
         if (result.success) {
             return res.status(200).json(result);
