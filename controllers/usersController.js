@@ -1,5 +1,6 @@
 const usersService = require('../services/usersService');
 const jwt = require('jsonwebtoken');
+const { normalizePhoneNumber } = require('../utils/phoneUtils');
 
 
 // Send verification email externally
@@ -456,18 +457,17 @@ const sendAdminPhoneVerificationOtp = async (req, res) => {
     }
 };
 
-// Check if an account exists for the given phone (for Buy Now guest flow — no auth required)
 const usersModel = require('../model/usersModel');
 const checkPhone = async (req, res) => {
     try {
-        let phone = (req.query.phone || req.body?.phone || '').toString().replace(/\D/g, '').slice(-10);
-        if (phone.length !== 10) {
-            return res.status(400).json({ success: false, exists: false, message: 'Valid 10-digit phone required' });
+        let phone = (req.query.phone || req.body?.phone || '').toString();
+        if (!phone) {
+            return res.status(400).json({ success: false, exists: false, message: 'Phone required' });
         }
-        const withCode = `+91${phone}`;
-        const userByPhone = await usersModel.findUserByPhone(phone);
-        const userByCode = await usersModel.findUserByPhone(withCode);
-        const exists = !!(userByPhone || userByCode);
+        
+        const normalized = normalizePhoneNumber(phone);
+        const user = await usersModel.findUserByPhone(normalized);
+        const exists = !!user;
         return res.status(200).json({ success: true, exists });
     } catch (err) {
         console.error('checkPhone error:', err);

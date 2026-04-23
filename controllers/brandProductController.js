@@ -9,7 +9,7 @@ const addBrandProduct = async (req, res) => {
     try {
         const payload = req.body;
         const brandID = req.user.uid; // Get brandID from JWT token
-        const brandName = req.user.username || 'BRANDNAME'; // Get brand name from JWT token
+        const brandName = req.user.name || req.user.username || 'BRANDNAME'; // Get brand name from JWT token
 
 
         console.log('Brand Product Payload:', payload);

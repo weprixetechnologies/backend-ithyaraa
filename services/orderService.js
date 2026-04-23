@@ -505,10 +505,10 @@ async function getOrderDetailsByOrderID(orderID, uid) {
         if (uniqueBrandIDs.length > 0) {
             try {
                 const [brandRows] = await db.query(
-                    `SELECT uid, username FROM users WHERE uid IN (?) AND role = 'brand'`,
+                    `SELECT uid, name, username FROM users WHERE uid IN (?) AND role = 'brand'`,
                     [uniqueBrandIDs]
                 );
-                brandRows.forEach(b => brandNameMap.set(b.uid, b.username));
+                brandRows.forEach(b => brandNameMap.set(b.uid, b.name || b.username));
             } catch (err) {
                 console.error('Error fetching brand names for shipping breakdown:', err);
             }
@@ -635,11 +635,11 @@ async function getOrderDetails(orderId, uid) {
                 if (comboItem.brandID) {
                     try {
                         const [brandRows] = await db.query(
-                            `SELECT username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+                            `SELECT name, username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
                             [comboItem.brandID]
                         );
                         if (brandRows && brandRows.length > 0) {
-                            comboBrandName = brandRows[0].username;
+                            comboBrandName = brandRows[0].name || brandRows[0].username;
                         } else if (comboItem.brand) {
                             comboBrandName = comboItem.brand;
                         }
@@ -1165,11 +1165,11 @@ async function getAdminOrderDetails(orderId) {
                 if (comboItem.brandID) {
                     try {
                         const [brandRows] = await db.query(
-                            `SELECT username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
+                            `SELECT name, username FROM users WHERE uid = ? AND role = 'brand' LIMIT 1`,
                             [comboItem.brandID]
                         );
                         if (brandRows && brandRows.length > 0) {
-                            comboBrandName = brandRows[0].username;
+                            comboBrandName = brandRows[0].name || brandRows[0].username;
                         } else if (comboItem.brand) {
                             comboBrandName = comboItem.brand;
                         }

@@ -13,6 +13,7 @@ const RESET_TOKEN_SECRET = process.env.RESET_TOKEN_SECRET;
 const RESET_TOKEN_EXPIRY = 60 * 30; // 30 minutes
 const otpModel = require('./../model/otpModel')
 const { sendEmail } = require('./../queue/service/emailService')
+const { normalizePhoneNumber } = require('../utils/phoneUtils');
 
 // Send verification email to user
 const sendVerificationEmail = async (user) => {
@@ -79,8 +80,11 @@ const resetPasswordWithToken = async (token, newPassword) => {
 };
 
 const createUser = async (userData) => {
+    // 0. Normalize phone
+    const normalizedPhone = normalizePhoneNumber(userData.phonenumber);
+
     // 1. Check if email or phone exists
-    const existingUser = await usersModel.findUserByEmailOrPhone(userData.email, userData.phonenumber);
+    const existingUser = await usersModel.findUserByEmailOrPhone(userData.email, normalizedPhone);
     if (existingUser) {
         return { success: false, message: 'USER EXIST' };
     }
@@ -117,7 +121,7 @@ const createUser = async (userData) => {
         uid,
         username: finalUsername,
         emailID: userData.email,
-        phonenumber: userData.phonenumber,
+        phonenumber: normalizedPhone,
         lastLogin: null,
         deviceInfo: userData.deviceInfo || '',
         joinedOn: new Date(),
@@ -145,7 +149,7 @@ const createUser = async (userData) => {
             name: userData.name || finalUsername,
             username: finalUsername,
             emailID: userData.email,
-            phonenumber: userData.phonenumber,
+            phonenumber: normalizedPhone,
             time: new Date().toLocaleString()
         },
         subject: 'Account Created Successfully'
@@ -155,8 +159,11 @@ const createUser = async (userData) => {
 };
 
 const loginUser = async (email, phonenumber, password, deviceInfo) => {
+    // Step 0: Normalize phone if provided
+    const normalizedPhone = phonenumber ? normalizePhoneNumber(phonenumber) : null;
+
     // Step 1: Find user
-    const user = await usersModel.findUserByEmailOrPhone(email, phonenumber);
+    const user = await usersModel.findUserByEmailOrPhone(email, normalizedPhone);
     if (!user) {
         return { success: false, message: 'USER NOT FOUND' };
     }
@@ -334,8 +341,10 @@ async function handleForgotPassword(identifier) {
         user = await usersModel.findUserByEmail(identifier);
         if (!user) throw new Error('No user found with this email');
     } else if (isPhone(identifier)) {
-        user = await usersModel.findUserByPhone(identifier);
+        const normalized = normalizePhoneNumber(identifier);
+        user = await usersModel.findUserByPhone(normalized);
         if (!user) throw new Error('No user found with this phone number');
+        identifier = normalized; // Use normalized for OTP record
     } else {
         throw new Error('Invalid identifier format');
     }

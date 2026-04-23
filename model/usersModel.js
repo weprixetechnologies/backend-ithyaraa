@@ -9,9 +9,13 @@ const findUserByUsername = async (username) => {
 
 // Check if user exists by email or phone
 const findUserByEmailOrPhone = async (emailID, phonenumber) => {
+    // If phonenumber is provided, clean it to 10 digits for wide search
+    let phone10 = phonenumber ? phonenumber.toString().replace(/\D/g, '').slice(-10) : null;
+    let phone91 = phone10 ? `+91${phone10}` : null;
+
     const [rows] = await db.query(
-        `SELECT * FROM users WHERE emailID = ? OR phonenumber = ? LIMIT 1`,
-        [emailID, phonenumber]
+        `SELECT * FROM users WHERE emailID = ? OR phonenumber = ? OR phonenumber = ? LIMIT 1`,
+        [emailID, phone10, phone91]
     );
     return rows[0];
 };
@@ -210,9 +214,12 @@ async function findUserByEmail(email) {
 }
 
 async function findUserByPhone(phoneNumber) {
+    let phone10 = phoneNumber.toString().replace(/\D/g, '').slice(-10);
+    let phone91 = `+91${phone10}`;
+    
     const [rows] = await db.execute(
-        'SELECT * FROM users WHERE phonenumber = ? LIMIT 1',
-        [phoneNumber]
+        'SELECT * FROM users WHERE phonenumber = ? OR phonenumber = ? LIMIT 1',
+        [phone10, phone91]
     );
     return rows[0];
 }

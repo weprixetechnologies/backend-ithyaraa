@@ -5,6 +5,7 @@ const otpModel = require('./../model/otpModel')
 const { sendEmail } = require('./../queue/service/emailService')
 
 const { client, twilioNumber } = require('./../utils/message');
+const { normalizePhoneNumber } = require('../utils/phoneUtils');
 
 // Generate 6-digit OTP
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -75,13 +76,8 @@ const sendPayoutOtp = async (uid, purpose = 'payout_verification') => {
             return { success: false, message: 'User phone number not found' };
         }
 
-        // Add +91 country code if not already present
-        if (!phoneNumber.startsWith('+91')) {
-            // Remove any existing + or 91 prefix
-            phoneNumber = phoneNumber.replace(/^(\+91|91)/, '');
-            // Add +91 prefix
-            phoneNumber = '+91' + phoneNumber;
-        }
+        // Normalize phone number using the central utility
+        phoneNumber = normalizePhoneNumber(phoneNumber);
 
         console.log('sendPayoutOtp - formatted phoneNumber:', phoneNumber);
 

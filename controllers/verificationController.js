@@ -1,6 +1,7 @@
 const otpService = require('../services/otpService');
 const usersService = require('../services/usersService');
 const usersModel = require('../model/usersModel');
+const { normalizePhoneNumber } = require('../utils/phoneUtils');
 
 // Send email verification OTP
 const sendEmailVerificationOtp = async (req, res) => {
@@ -90,8 +91,8 @@ const sendPhoneVerificationOtp = async (req, res) => {
         }
 
         // Send OTP to phone
-        let phoneForOtp = String(user.phonenumber).replace(/\D/g, '').slice(-10);
-        const result = await otpService.sendOtp(`+91${phoneForOtp}`);
+        const normalized = normalizePhoneNumber(user.phonenumber);
+        const result = await otpService.sendOtp(normalized);
 
         if (result.success) {
             return res.status(200).json(result);
@@ -123,8 +124,8 @@ const verifyPhoneOtp = async (req, res) => {
             return res.status(400).json({ success: false, message: 'OTP is required' });
         }
 
-        let phoneForOtp = String(user.phonenumber).replace(/\D/g, '').slice(-10);
-        const result = await otpService.verifyOtp(`+91${phoneForOtp}`, otp);
+        const normalized = normalizePhoneNumber(user.phonenumber);
+        const result = await otpService.verifyOtp(normalized, otp);
 
         if (result.success) {
             // Mark phone as verified
