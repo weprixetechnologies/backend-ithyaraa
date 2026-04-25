@@ -5,14 +5,14 @@ const VALID_TYPES = ['mobile', 'desktop'];
 /**
  * Add a slider banner (mobile or desktop)
  */
-const create = async ({ type, image_url, position }) => {
+const create = async ({ type, image_url, position, routeTo, minPrice, maxPrice, category, offer }) => {
     if (!VALID_TYPES.includes(type)) {
         return { success: false, error: 'Invalid type. Use mobile or desktop.' };
     }
     try {
         const [result] = await db.query(
-            `INSERT INTO home_slider_banners (type, image_url, position) VALUES (?, ?, ?)`,
-            [type, image_url, position ?? 0]
+            `INSERT INTO home_slider_banners (type, image_url, position, routeTo, minPrice, maxPrice, category, offer) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [type, image_url, position ?? 0, routeTo || 'shop', minPrice || null, maxPrice || null, category || null, offer || null]
         );
         return { success: true, id: result.insertId };
     } catch (error) {
@@ -27,12 +27,13 @@ const create = async ({ type, image_url, position }) => {
 const getActiveByType = async () => {
     try {
         const [rows] = await db.query(
-            `SELECT id, type, image_url, position, createdAt
+            `SELECT id, type, image_url, position, routeTo, minPrice, maxPrice, category, offer, createdAt
              FROM home_slider_banners
              ORDER BY type, position ASC`
         );
-        const mobile = rows.filter(r => r.type === 'mobile').map(r => r.image_url);
-        const desktop = rows.filter(r => r.type === 'desktop').map(r => r.image_url);
+        // Returns objects with image_url and target filters
+        const mobile = rows.filter(r => r.type === 'mobile');
+        const desktop = rows.filter(r => r.type === 'desktop');
         return {
             success: true,
             data: { mobile, desktop }
@@ -48,7 +49,7 @@ const getActiveByType = async () => {
  */
 const getAll = async ({ type } = {}) => {
     try {
-        let sql = `SELECT id, type, image_url, position, createdAt, updatedAt FROM home_slider_banners`;
+        let sql = `SELECT id, type, image_url, position, routeTo, minPrice, maxPrice, category, offer, createdAt, updatedAt FROM home_slider_banners`;
         const params = [];
         if (type && VALID_TYPES.includes(type)) {
             sql += ` WHERE type = ?`;

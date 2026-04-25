@@ -8,12 +8,12 @@ const getNextPosition = async (type) => {
 };
 
 const createBanner = async (body) => {
-    const { type, image_url } = body;
+    const { type, image_url, routeTo, minPrice, maxPrice, category, offer } = body;
     if (!type || !image_url) {
         return { success: false, message: 'type and image_url are required.' };
     }
     const position = body.position ?? await getNextPosition(type);
-    return model.create({ type, image_url, position });
+    return model.create({ type, image_url, position, routeTo, minPrice, maxPrice, category, offer });
 };
 
 const getActiveForFrontend = async () => {
