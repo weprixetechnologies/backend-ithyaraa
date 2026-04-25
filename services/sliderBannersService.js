@@ -36,10 +36,16 @@ const reorderBanners = async (body) => {
     return model.reorder({ type, order });
 };
 
+const updateBanner = async (id, body) => {
+    const { routeTo, minPrice, maxPrice, category, offer } = body;
+    return model.updateById(id, { routeTo, minPrice, maxPrice, category, offer });
+};
+
 module.exports = {
     createBanner,
     getActiveForFrontend,
     getAllBanners,
     deleteBanner,
+    updateBanner,
     reorderBanners
 };

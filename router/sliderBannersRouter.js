@@ -10,6 +10,7 @@ router.get('/active', sliderBannersController.getActive);
 router.get('/', authAdminMiddleware.verifyAccessToken, sliderBannersController.getAll);
 router.post('/', authAdminMiddleware.verifyAccessToken, sliderBannersController.create);
 router.delete('/:id', authAdminMiddleware.verifyAccessToken, sliderBannersController.remove);
+router.put('/:id', authAdminMiddleware.verifyAccessToken, sliderBannersController.update);
 router.post('/reorder', authAdminMiddleware.verifyAccessToken, sliderBannersController.reorder);
 
 module.exports = router;

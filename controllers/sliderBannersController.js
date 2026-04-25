@@ -103,10 +103,32 @@ const reorder = async (req, res) => {
     }
 };
 
+/**
+ * Admin: update slider banner config
+ */
+const update = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await service.updateBanner(id, req.body);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Error in update slider controller:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     getActive,
     getAll,
     create,
     remove,
+    update,
     reorder
 };

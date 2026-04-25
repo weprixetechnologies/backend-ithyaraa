@@ -96,10 +96,29 @@ const reorder = async ({ type, order }) => {
     }
 };
 
+/**
+ * Update a banner for its navigation/filter config
+ */
+const updateById = async (id, { routeTo, minPrice, maxPrice, category, offer }) => {
+    try {
+        const [result] = await db.query(
+            `UPDATE home_slider_banners 
+             SET routeTo = ?, minPrice = ?, maxPrice = ?, category = ?, offer = ?
+             WHERE id = ?`,
+            [routeTo || 'shop', minPrice || null, maxPrice || null, category || null, offer || null, id]
+        );
+        return { success: true, updated: result.affectedRows > 0 };
+    } catch (error) {
+        console.error('Error updating slider banner:', error);
+        return { success: false, error: error.message };
+    }
+};
+
 module.exports = {
     create,
     getActiveByType,
     getAll,
     deleteById,
+    updateById,
     reorder
 };
