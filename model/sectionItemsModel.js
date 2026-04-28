@@ -131,6 +131,29 @@ const listItems = async ({ type = null } = {}) => {
         }
       }
 
+      // --- featuredcoupon enrichment ---
+      const featuredcouponItemIds = rows
+        .filter(r => r.type && String(r.type).trim().toLowerCase() === 'featuredcoupon')
+        .map(r => r.itemId)
+        .filter((v, i, a) => v !== null && v !== undefined && a.indexOf(v) === i);
+
+      let fcByItemId = {};
+
+      if (featuredcouponItemIds.length > 0) {
+        // itemId stores the featured_coupons.id as a string
+        const numericIds = featuredcouponItemIds.map(Number).filter(n => !isNaN(n));
+        if (numericIds.length > 0) {
+          const placeholders = numericIds.map(() => '?').join(',');
+          const [fcs] = await db.query(
+            `SELECT * FROM featured_coupons WHERE id IN (${placeholders})`,
+            numericIds
+          );
+          fcs.forEach(fc => {
+            fcByItemId[String(fc.id)] = fc;
+          });
+        }
+      }
+
       const enriched = rows.map(r => {
         const t = r.type ? String(r.type).trim().toLowerCase() : null;
         if (t === 'imagesection') {
@@ -164,6 +187,20 @@ const listItems = async ({ type = null } = {}) => {
               updatedAt: pg.updatedAt
             } : null,
             products: pg ? (groupProductsMap[pg.id] || []) : []
+          };
+        } else if (t === 'featuredcoupon') {
+          const fc = fcByItemId[String(r.itemId)] || null;
+          return {
+            ...r,
+            coupon: fc ? {
+              id: fc.id,
+              popupImage: fc.popupImage,
+              iconImage: fc.iconImage,
+              couponCode: fc.couponCode,
+              isActive: Boolean(fc.isActive),
+              createdAt: fc.createdAt,
+              updatedAt: fc.updatedAt
+            } : null
           };
         }
         return r;
@@ -303,6 +340,43 @@ const listItems = async ({ type = null } = {}) => {
       }));
 
       return { success: true, data: enriched };
+    } else if (rawType === 'featuredcoupon') {
+      const [rows] = await db.query(
+        `SELECT * FROM section_items WHERE LOWER(type) = ? ORDER BY orderIndex ASC`,
+        [rawType]
+      );
+
+      const numericIds = rows.map(r => Number(r.itemId)).filter(n => !isNaN(n));
+      let fcMap = {};
+      if (numericIds.length > 0) {
+        const placeholders = numericIds.map(() => '?').join(',');
+        const [fcs] = await db.query(
+          `SELECT * FROM featured_coupons WHERE id IN (${placeholders})`,
+          numericIds
+        );
+        fcs.forEach(fc => { fcMap[String(fc.id)] = fc; });
+      }
+
+      const enriched = rows.map(r => {
+        const fc = fcMap[String(r.itemId)] || null;
+        return {
+          entryId: r.id,
+          type: r.type,
+          orderIndex: r.orderIndex,
+          itemId: r.itemId,
+          coupon: fc ? {
+            id: fc.id,
+            popupImage: fc.popupImage,
+            iconImage: fc.iconImage,
+            couponCode: fc.couponCode,
+            isActive: Boolean(fc.isActive),
+            createdAt: fc.createdAt,
+            updatedAt: fc.updatedAt
+          } : null
+        };
+      });
+
+      return { success: true, data: enriched };
     } else {
       // Fallback: return raw entries for unknown types
       const [rows] = await db.query('SELECT * FROM section_items WHERE type = ? ORDER BY orderIndex ASC', [type]);
@@ -413,6 +487,25 @@ const getItemById = async (id) => {
         });
       }
       return { success: true, data: { ...r, group: pg, products } };
+    } else if (t === 'featuredcoupon') {
+      const numId = Number(r.itemId);
+      let coupon = null;
+      if (!isNaN(numId)) {
+        const [fcRows] = await db.query('SELECT * FROM featured_coupons WHERE id = ? LIMIT 1', [numId]);
+        if (fcRows && fcRows[0]) {
+          const fc = fcRows[0];
+          coupon = {
+            id: fc.id,
+            popupImage: fc.popupImage,
+            iconImage: fc.iconImage,
+            couponCode: fc.couponCode,
+            isActive: Boolean(fc.isActive),
+            createdAt: fc.createdAt,
+            updatedAt: fc.updatedAt
+          };
+        }
+      }
+      return { success: true, data: { ...r, coupon } };
     }
 
     return { success: true, data: r };

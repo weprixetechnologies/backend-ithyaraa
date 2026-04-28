@@ -1,6 +1,7 @@
 const model = require('../model/sectionItemsModel');
 const cisModel = require('../model/customImageSectionsModel');
 const pgModel = require('../model/productGroupsModel');
+const fcModel = require('../model/featuredCouponsModel');
 // const cacheHelper = require('../utils/cacheHelper');
 const { deleteCache, getCache, setCache } = require('../utils/cacheHelper');
 const { SCOPE } = require('../utils/cacheScopes');
@@ -34,6 +35,9 @@ const createItem = async (req, res) => {
           itemId = pg.data.sectionID;
         }
       }
+    } else if (t === 'featuredcoupon') {
+      // For featuredcoupon, itemId is the featured_coupons.id directly
+      itemId = String(id);
     }
 
     const orderIndex = order !== undefined && order !== null ? parseInt(order, 10) : 0;
@@ -142,6 +146,9 @@ const updateItem = async (req, res) => {
           itemId = pg.data.sectionID;
         }
       }
+    } else if (t === 'featuredcoupon') {
+      // For featuredcoupon, itemId is the featured_coupons.id directly
+      itemId = String(incomingId);
     }
 
     const orderIndex = order !== undefined && order !== null ? parseInt(order, 10) : undefined;

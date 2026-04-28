@@ -14,9 +14,9 @@ const handleTokenPayment = async (req, res) => {
         const tokenData = await paymentTokenModel.getValidToken(token);
         if (!tokenData) {
             console.error(`[PAY TOKEN] Token invalid, used, or expired: ${token}`);
-            return res.status(410).json({ 
-                success: false, 
-                message: 'Payment session expired or already used. Please initiate a new payment from the app.' 
+            return res.status(410).json({
+                success: false,
+                message: 'Payment session expired or already used. Please initiate a new payment from the app.'
             });
         }
 
@@ -51,10 +51,10 @@ const handleTokenPayment = async (req, res) => {
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://ithyaraa.com').replace(/\/+$/, '');
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
 
-        const redirectUrl = type === 'presale' 
+        const redirectUrl = type === 'presale'
             ? `${frontendUrlBase}/order-status/presale-summary/${orderID}`.replace(/([^:]\/)\/+/g, '$1')
             : `${frontendUrlBase}/order-status/order-summary/${orderID}`.replace(/([^:]\/)\/+/g, '$1');
-        
+
         const callbackUrl = type === 'presale'
             ? `${backendUrl}/api/phonepe/webhook/presale`
             : `${backendUrl}/api/phonepe/webhook/order`;
@@ -103,9 +103,9 @@ const handleTokenPayment = async (req, res) => {
         }
 
         console.error(`[PAY TOKEN] PhonePe API failed:`, JSON.stringify(data));
-        return res.status(502).json({ 
-            success: false, 
-            message: 'Failed to initiate payment with PhonePe. Please try again.' 
+        return res.status(502).json({
+            success: false,
+            message: 'Failed to initiate payment with PhonePe. Please try again.'
         });
 
     } catch (error) {
