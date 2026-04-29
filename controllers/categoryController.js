@@ -84,7 +84,8 @@ const editCategory = async (req, res) => {
             categoryName,
             slug,
             featuredImage,
-            categoryBanner
+            categoryBanner,
+            isFeatured: req.body.isFeatured
         });
 
         if (!result.success) {
@@ -129,10 +130,65 @@ const deleteCategory = async (req, res) => {
     }
 };
 
+const getFeaturedCategories = async (req, res) => {
+    try {
+        const result = await categoryService.fetchFeaturedCategories();
+        if (result.success) {
+            res.status(200).json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (error) {
+        console.error('getFeaturedCategories error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const bulkSetFeatured = async (req, res) => {
+    const { categoryIDs, isFeatured } = req.body;
+    if (!Array.isArray(categoryIDs)) {
+        return res.status(400).json({ success: false, message: 'categoryIDs must be an array' });
+    }
+    try {
+        const result = await categoryService.bulkSetFeaturedCategories(categoryIDs, isFeatured);
+        if (result.success) {
+            try { await deleteCache(SCOPE.CATEGORIES_ALL); } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(400).json(result);
+        }
+    } catch (error) {
+        console.error('bulkSetFeatured error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const reorderFeaturedCategories = async (req, res) => {
+    const { reorderedItems } = req.body;
+    if (!Array.isArray(reorderedItems)) {
+        return res.status(400).json({ success: false, message: 'reorderedItems must be an array' });
+    }
+    try {
+        const result = await categoryService.reorderFeaturedCategories(reorderedItems);
+        if (result.success) {
+            try { await deleteCache(SCOPE.CATEGORIES_ALL); } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(400).json(result);
+        }
+    } catch (error) {
+        console.error('reorderFeaturedCategories error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 module.exports = {
     postCategory,
     getCategories,
     getCategoryByID,
     editCategory,
-    deleteCategory
+    deleteCategory,
+    getFeaturedCategories,
+    bulkSetFeatured,
+    reorderFeaturedCategories
 };

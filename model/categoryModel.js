@@ -1,11 +1,11 @@
 const db = require('../utils/dbconnect');
 
-const insertCategory = async ({ categoryName, featuredImage, count, categoryBanner, slug }) => {
+const insertCategory = async ({ categoryName, featuredImage, count, categoryBanner, slug, isFeatured }) => {
     const query = `
-        INSERT INTO categories (categoryName, featuredImage, count, categoryBanner, slug)
-        VALUES (?, ?, ?, ?,?)
+        INSERT INTO categories (categoryName, featuredImage, count, categoryBanner, slug, isFeatured)
+        VALUES (?, ?, ?, ?, ?, ?)
     `;
-    const [result] = await db.query(query, [categoryName, featuredImage, count, categoryBanner, slug]);
+    const [result] = await db.query(query, [categoryName, featuredImage, count, categoryBanner, slug, isFeatured || 0]);
     return result.insertId;
 };
 
@@ -49,7 +49,8 @@ const updateCategoryByID = async ({
     categoryName,
     slug,
     featuredImage,
-    categoryBanner
+    categoryBanner,
+    isFeatured
 }) => {
     const [result] = await db.query(
         `
@@ -58,10 +59,11 @@ const updateCategoryByID = async ({
             categoryName = ?, 
             slug = ?, 
             featuredImage = ?, 
-            categoryBanner = ?
+            categoryBanner = ?,
+            isFeatured = ?
         WHERE categoryID = ?
         `,
-        [categoryName, slug, featuredImage, categoryBanner, categoryID]
+        [categoryName, slug, featuredImage, categoryBanner, isFeatured || 0, categoryID]
     );
 
     return result.affectedRows > 0;
@@ -116,13 +118,48 @@ const removeCategoryFromProducts = async (categoryID) => {
     return updatedCount;
 };
 
+const getFeaturedCategories = async () => {
+    const query = `
+        SELECT * FROM categories 
+        WHERE isFeatured = 1 
+        ORDER BY featuredOrder ASC, createdOn DESC
+    `;
+    const [rows] = await db.query(query);
+    return rows;
+};
+
+const bulkSetFeatured = async (categoryIDs, isFeatured) => {
+    if (!categoryIDs || categoryIDs.length === 0) return 0;
+    const query = `
+        UPDATE categories 
+        SET isFeatured = ? 
+        WHERE categoryID IN (?)
+    `;
+    const [result] = await db.query(query, [isFeatured ? 1 : 0, categoryIDs]);
+    return result.affectedRows;
+};
+
+const updateFeaturedOrder = async (reorderedItems) => {
+    // reorderedItems is an array of { categoryID, featuredOrder }
+    for (const item of reorderedItems) {
+        await db.query(
+            'UPDATE categories SET featuredOrder = ? WHERE categoryID = ?',
+            [item.featuredOrder, item.categoryID]
+        );
+    }
+    return true;
+};
+
 module.exports = {
     getCategoryByID,
     insertCategory,
     getFilteredCategories,
     updateCategoryByID,
     deleteCategoryByID,
-    removeCategoryFromProducts
+    removeCategoryFromProducts,
+    getFeaturedCategories,
+    bulkSetFeatured,
+    updateFeaturedOrder
 };
 
 // Fetch all categories: categoryID and categoryName only

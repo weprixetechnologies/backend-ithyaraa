@@ -6,6 +6,7 @@ const categoryController = require('./../../controllers/categoryController');
 // Public routes (no auth required)
 router.get('/public', categoryController.getCategories);
 router.get('/public/:categoryID', categoryController.getCategoryByID);
+router.get('/featured', categoryController.getFeaturedCategories);
 
 // Admin routes (auth required)
 router.post('/upload-category', authAdminMiddleware.verifyAccessToken, categoryController.postCategory);
@@ -16,6 +17,8 @@ router.put('/edit/:categoryID', authAdminMiddleware.verifyAccessToken, categoryC
 // Delete category by ID
 router.delete('/delete/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.deleteCategory);
 
-
+// Featured Management
+router.put('/bulk-featured', authAdminMiddleware.verifyAccessToken, categoryController.bulkSetFeatured);
+router.put('/reorder', authAdminMiddleware.verifyAccessToken, categoryController.reorderFeaturedCategories);
 
 module.exports = router;

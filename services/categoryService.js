@@ -66,7 +66,8 @@ const updateCategory = async (payload) => {
         categoryName,
         slug,
         featuredImage,
-        categoryBanner
+        categoryBanner,
+        isFeatured
     } = payload;
 
     if (!categoryID || !categoryName || !slug || !featuredImage) {
@@ -78,7 +79,8 @@ const updateCategory = async (payload) => {
         categoryName,
         slug,
         featuredImage,
-        categoryBanner
+        categoryBanner,
+        isFeatured
     });
 
     if (!updated) {
@@ -125,10 +127,43 @@ const deleteCategory = async (categoryID) => {
     }
 };
 
+const fetchFeaturedCategories = async () => {
+    try {
+        const data = await categoryModel.getFeaturedCategories();
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error in fetchFeaturedCategories service:', error);
+        return { success: false, message: 'Failed to fetch featured categories', error: error.message };
+    }
+};
+
+const bulkSetFeaturedCategories = async (categoryIDs, isFeatured) => {
+    try {
+        const count = await categoryModel.bulkSetFeatured(categoryIDs, isFeatured);
+        return { success: true, message: `Successfully updated ${count} categories` };
+    } catch (error) {
+        console.error('Error in bulkSetFeaturedCategories service:', error);
+        return { success: false, message: 'Failed to update featured status', error: error.message };
+    }
+};
+
+const reorderFeaturedCategories = async (reorderedItems) => {
+    try {
+        await categoryModel.updateFeaturedOrder(reorderedItems);
+        return { success: true, message: 'Order updated successfully' };
+    } catch (error) {
+        console.error('Error in reorderFeaturedCategories service:', error);
+        return { success: false, message: 'Failed to update order', error: error.message };
+    }
+};
+
 module.exports = {
     uploadCategory,
     getAllCategories,
     fetchCategoryByID,
     updateCategory,
-    deleteCategory
+    deleteCategory,
+    fetchFeaturedCategories,
+    bulkSetFeaturedCategories,
+    reorderFeaturedCategories
 };
