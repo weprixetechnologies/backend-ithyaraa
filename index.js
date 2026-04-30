@@ -64,6 +64,7 @@ const reelsAdminRouter = require('./router/admin/reelsAdminRouter')
 const flashSalePublicRouter = require('./router/flashSalePublicRouter')
 const cacheAdminRouter = require('./router/admin/cacheAdminRouter')
 const featuredCouponsRouter = require('./router/featuredCouponsRouter')
+const deliveryExperienceRouter = require('./router/deliveryExperienceRouter')
 
 
 // Support Routes
@@ -127,6 +128,7 @@ app.use('/api/slider-banners', sliderBannersRouter)
 app.use('/api/featured-blocks', featuredBlocksRouter)
 app.use('/api/featured-coupons', featuredCouponsRouter)
 app.use('/api/newsletter', newsletterRouter)
+app.use('/api/delivery-experience', deliveryExperienceRouter)
 app.use('/api/home-categories', homeCategoryRouter)
 app.use('/api/size-charts', sizeChartRouter)
 app.use('/api/public', publicFaqRouter)
