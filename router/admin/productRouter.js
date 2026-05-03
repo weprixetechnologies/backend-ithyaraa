@@ -1,8 +1,10 @@
 const express = require('express')
 const productRouter = express.Router()
 const productController = require('./../../controllers/productController')
+const customTabbedCategoryController = require('./../../controllers/customTabbedCategoryController')
 const authAdminMiddleware = require('./../../middleware/authAdminMiddleware')
 
+// Admin routes (protected)
 productRouter.post('/add-product', authAdminMiddleware.verifyAccessToken, productController.addProduct)
 productRouter.post('/add-custom-product', authAdminMiddleware.verifyAccessToken, productController.addCustomProduct)
 productRouter.post('/edit-product', authAdminMiddleware.verifyAccessToken, productController.editProduct)
@@ -11,13 +13,13 @@ productRouter.post('/bulk-delete', authAdminMiddleware.verifyAccessToken, produc
 productRouter.post('/bulk-sale-update', authAdminMiddleware.verifyAccessToken, productController.bulkUpdateSale)
 productRouter.post('/bulk-assign-section', authAdminMiddleware.verifyAccessToken, productController.bulkAssignSection)
 productRouter.post('/bulk-remove-section', authAdminMiddleware.verifyAccessToken, productController.bulkRemoveSection)
-productRouter.get('/all-products', productController.getPaginatedProducts)
 productRouter.get('/count-product', authAdminMiddleware.verifyAccessToken, productController.getProductPageCount)
-productRouter.get('/details/:productID', productController.getProductDetails);
 
-// Public shop list
-productRouter.get('/shop', productController.shopList);
-// Public search endpoint
-productRouter.get('/search', productController.searchProducts);
+// Public routes (no auth required)
+productRouter.get('/all-products', productController.getPaginatedProducts)
+productRouter.get('/details/:productID', productController.getProductDetails)
+productRouter.get('/shop', productController.shopList)
+productRouter.get('/shop/customtabbed', customTabbedCategoryController.getCustomTabbedCategories)
+productRouter.get('/search', productController.searchProducts)
 
 module.exports = productRouter

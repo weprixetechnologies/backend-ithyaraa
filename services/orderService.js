@@ -473,6 +473,15 @@ async function getOrderDetailsByOrderID(orderID, uid) {
     const items = await orderModel.getOrderDetailsByOrderID(orderID, uid);
     const orderDetail = await orderModel.getOrderByID(orderID);
 
+    // Check if user has already rated this delivery
+    let isExperienceRated = false;
+    try {
+        const [feedbackRows] = await db.query('SELECT feedbackID FROM delivery_experience_feedback WHERE orderID = ?', [orderID]);
+        isExperienceRated = feedbackRows && feedbackRows.length > 0;
+    } catch (err) {
+        console.error('Error checking feedback status:', err);
+    }
+
     // Ensure the order belongs to the requesting user
     if (orderDetail && orderDetail.uid !== uid) {
         return { items: [], orderDetail: null };
@@ -549,7 +558,7 @@ async function getOrderDetailsByOrderID(orderID, uid) {
         }
     }
 
-    return { items, orderDetail };
+    return { items, orderDetail: { ...orderDetail, isExperienceRated } };
 }
 
 module.exports.getOrderItemsByUid = getOrderItemsByUid;
@@ -572,6 +581,15 @@ async function getOrderDetails(orderId, uid) {
         // Check if the order belongs to the user
         if (order.uid !== uid) {
             return null;
+        }
+
+        // Check if user has already rated this delivery
+        let isExperienceRated = false;
+        try {
+            const [feedbackRows] = await db.query('SELECT feedbackID FROM delivery_experience_feedback WHERE orderID = ?', [orderId]);
+            isExperienceRated = feedbackRows && feedbackRows.length > 0;
+        } catch (err) {
+            console.error('Error checking feedback status:', err);
         }
 
         // Get order items from order_items table
@@ -771,7 +789,8 @@ async function getOrderDetails(orderId, uid) {
             couponCode: order.couponCode,
             couponDiscount: Number(order.couponDiscount) || 0,
             handlingFee: normalizedHandlingFee.handlingFee,
-            handFeeRate: normalizedHandlingFee.handFeeRate
+            handFeeRate: normalizedHandlingFee.handFeeRate,
+            isExperienceRated
         };
     } catch (error) {
         console.error('Error in getOrderDetails service:', error);

@@ -1,5 +1,11 @@
 const db = require('../utils/dbconnect')
 
+// ─────────────────────────────────────────────
+// Query builder (used by service pagination)
+// NOTE: filters array must be built internally
+// from validated/whitelisted keys only —
+// never pass raw req.query keys into this.
+// ─────────────────────────────────────────────
 const getFilteredProductQuery = (filters, values) => {
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     const baseQuery = `SELECT * FROM products ${whereClause} ORDER BY createdAt DESC`;
@@ -7,7 +13,9 @@ const getFilteredProductQuery = (filters, values) => {
     return { baseQuery, countQuery, values };
 };
 
-
+// ─────────────────────────────────────────────
+// Upload Product
+// ─────────────────────────────────────────────
 const uploadProduct = async ({
     name,
     description,
@@ -32,13 +40,8 @@ const uploadProduct = async ({
     custom_inputs,
     dressTypes,
     allowCustomerImageUpload,
-    sizeChartUrl // optional, only used for variable products
+    sizeChartUrl
 }) => {
-    const safeString = (str) => {
-        if (str === null || str === undefined) return '';
-        return typeof str === 'string' ? str.replace(/'/g, "''") : String(str);
-    };
-
     const query = `
         INSERT INTO products (
             name,
@@ -65,36 +68,38 @@ const uploadProduct = async ({
             dressTypes,
             allowCustomerImageUpload,
             sizeChartUrl
-        ) VALUES (
-            '${safeString(name)}',
-            '${safeString(description)}',
-            ${regularPrice},
-            ${salePrice},
-            '${safeString(discountType)}',
-            ${discountValue},
-            '${safeString(type)}',
-            '${safeString(status || 'In Stock')}',
-            ${offerId === null || offerId === undefined ? 'NULL' : `'${safeString(offerId)}'`},
-            ${overridePrice === null || overridePrice === undefined ? 'NULL' : `'${safeString(overridePrice)}'`},
-            '${safeString(tab1)}',
-            '${safeString(tab2)}',
-            '${safeString(productID)}',
-            ${sectionid === null || sectionid === undefined ? 'NULL' : `'${safeString(sectionid)}'`},
-            '${safeString(JSON.stringify(featuredImage))}',
-            ${attributes === null || attributes === undefined ? 'NULL' : `'${safeString(JSON.stringify(attributes))}'`},
-            ${categories === null || categories === undefined ? 'NULL' : `'${safeString(JSON.stringify(categories))}'`},
-            ${brandName === null || brandName === undefined ? 'NULL' : `'${safeString(brandName)}'`},
-            '${safeString(JSON.stringify(galleryImage))}',
-            ${brandID === null || brandID === undefined ? 'NULL' : `'${safeString(brandID)}'`},
-            ${custom_inputs === null || custom_inputs === undefined ? 'NULL' : `'${safeString(JSON.stringify(custom_inputs))}'`},
-            ${dressTypes === null || dressTypes === undefined ? 'NULL' : `'${safeString(JSON.stringify(dressTypes))}'`},
-            ${allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0},
-            ${sizeChartUrl ? `'${safeString(sizeChartUrl)}'` : 'NULL'}
-        );
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
+    const values = [
+        name,
+        description,
+        regularPrice,
+        salePrice,
+        discountType,
+        discountValue,
+        type,
+        status || 'In Stock',
+        offerId ?? null,
+        overridePrice ?? null,
+        tab1,
+        tab2,
+        productID,
+        sectionid ?? null,
+        JSON.stringify(featuredImage),
+        attributes != null ? JSON.stringify(attributes) : null,
+        categories != null ? JSON.stringify(categories) : null,
+        brandName ?? null,
+        JSON.stringify(galleryImage),
+        brandID ?? null,
+        custom_inputs != null ? JSON.stringify(custom_inputs) : null,
+        dressTypes != null ? JSON.stringify(dressTypes) : null,
+        allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0,
+        sizeChartUrl ?? null,
+    ];
+
     try {
-        const [result] = await db.query(query);
+        const [result] = await db.query(query, values);
         return {
             success: true,
             message: 'Product inserted successfully',
@@ -110,46 +115,73 @@ const uploadProduct = async ({
     }
 };
 
-const deleteAttributesByProductID = async (productID) => {
-    return db.query(`DELETE FROM attributes WHERE productID = ?`, [productID]);
-};
-
+// ─────────────────────────────────────────────
+// Edit Product
+// FIX: replaced || null with ?? null so that
+// falsy-but-valid values (0, false, "") are not
+// incorrectly coerced to null
+// ─────────────────────────────────────────────
 const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
         type, status, offerID, overridePrice, tab1, tab2,
-        productID, featuredImage, attributes, categories, brand, galleryImage, custom_inputs, dressTypes,
-        allowCustomerImageUpload,
-        sectionid,
-        brandID,
-        sizeChartUrl
+        productID, featuredImage, attributes, categories, brand, galleryImage,
+        custom_inputs, dressTypes, allowCustomerImageUpload,
+        sectionid, brandID, sizeChartUrl
     } = product;
-    console.log(categories);
 
     const query = `
         UPDATE products SET
-            name = ?, description = ?, regularPrice = ?, salePrice = ?,
-            discountType = ?, discountValue = ?, type = ?,
-            status = ?, offerID = ?, overridePrice = ?, tab1 = ?, tab2 = ?,
-            sectionid = ?, featuredImage = ?, productAttributes = ?, categories = ?, brand = ?, galleryImage = ?, custom_inputs = ?, dressTypes = ?, allowCustomerImageUpload = ?, sizeChartUrl = ?, brandID = ?
+            name = ?,
+            description = ?,
+            regularPrice = ?,
+            salePrice = ?,
+            discountType = ?,
+            discountValue = ?,
+            type = ?,
+            status = ?,
+            offerID = ?,
+            overridePrice = ?,
+            tab1 = ?,
+            tab2 = ?,
+            sectionid = ?,
+            featuredImage = ?,
+            productAttributes = ?,
+            categories = ?,
+            brand = ?,
+            galleryImage = ?,
+            custom_inputs = ?,
+            dressTypes = ?,
+            allowCustomerImageUpload = ?,
+            sizeChartUrl = ?,
+            brandID = ?
         WHERE productID = ?
     `;
 
     const values = [
-        name, description, regularPrice, salePrice, discountType, discountValue,
+        name,
+        description,
+        regularPrice,
+        salePrice,
+        discountType,
+        discountValue,
         type,
-        status || 'In Stock', offerID || null, overridePrice || null, tab1, tab2,
-        sectionid || null,
+        status || 'In Stock',
+        offerID ?? null,       // FIX: was || null (would null out offerID = 0)
+        overridePrice ?? null, // FIX: was || null (would null out overridePrice = 0 or false)
+        tab1,
+        tab2,
+        sectionid ?? null,
         JSON.stringify(featuredImage),
         attributes ? JSON.stringify(attributes) : null,
         categories ? JSON.stringify(categories) : null,
-        brand || null,
+        brand ?? null,
         JSON.stringify(galleryImage),
         custom_inputs ? JSON.stringify(custom_inputs) : null,
         dressTypes ? JSON.stringify(dressTypes) : null,
         allowCustomerImageUpload === true || allowCustomerImageUpload === 1 ? 1 : 0,
-        product.sizeChartUrl || null,
-        brandID || null,
+        sizeChartUrl ?? null,
+        brandID ?? null,
         productID,
     ];
 
@@ -162,8 +194,16 @@ const editProductModel = async (product) => {
     }
 };
 
+// ─────────────────────────────────────────────
+// Attributes
+// ─────────────────────────────────────────────
+const deleteAttributesByProductID = async (productID) => {
+    return db.query(`DELETE FROM attributes WHERE productID = ?`, [productID]);
+};
 
-
+// ─────────────────────────────────────────────
+// Variations — Upload
+// ─────────────────────────────────────────────
 const uploadVariations = async ({
     variationName,
     variationSlug,
@@ -176,15 +216,15 @@ const uploadVariations = async ({
 }) => {
     const query = `
         INSERT INTO variations (
-            variationName, 
-            variationSlug, 
-            variationID, 
-            variationPrice, 
-            variationStock, 
-            variationValues, 
+            variationName,
+            variationSlug,
+            variationID,
+            variationPrice,
+            variationStock,
+            variationValues,
             productID,
             variationSalePrice
-        ) VALUES (?, ?, ?, ?, ?, ?, ?,?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
@@ -198,16 +238,13 @@ const uploadVariations = async ({
             productID,
             variationSalePrice
         ]);
-
         return {
             success: true,
             message: 'Variation inserted successfully',
             insertedId: result.insertId
         };
-
     } catch (error) {
         console.error('Error inserting variation:', error);
-
         return {
             success: false,
             message: 'Failed to insert variation',
@@ -216,6 +253,9 @@ const uploadVariations = async ({
     }
 };
 
+// ─────────────────────────────────────────────
+// Variations — Update
+// ─────────────────────────────────────────────
 const updateVariation = async ({
     variationName,
     variationSlug,
@@ -246,16 +286,13 @@ const updateVariation = async ({
             variationID,
             productID
         ]);
-
         return {
             success: true,
             message: 'Variation updated successfully',
             affectedRows: result.affectedRows
         };
-
     } catch (error) {
         console.error('Error updating variation:', error);
-
         return {
             success: false,
             message: 'Failed to update variation',
@@ -264,14 +301,15 @@ const updateVariation = async ({
     }
 };
 
+// ─────────────────────────────────────────────
+// Variations — Read
+// ─────────────────────────────────────────────
 const getVariationsByProductID = async (productID) => {
     try {
         const [rows] = await db.query(
             `SELECT * FROM variations WHERE productID = ?`,
             [productID]
         );
-
-        // Parse variationValues JSON for each variation
         return rows.map(v => {
             try {
                 return {
@@ -281,10 +319,7 @@ const getVariationsByProductID = async (productID) => {
                         : v.variationValues
                 };
             } catch {
-                return {
-                    ...v,
-                    variationValues: v.variationValues
-                };
+                return { ...v, variationValues: v.variationValues };
             }
         });
     } catch (error) {
@@ -299,18 +334,13 @@ const getVariationBySlug = async (productID, variationSlug) => {
             `SELECT * FROM variations WHERE productID = ? AND variationSlug = ? LIMIT 1`,
             [productID, variationSlug]
         );
-
         if (rows.length === 0) return null;
-
         const variation = rows[0];
         try {
             variation.variationValues = typeof variation.variationValues === 'string'
                 ? JSON.parse(variation.variationValues)
                 : variation.variationValues;
-        } catch {
-            // Keep as is if parsing fails
-        }
-
+        } catch { /* keep as-is */ }
         return variation;
     } catch (error) {
         console.error('Error fetching variation by slug:', error);
@@ -318,25 +348,29 @@ const getVariationBySlug = async (productID, variationSlug) => {
     }
 };
 
+// ─────────────────────────────────────────────
+// Variations — Delete
+// ─────────────────────────────────────────────
 const deleteVariationByID = async (variationID) => {
     try {
         const [result] = await db.query(
             `DELETE FROM variations WHERE variationID = ?`,
             [variationID]
         );
-        return {
-            success: true,
-            affectedRows: result.affectedRows
-        };
+        return { success: true, affectedRows: result.affectedRows };
     } catch (error) {
         console.error('Error deleting variation:', error);
-        return {
-            success: false,
-            error: error.message
-        };
+        return { success: false, error: error.message };
     }
 };
 
+const deleteVariationsByProductID = async (productID) => {
+    return db.query(`DELETE FROM variations WHERE productID = ?`, [productID]);
+};
+
+// ─────────────────────────────────────────────
+// Variations — Existence Check
+// ─────────────────────────────────────────────
 const checkIfVariationIDExists = async (variationID) => {
     const [rows] = await db.query(
         'SELECT variationID FROM variations WHERE variationID = ?',
@@ -344,33 +378,36 @@ const checkIfVariationIDExists = async (variationID) => {
     );
     return rows.length > 0;
 };
+
+// ─────────────────────────────────────────────
+// Products — Read
+// ─────────────────────────────────────────────
 const getProductWithVariations = async (productID) => {
     const [productRows] = await db.query(
-        `SELECT p.*, u.shippingCharge AS brandShippingCharge 
-         FROM products p 
-         LEFT JOIN users u ON p.brandID = u.uid 
-         WHERE p.productID = ? LIMIT 1`, 
+        `SELECT p.*, u.shippingCharge AS brandShippingCharge
+         FROM products p
+         LEFT JOIN users u ON p.brandID = u.uid
+         WHERE p.productID = ? LIMIT 1`,
         [productID]
     );
-
     if (productRows.length === 0) return null;
 
     const product = productRows[0];
-
-    const [variationRows] = await db.query(`SELECT * FROM variations WHERE productID = ?`, [productID]);
-
+    const [variationRows] = await db.query(
+        `SELECT * FROM variations WHERE productID = ?`,
+        [productID]
+    );
     product.variations = variationRows;
-
     return product;
 };
 
 const getProductByID = async (productID) => {
     try {
         const [rows] = await db.query(
-            `SELECT p.*, u.shippingCharge AS brandShippingCharge 
-             FROM products p 
-             LEFT JOIN users u ON p.brandID = u.uid 
-             WHERE p.productID = ? LIMIT 1`, 
+            `SELECT p.*, u.shippingCharge AS brandShippingCharge
+             FROM products p
+             LEFT JOIN users u ON p.brandID = u.uid
+             WHERE p.productID = ? LIMIT 1`,
             [productID]
         );
         if (!rows || rows.length === 0) return null;
@@ -380,76 +417,116 @@ const getProductByID = async (productID) => {
         throw error;
     }
 };
-const deleteVariationsByProductID = async (productID) => {
-    return db.query(`DELETE FROM variations WHERE productID = ?`, [productID]);
-};
 
+// ─────────────────────────────────────────────
+// Products — Delete
+// ─────────────────────────────────────────────
 const deleteProduct = async (productID) => {
     try {
-        // Check if product exists first
-        const [productRows] = await db.query(`SELECT productID FROM products WHERE productID = ?`, [productID]);
+        const [productRows] = await db.query(
+            `SELECT productID FROM products WHERE productID = ?`,
+            [productID]
+        );
         if (productRows.length === 0) {
-            return {
-                success: false,
-                error: 'Product not found'
-            };
+            return { success: false, error: 'Product not found' };
         }
 
-        // Check for existing orders with this product
-        const [orderRows] = await db.query(`SELECT COUNT(*) as count FROM order_items WHERE productID = ?`, [productID]);
+        const [orderRows] = await db.query(
+            `SELECT COUNT(*) as count FROM order_items WHERE productID = ?`,
+            [productID]
+        );
         if (orderRows[0].count > 0) {
-            return {
-                success: false,
-                error: 'Cannot delete product: It has been ordered by customers'
-            };
+            return { success: false, error: 'Cannot delete product: It has been ordered by customers' };
         }
 
-        // Delete related data first (foreign key constraints)
-        // Note: Attributes are stored as JSON in products table, so no separate deletion needed
+        // Delete related data in parallel where there are no dependencies
+        await Promise.all([
+            db.query(`DELETE FROM cart_items WHERE productID = ?`, [productID]),
+            db.query(`DELETE FROM wishlist_items WHERE productID = ?`, [productID]),
+            db.query(`DELETE FROM make_combo_items WHERE productID = ?`, [productID]),
+        ]);
 
-        // Delete from cart items
-        await db.query(`DELETE FROM cart_items WHERE productID = ?`, [productID]);
-
-        // Delete from wishlist items
-        await db.query(`DELETE FROM wishlist_items WHERE productID = ?`, [productID]);
-
-        // Delete from make combo items
-        await db.query(`DELETE FROM make_combo_items WHERE productID = ?`, [productID]);
-
-        // Delete variations
         await deleteVariationsByProductID(productID);
 
-        // Delete the main product
-        const [result] = await db.query(`DELETE FROM products WHERE productID = ?`, [productID]);
+        const [result] = await db.query(
+            `DELETE FROM products WHERE productID = ?`,
+            [productID]
+        );
 
+        return { success: result.affectedRows > 0, affectedRows: result.affectedRows };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+};
+const bulkUploadVariations = async (variationsArray) => {
+    if (!Array.isArray(variationsArray) || variationsArray.length === 0) {
+        return { success: false, message: 'No variations provided' };
+    }
+
+    // Build a single INSERT with multiple value tuples
+    // e.g. INSERT INTO variations (...) VALUES (?,?,?,...), (?,?,?,...)
+    const placeholderRow = '(?, ?, ?, ?, ?, ?, ?, ?)';
+    const placeholders = variationsArray.map(() => placeholderRow).join(', ');
+
+    const query = `
+        INSERT INTO variations (
+            variationName,
+            variationSlug,
+            variationID,
+            variationPrice,
+            variationStock,
+            variationValues,
+            productID,
+            variationSalePrice
+        ) VALUES ${placeholders}
+    `;
+
+    // Flatten all variation values into a single array
+    const values = variationsArray.flatMap(v => [
+        v.variationName,
+        v.variationSlug,
+        v.variationID,
+        v.variationPrice,
+        v.variationStock,
+        JSON.stringify(v.variationValues),
+        v.productID,
+        v.variationSalePrice ?? null,
+    ]);
+
+    try {
+        const [result] = await db.query(query, values);
         return {
-            success: result.affectedRows > 0,
+            success: true,
+            message: `${variationsArray.length} variation(s) inserted successfully`,
             affectedRows: result.affectedRows
         };
     } catch (error) {
+        console.error('Error bulk inserting variations:', error);
         return {
             success: false,
+            message: 'Failed to bulk insert variations',
             error: error.message
         };
     }
 };
 
-
-
-
+// ─────────────────────────────────────────────
+// Exports
+// ─────────────────────────────────────────────
 module.exports = {
-    deleteVariationsByProductID,
+    getFilteredProductQuery,
+    uploadProduct,
+    editProductModel,
+    deleteAttributesByProductID,
     uploadVariations,
     updateVariation,
     getVariationsByProductID,
     getVariationBySlug,
     deleteVariationByID,
-    uploadProduct,
+    deleteVariationsByProductID,
     checkIfVariationIDExists,
-    getFilteredProductQuery,
+    bulkUploadVariations,
     getProductWithVariations,
     getProductByID,
-    editProductModel,
-    deleteAttributesByProductID,
-    deleteProduct
-}
+    deleteProduct,
+};

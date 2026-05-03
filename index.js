@@ -169,6 +169,10 @@ app.use('/api/admin/section-items', sectionItemsRouter);
 const homeCategoryAdminRouter = require('./router/admin/homeCategoryAdminRouter');
 app.use('/api/admin/home-categories', homeCategoryAdminRouter);
 
+// Custom tabbed categories (admin managed)
+const customTabbedCategoryAdminRouter = require('./router/admin/customTabbedCategoryAdminRouter');
+app.use('/api/admin/custom-tabbed-categories', customTabbedCategoryAdminRouter);
+
 // BRAND AUTH ROUTE
 app.use('/api/brand', brandAuthRouter)
 app.use('/api/brand', orderBrandRouter)

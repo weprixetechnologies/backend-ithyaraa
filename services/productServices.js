@@ -26,148 +26,98 @@ const generateRandomString = (length = 7) => {
 const generateUniqueVariationID = async () => {
     const prefix = 'VAR-';
     let variationID = '';
-
     while (true) {
         const randomPart = generateRandomString(7);
         variationID = `${prefix}${randomPart}`;
-
         const exists = await model.checkIfVariationIDExists(variationID);
         if (!exists) break;
     }
-
     return variationID;
 };
-
 
 const generateUniqueProductID = async () => {
     let unique = false;
     let productID = '';
-
     while (!unique) {
         productID = generateRandomID();
-
         const [rows] = await db.query(
             'SELECT 1 FROM products WHERE productID = ? LIMIT 1',
             [productID]
         );
-
-        if (rows.length === 0) {
-            unique = true;
-        }
+        if (rows.length === 0) unique = true;
     }
-
     return productID;
 };
 
-const uploadVariationMap = async ({ variations, productID }) => {
-    // console.log('🔄 Starting uploadVariationMap...');
+const generateVariationSlug = (variation) => {
+    // If slug already provided by payload, use it
+    if (variation.variationSlug) return variation.variationSlug;
 
+    // Otherwise derive from variationValues
+    if (variation.variationValues && Array.isArray(variation.variationValues)) {
+        return variation.variationValues
+            .map(v => {
+                if (typeof v === 'object' && v !== null) {
+                    const entries = Object.entries(v);
+                    return entries.length > 0 ? entries[0][1] : '';
+                }
+                return String(v);
+            })
+            .join('_')
+            .toLowerCase();
+    }
+
+    // Last resort fallback
+    return variation.variationName
+        ? variation.variationName.toLowerCase().replace(/\s+/g, '_')
+        : null;
+};
+
+const uploadVariationMap = async ({ variations, productID }) => {
     if (!variations) {
-        console.warn('⚠️ No variation data provided');
-        return {
-            success: false,
-            message: 'No variation data provided'
-        };
+        return { success: false, message: 'No variation data provided' };
     }
 
     try {
-        const results = [];
-
-        if (Array.isArray(variations)) {
-            // console.log(`🧩 Variations is an array with ${variations.length} item(s)`);
-
-            for (const [index, variation] of variations.entries()) {
-                // console.log(`➡️ Processing variation[${index}]:`, variation);
-
-                const variationID = await generateUniqueVariationID();
-                // console.log(`🆔 Generated variationID: ${variationID}`);
-
-                const payload = {
-                    ...variation,
-                    productID,
-                    variationID
-                };
-
-                // console.log('📤 Uploading variation to model.uploadVariations with payload:', payload);
-
-                const result = await model.uploadVariations(payload);
-
-                if (!result.success) {
-                    console.error(`❌ Upload failed for variation[${index}]:`, result.error);
-                    return {
-                        success: false,
-                        message: 'One or more variations failed to upload',
-                        error: result.error
-                    };
-                }
-
-                // console.log(`✅ Upload succeeded for variation[${index}] with ID ${variationID}`);
-                results.push(result);
-            }
-
-        } else if (typeof variations === 'object') {
-            // console.log('🧩 Single variation object detected:', variations);
-
-            const variationID = await generateUniqueVariationID();
-            // console.log(`🆔 Generated variationID: ${variationID}`);
-
-            const payload = {
-                ...variations,
-                productID,
-                variationID
-            };
-
-            // console.log('📤 Uploading single variation to model.uploadVariations with payload:', payload);
-
-            const result = await model.uploadVariations(payload);
-
-            if (!result.success) {
-                console.error('❌ Upload failed for single variation:', result.error);
-                return {
-                    success: false,
-                    message: 'Variation upload failed',
-                    error: result.error
-                };
-            }
-
-            // console.log(`✅ Upload succeeded for single variation with ID ${variationID}`);
-            results.push(result);
-        } else {
-            console.warn('⚠️ Invalid variations format. Must be array or object:', variations);
-            return {
-                success: false,
-                message: 'Invalid variation format'
-            };
+        const variationsArray = Array.isArray(variations) ? variations : [variations];
+        if (variationsArray.length === 0) {
+            return { success: false, message: 'Variations array is empty' };
         }
 
-        // console.log('🎉 All variation(s) uploaded successfully');
+        const variationIDs = await generateMultipleUniqueVariationIDs(variationsArray.length);
+
+        const preparedVariations = variationsArray.map((variation, i) => ({
+            ...variation,
+            productID,
+            variationID: variationIDs[i],
+            variationSlug: generateVariationSlug(variation), // explicitly guaranteed
+        }));
+
+        const result = await model.bulkUploadVariations(preparedVariations);
+        if (!result.success) {
+            return { success: false, message: 'Variation upload failed', error: result.error };
+        }
+
         return {
             success: true,
-            message: 'Variation(s) uploaded successfully',
-            data: results
+            message: result.message,
+            data: preparedVariations.map(v => ({
+                variationID: v.variationID,
+                variationSlug: v.variationSlug
+            }))
         };
-
     } catch (error) {
-        console.error('🔥 Exception during uploadVariationMap:', error);
-        return {
-            success: false,
-            message: 'Unexpected error during variation upload',
-            error: error.message
-        };
+        console.error('Exception during uploadVariationMap:', error);
+        return { success: false, message: 'Unexpected error during variation upload', error: error.message };
     }
 };
-
-// Helper function to normalize variation values for comparison
 const normalizeVariationValues = (variationValues) => {
     if (!variationValues || !Array.isArray(variationValues)) return '';
-    // Sort and stringify for consistent comparison
     const sorted = variationValues
         .map(v => {
             if (typeof v === 'object' && v !== null) {
                 const entries = Object.entries(v);
-                if (entries.length > 0) {
-                    return `${entries[0][0]}:${entries[0][1]}`;
-                }
+                if (entries.length > 0) return `${entries[0][0]}:${entries[0][1]}`;
             }
             return String(v);
         })
@@ -178,33 +128,21 @@ const normalizeVariationValues = (variationValues) => {
 
 const editVariationMap = async ({ variations, productID }) => {
     if (!variations) {
-        return {
-            success: false,
-            message: 'No variation data provided'
-        };
+        return { success: false, message: 'No variation data provided' };
     }
 
     try {
-        // Get existing variations for this product
         const existingVariations = await model.getVariationsByProductID(productID);
 
-        // Create maps for matching: by slug and by variationID (if provided)
         const existingVariationsBySlug = new Map();
         const existingVariationsByID = new Map();
-        const existingVariationsByValues = new Map(); // Fallback: match by values
+        const existingVariationsByValues = new Map();
 
         existingVariations.forEach(v => {
-            if (v.variationSlug) {
-                existingVariationsBySlug.set(v.variationSlug.toLowerCase().trim(), v);
-            }
-            if (v.variationID) {
-                existingVariationsByID.set(v.variationID, v);
-            }
-            // Create a normalized key from variationValues for fallback matching
+            if (v.variationSlug) existingVariationsBySlug.set(v.variationSlug.toLowerCase().trim(), v);
+            if (v.variationID) existingVariationsByID.set(v.variationID, v);
             const normalizedValues = normalizeVariationValues(v.variationValues);
-            if (normalizedValues) {
-                existingVariationsByValues.set(normalizedValues, v);
-            }
+            if (normalizedValues) existingVariationsByValues.set(normalizedValues, v);
         });
 
         const variationsArray = Array.isArray(variations) ? variations : [variations];
@@ -212,17 +150,10 @@ const editVariationMap = async ({ variations, productID }) => {
         const processedIDs = new Set();
         const results = [];
 
-        // Process each variation from the request
-        // This handles mixed scenarios:
-        // - Old variations (with variationID/variationSlug) → matched and updated (preserves ID)
-        // - New variations (without matching ID/slug) → created with new ID
-        // - Variations not in request → deleted
         for (const variation of variationsArray) {
             let existingVariation = null;
             let matchMethod = null;
 
-            // Priority 1: Match by variationID if provided (most reliable)
-            // Handles: Old variations sent with their variationID
             if (variation.variationID) {
                 existingVariation = existingVariationsByID.get(variation.variationID);
                 if (existingVariation) {
@@ -231,55 +162,41 @@ const editVariationMap = async ({ variations, productID }) => {
                 }
             }
 
-            // Priority 2: Match by variationSlug
-            // Handles: Old variations sent with variationSlug (even if variationID missing)
-            // Also handles: New variations that accidentally have same slug as existing
             if (!existingVariation && variation.variationSlug) {
                 const normalizedSlug = variation.variationSlug.toLowerCase().trim();
                 existingVariation = existingVariationsBySlug.get(normalizedSlug);
                 if (existingVariation) {
                     matchMethod = 'variationSlug';
                     processedSlugs.add(normalizedSlug);
-                    // Also track the ID if it exists
-                    if (existingVariation.variationID) {
-                        processedIDs.add(existingVariation.variationID);
-                    }
+                    if (existingVariation.variationID) processedIDs.add(existingVariation.variationID);
                 }
             }
 
-            // Priority 3: Fallback - match by variationValues content
-            // Handles: Variations where slug/ID don't match but values are the same
             if (!existingVariation && variation.variationValues) {
                 const normalizedValues = normalizeVariationValues(variation.variationValues);
                 if (normalizedValues) {
                     existingVariation = existingVariationsByValues.get(normalizedValues);
                     if (existingVariation) {
                         matchMethod = 'variationValues';
-                        if (existingVariation.variationSlug) {
-                            processedSlugs.add(existingVariation.variationSlug.toLowerCase().trim());
-                        }
-                        if (existingVariation.variationID) {
-                            processedIDs.add(existingVariation.variationID);
-                        }
+                        if (existingVariation.variationSlug) processedSlugs.add(existingVariation.variationSlug.toLowerCase().trim());
+                        if (existingVariation.variationID) processedIDs.add(existingVariation.variationID);
                     }
                 }
             }
 
             if (existingVariation) {
-                // Update existing variation - keep the same variationID and variationSlug
                 const updatePayload = {
                     variationName: variation.variationName !== undefined ? variation.variationName : existingVariation.variationName,
-                    variationSlug: existingVariation.variationSlug || variation.variationSlug, // Preserve original slug
-                    variationID: existingVariation.variationID, // Always keep original ID
+                    variationSlug: existingVariation.variationSlug || variation.variationSlug,
+                    variationID: existingVariation.variationID,
                     variationPrice: variation.variationPrice !== undefined && variation.variationPrice !== '' ? variation.variationPrice : existingVariation.variationPrice,
                     variationStock: variation.variationStock !== undefined && variation.variationStock !== '' ? variation.variationStock : existingVariation.variationStock,
                     variationValues: variation.variationValues || existingVariation.variationValues,
-                    productID: productID,
+                    productID,
                     variationSalePrice: variation.variationSalePrice !== undefined && variation.variationSalePrice !== '' ? variation.variationSalePrice : existingVariation.variationSalePrice
                 };
 
                 const result = await model.updateVariation(updatePayload);
-
                 if (!result.success) {
                     console.error('Failed to update variation:', updatePayload.variationSlug || updatePayload.variationID, result.error);
                     return {
@@ -288,21 +205,10 @@ const editVariationMap = async ({ variations, productID }) => {
                         error: result.error
                     };
                 }
-
-                results.push({
-                    action: 'updated',
-                    matchMethod,
-                    variationSlug: updatePayload.variationSlug,
-                    variationID: updatePayload.variationID,
-                    ...result
-                });
+                results.push({ action: 'updated', matchMethod, variationSlug: updatePayload.variationSlug, variationID: updatePayload.variationID, ...result });
             } else {
-                // Create new variation with new variationID
-                // If variationID was provided but didn't match any existing variation,
-                // generate a new unique ID to avoid conflicts
                 const variationID = await generateUniqueVariationID();
 
-                // Generate slug if not provided
                 let variationSlug = variation.variationSlug;
                 if (!variationSlug && variation.variationValues) {
                     const values = Array.isArray(variation.variationValues)
@@ -317,26 +223,22 @@ const editVariationMap = async ({ variations, productID }) => {
                     variationSlug = values.join('_').toLowerCase();
                 }
 
-                // Ensure variationSlug is unique for this product
-                // If slug already exists (shouldn't happen if matching worked correctly), append a suffix
                 if (variationSlug && existingVariationsBySlug.has(variationSlug.toLowerCase().trim())) {
-                    console.warn(`Variation slug ${variationSlug} already exists, but wasn't matched. This shouldn't happen.`);
-                    // Still create it, but log a warning - the matching logic should have caught this
+                    console.warn(`Variation slug ${variationSlug} already exists but wasn't matched.`);
                 }
 
                 const createPayload = {
                     variationName: variation.variationName || variationSlug,
-                    variationSlug: variationSlug,
-                    variationID: variationID,
+                    variationSlug,
+                    variationID,
                     variationPrice: variation.variationPrice || 0,
                     variationStock: variation.variationStock || 0,
                     variationValues: variation.variationValues || [],
-                    productID: productID,
+                    productID,
                     variationSalePrice: variation.variationSalePrice || null
                 };
 
                 const result = await model.uploadVariations(createPayload);
-
                 if (!result.success) {
                     console.error('Failed to create variation:', createPayload.variationSlug, result.error);
                     return {
@@ -346,22 +248,13 @@ const editVariationMap = async ({ variations, productID }) => {
                     };
                 }
 
-                // Track the new variation's slug and ID so it won't be deleted
-                if (createPayload.variationSlug) {
-                    processedSlugs.add(createPayload.variationSlug.toLowerCase().trim());
-                }
+                if (createPayload.variationSlug) processedSlugs.add(createPayload.variationSlug.toLowerCase().trim());
                 processedIDs.add(createPayload.variationID);
 
-                results.push({
-                    action: 'created',
-                    variationSlug: createPayload.variationSlug,
-                    variationID: createPayload.variationID,
-                    ...result
-                });
+                results.push({ action: 'created', variationSlug: createPayload.variationSlug, variationID: createPayload.variationID, ...result });
             }
         }
 
-        // Delete variations that are no longer in the new list
         const variationsToDelete = existingVariations.filter(v => {
             const hasSlug = v.variationSlug && processedSlugs.has(v.variationSlug.toLowerCase().trim());
             const hasID = v.variationID && processedIDs.has(v.variationID);
@@ -371,146 +264,76 @@ const editVariationMap = async ({ variations, productID }) => {
         for (const variationToDelete of variationsToDelete) {
             const deleteResult = await model.deleteVariationByID(variationToDelete.variationID);
             if (deleteResult.success) {
-                results.push({
-                    action: 'deleted',
-                    variationSlug: variationToDelete.variationSlug,
-                    variationID: variationToDelete.variationID
-                });
+                results.push({ action: 'deleted', variationSlug: variationToDelete.variationSlug, variationID: variationToDelete.variationID });
             }
         }
 
-        return {
-            success: true,
-            message: 'Variation(s) updated successfully',
-            data: results
-        };
+        return { success: true, message: 'Variation(s) updated successfully', data: results };
     } catch (error) {
         console.error('editVariationMap error:', error);
-        return {
-            success: false,
-            message: 'Unexpected error during variation update',
-            error: error.message
-        };
+        return { success: false, message: 'Unexpected error during variation update', error: error.message };
     }
 };
 
 const uploadAttributeService = async (attributesArray) => {
-
     if (!Array.isArray(attributesArray) || attributesArray.length === 0) {
-        console.error("Invalid attributesArray: Must be a non-empty array");
-        return {
-            success: false,
-            message: 'An array of attributes is required'
-        };
+        return { success: false, message: 'An array of attributes is required' };
     }
 
     const results = [];
-
     for (const attr of attributesArray) {
         const { name, values } = attr;
-
-        // Validation
         if (!name || !Array.isArray(values) || values.length === 0) {
             console.warn(`Skipping attribute "${name}" due to invalid format`);
-            results.push({
-                success: false,
-                name,
-                message: 'Invalid attribute format (missing name or non-array/empty values)'
-            });
+            results.push({ success: false, name, message: 'Invalid attribute format (missing name or non-array/empty values)' });
             continue;
         }
-
         try {
             const result = await attributeModel.uploadAttribute({ name, values });
-
             if (result.success) {
-                results.push({
-                    success: true,
-                    name,
-                    id: result.insertId || result.insertedId
-                });
+                results.push({ success: true, name, id: result.insertId || result.insertedId });
             } else {
                 console.error(`Failed to upload attribute "${name}":`, result.error);
-                results.push({
-                    success: false,
-                    name,
-                    message: result.error
-                });
+                results.push({ success: false, name, message: result.error });
             }
         } catch (error) {
             console.error(`Error uploading attribute "${name}":`, error.message);
-            results.push({
-                success: false,
-                name,
-                message: error.message
-            });
+            results.push({ success: false, name, message: error.message });
         }
     }
 
     const allSuccessful = results.every(r => r.success);
-    return {
-        success: allSuccessful,
-        message: 'Attribute upload process completed',
-        data: results
-    };
+    return { success: allSuccessful, message: 'Attribute upload process completed', data: results };
 };
 
 const editAttributeService = async (attributesArray, productID) => {
     if (!Array.isArray(attributesArray) || attributesArray.length === 0) {
-        return {
-            success: false,
-            message: 'An array of attributes is required'
-        };
+        return { success: false, message: 'An array of attributes is required' };
     }
 
     try {
-        await model.deleteVariationsByProductID(productID); // overwrite behavior
-
+        await model.deleteVariationsByProductID(productID);
         const results = [];
 
         for (const attr of attributesArray) {
             const { name, values } = attr;
-
             if (!name || !Array.isArray(values) || values.length === 0) {
-                results.push({
-                    success: false,
-                    name,
-                    message: 'Invalid attribute format'
-                });
+                results.push({ success: false, name, message: 'Invalid attribute format' });
                 continue;
             }
-
             const result = await attributeModel.uploadAttribute({ name, values, productID });
-
             if (result.success) {
-                results.push({
-                    success: true,
-                    name,
-                    id: result.insertId || result.insertedId
-                });
+                results.push({ success: true, name, id: result.insertId || result.insertedId });
             } else {
-                results.push({
-                    success: false,
-                    name,
-                    message: result.error
-                });
+                results.push({ success: false, name, message: result.error });
             }
         }
 
         const allSuccessful = results.every(r => r.success);
-
-        return {
-            success: allSuccessful,
-            message: 'Attribute update process completed',
-            data: results
-        };
+        return { success: allSuccessful, message: 'Attribute update process completed', data: results };
     } catch (error) {
         console.error('editAttributeService error:', error);
-        return {
-            success: false,
-            message: 'Unexpected error during attribute update',
-            error: error.message
-        };
+        return { success: false, message: 'Unexpected error during attribute update', error: error.message };
     }
 };
 
@@ -524,13 +347,11 @@ const getProductCount = async (query) => {
         'overridePrice', 'tab1', 'tab2', 'productID',
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
-
     const likeFields = ['name', 'type', 'productID', 'sectionid'];
 
     for (const key in query) {
         if (!allowedFilters.includes(key)) continue;
-
-        let value = query[key];
+        const value = query[key];
         const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
 
         if (key === 'categoryID') {
@@ -549,35 +370,21 @@ const getProductCount = async (query) => {
     }
 
     let countQuery = `SELECT COUNT(*) as total FROM products`;
-
-    if (filters.length > 0) {
-        countQuery += ` WHERE ${filters.join(' AND ')}`;
-    }
+    if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
 
     const [rows] = await db.execute(countQuery, values);
-
-    return {
-        totalItems: rows[0]?.total || 0
-    };
+    return { totalItems: rows[0]?.total || 0 };
 };
-
 
 const paginate = async ({ baseQuery, values, page, limit, db }) => {
     const offset = (page - 1) * limit;
-
     const [data] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
-
-    return {
-        currentPage: page,
-        data
-    };
+    return { currentPage: page, data };
 };
-const fetchPaginatedProducts = async (query) => {
-    console.log(query);
 
+const fetchPaginatedProducts = async (query) => {
     let page = parseInt(query.page) || 1;
     let limit = parseInt(query.limit) || 20;
-
     if (page < 1) page = 1;
     if (limit < 1) limit = 10;
 
@@ -590,73 +397,40 @@ const fetchPaginatedProducts = async (query) => {
         'overridePrice', 'tab1', 'tab2', 'productID',
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
-
     const likeFields = ['name', 'productID', 'sectionid'];
 
     for (const key in query) {
-        if (allowedFilters.includes(key)) {
-            let value = query[key];
-            const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
+        if (!allowedFilters.includes(key)) continue;
+        const value = query[key];
+        const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
 
-            if (key === 'categoryID') {
-                filters.push(`JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
-                values.push(Number(cleanedValue));
-            } else if (key === 'categoryName') {
-                // Use LIKE on JSON_EXTRACT to allow partial match
-                filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
-                values.push(`%${cleanedValue}%`);
-            } else if (likeFields.includes(key)) {
-                filters.push(`${key} LIKE ?`);
-                values.push(`%${cleanedValue}%`);
-            } else {
-                filters.push(`${key} = ?`);
-                values.push(cleanedValue);
-            }
+        if (key === 'categoryID') {
+            filters.push(`JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
+            values.push(Number(cleanedValue));
+        } else if (key === 'categoryName') {
+            filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
+            values.push(`%${cleanedValue}%`);
+        } else if (likeFields.includes(key)) {
+            filters.push(`${key} LIKE ?`);
+            values.push(`%${cleanedValue}%`);
+        } else {
+            filters.push(`${key} = ?`);
+            values.push(cleanedValue);
         }
     }
 
-    // Only select columns actually needed by admin list + frontend product cards
     let baseQuery = `
-        SELECT 
-            productID,
-            name,
-            sectionid,
-            regularPrice,
-            salePrice,
-            discountType,
-            discountValue,
-            offerID,
-            featuredImage,
-            brand,
-            categories,
-            type,
-            status,
-            createdAt
+        SELECT
+            productID, name, sectionid, regularPrice, salePrice,
+            discountType, discountValue, offerID, featuredImage,
+            brand, categories, type, status, createdAt
         FROM products
     `;
-
-    if (filters.length > 0) {
-        baseQuery += ` WHERE ${filters.join(' AND ')}`;
-    }
-
+    if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY createdAt DESC`;
 
-    console.log('🧪 baseQuery:', baseQuery);
-    console.log('🧪 values:', values);
-
-    const result = await paginate({
-        baseQuery,
-        values,
-        page,
-        limit,
-        db
-    });
-    // console.log(result);
-
-
-    return result;
+    return paginate({ baseQuery, values, page, limit, db });
 };
-
 
 const { detectFlashSaleSchema } = require('../utils/flashSaleSchema');
 
@@ -694,11 +468,9 @@ const getProductDetails = async (productID) => {
     if (flash && Array.isArray(product.variations)) {
         const discountType = String(flash.discountType || '').toLowerCase();
         const discountValue = Number(flash.discountValue || 0);
-
         product.variations = product.variations.map(v => {
             const basePrice = Number(v.variationPrice);
             let salePrice = Number(v.variationSalePrice ?? v.variationPrice);
-
             if (!Number.isNaN(basePrice)) {
                 if (discountType === 'percentage') {
                     salePrice = Math.max(0, +(basePrice * (1 - discountValue / 100)).toFixed(2));
@@ -706,42 +478,25 @@ const getProductDetails = async (productID) => {
                     salePrice = Math.max(0, +(basePrice - discountValue).toFixed(2));
                 }
             }
-
-            return {
-                ...v,
-                variationSalePrice: String(salePrice.toFixed ? salePrice.toFixed(2) : salePrice)
-            };
+            return { ...v, variationSalePrice: String(salePrice.toFixed ? salePrice.toFixed(2) : salePrice) };
         });
     }
 
-    // Fetch cross-sell products
     try {
         const crossSellProducts = await crossSellModel.getCrossSellProducts(productID);
-        // Extract only the first image URL for cross-sell products
         product.crossSellProducts = crossSellProducts.map(p => {
             const parsed = { ...p };
-
-            // Extract first image URL from featuredImage
             let imageUrl = null;
             try {
                 let featuredImage = parsed.featuredImage;
-                // Parse if it's a string
-                if (typeof featuredImage === 'string') {
-                    featuredImage = JSON.parse(featuredImage);
-                }
-                // Extract first image URL
+                if (typeof featuredImage === 'string') featuredImage = JSON.parse(featuredImage);
                 if (Array.isArray(featuredImage) && featuredImage.length > 0) {
                     const firstImage = featuredImage[0];
-                    if (firstImage && firstImage.imgUrl) {
-                        imageUrl = firstImage.imgUrl;
-                    }
+                    if (firstImage && firstImage.imgUrl) imageUrl = firstImage.imgUrl;
                 }
             } catch (error) {
-                // If parsing fails, imageUrl remains null
                 console.error('Error parsing featuredImage for cross-sell product:', error);
             }
-
-            // Return only essential fields with imageUrl and type
             return {
                 productID: parsed.productID,
                 name: parsed.name,
@@ -756,14 +511,11 @@ const getProductDetails = async (productID) => {
         product.crossSellProducts = [];
     }
 
-    // Fetch offer details if product has an offerID
     try {
         if (product.offerID) {
             const [offerRows] = await db.query(
                 `SELECT offerID, offerName, offerType, buyCount, getCount, offerBanner, offerMobileBanner
-                 FROM offers
-                 WHERE offerID = ?
-                 LIMIT 1`,
+                 FROM offers WHERE offerID = ? LIMIT 1`,
                 [product.offerID]
             );
             if (offerRows && offerRows.length > 0) {
@@ -789,166 +541,11 @@ const getProductDetails = async (productID) => {
     return product;
 };
 
-
-
-// Public shop products with filters: multiple categories, price range, stock, pagination
-// async function getShopProductsPublic(query) {
-//     let page = Math.max(1, parseInt(query.page) || 1);
-//     let limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
-//     let type = query.type || 'variable';
-
-//     const filters = [];
-//     const values = [];
-
-
-//     // Category filter: categoryID can be comma-separated IDs
-//     if (query.categoryID) {
-//         const ids = String(query.categoryID)
-//             .split(',')
-//             .map(s => s.trim())
-//             .filter(Boolean)
-//             .map(Number)
-//             .filter(n => !Number.isNaN(n));
-//         if (ids.length > 0) {
-//             const orConds = ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`);
-//             filters.push(`(${orConds.join(' OR ')})`);
-//             values.push(...ids);
-//         }
-//     }
-
-//     // Section filter: sectionid can be a single value or comma-separated list
-//     if (query.sectionid) {
-//         const sectionIds = String(query.sectionid)
-//             .split(',')
-//             .map(s => s.trim())
-//             .filter(Boolean);
-//         if (sectionIds.length > 0) {
-//             const orConds = sectionIds.map(() => `sectionid = ?`);
-//             filters.push(`(${orConds.join(' OR ')})`);
-//             values.push(...sectionIds);
-//         }
-//     }
-
-//     // Type filter: default to 'variable' unless explicitly provided otherwise
-//     if (type && String(type).toLowerCase() !== 'all') {
-//         filters.push(`type = ?`);
-//         values.push(type);
-//     }
-
-//     // Price range (single min/max) or multiple bands via priceBands param
-//     const priceBands = typeof query.priceBands === 'string'
-//         ? query.priceBands.split(',').map(s => s.trim()).filter(Boolean)
-//         : [];
-
-//     if (priceBands.length > 0) {
-//         const bandConds = [];
-//         for (const band of priceBands) {
-//             if (band === 'u500') bandConds.push(`(salePrice >= 0 AND salePrice <= 499)`);
-//             else if (band === '500-999') bandConds.push(`(salePrice >= 500 AND salePrice <= 999)`);
-//             else if (band === '1000-1999') bandConds.push(`(salePrice >= 1000 AND salePrice <= 1999)`);
-//             else if (band === '2000+') bandConds.push(`(salePrice >= 2000)`);
-//         }
-//         if (bandConds.length > 0) filters.push(`(${bandConds.join(' OR ')})`);
-//     } else {
-//         const minPrice = query.minPrice !== undefined && query.minPrice !== '' ? Number(query.minPrice) : null;
-//         const maxPrice = query.maxPrice !== undefined && query.maxPrice !== '' ? Number(query.maxPrice) : null;
-//         if (minPrice !== null && !Number.isNaN(minPrice)) { filters.push(`salePrice >= ?`); values.push(minPrice); }
-//         if (maxPrice !== null && !Number.isNaN(maxPrice)) { filters.push(`salePrice <= ?`); values.push(maxPrice); }
-//     }
-
-//     // Stock filter (optional): stock=in|out maps to status field values
-//     if (query.stock) {
-//         const stock = String(query.stock).toLowerCase();
-//         if (stock === 'in') {
-//             // Treat NULL as In Stock as well
-//             filters.push(`(status = ? OR status IS NULL)`);
-//             values.push('In Stock');
-//         } else if (stock === 'out') {
-//             filters.push(`status = ?`);
-//             values.push('Out of Stock');
-//         }
-//     }
-
-//     // Optional search by name
-//     if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
-
-//     // Offer filter
-//     if (query.offerID) {
-//         filters.push(`offerID = ?`);
-//         values.push(query.offerID);
-//     }
-
-//     // Sorting
-//     const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
-//     const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
-//     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-
-//     // Base query
-//     let baseQuery = `SELECT productID, name, regularPrice, salePrice, discountType, discountValue, type, status, brand, featuredImage, categories, sectionid, createdAt FROM products`;
-//     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
-//     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
-
-//     // Count query
-//     let countQuery = `SELECT COUNT(*) AS total FROM products`;
-//     if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
-
-//     const offset = (page - 1) * limit;
-//     const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
-
-//     // Parse JSON fields
-//     rows.forEach(row => {
-//         try {
-//             if (row.featuredImage && typeof row.featuredImage === 'string') {
-//                 row.featuredImage = JSON.parse(row.featuredImage);
-//             }
-//             if (row.categories && typeof row.categories === 'string') {
-//                 row.categories = JSON.parse(row.categories);
-//             }
-//         } catch (e) {
-//             console.error('Error parsing JSON fields for product:', row.productID, e);
-//         }
-//     });
-//     // build cache key
-//     const cacheKey = SCOPE.PRODUCTS_PAGE(page, limit, filters);
-
-//     // 1️⃣ check cache
-//     const cached = await getCache(cacheKey);
-//     if (cached) {
-//         return cached;
-//     }
-//     const [countRows] = await db.query(countQuery, values);
-//     const total = countRows?.[0]?.total || 0;
-
-//     const data = {
-//         success: true,
-//         data: rows,
-//         pagination: {
-//             currentPage: page,
-//             totalItems: total,
-//             totalPages: Math.ceil(total / limit),
-//             itemsPerPage: limit,
-//             hasPrevPage: page > 1,
-//             hasNextPage: page < Math.ceil(total / limit)
-//         }
-//     };
-//     await setCache(cacheKey, data, 24400);
-//     return data;
-// }
-
 async function getShopProductsPublic(query) {
-    // =========================
-    // Pagination & base params
-    // =========================
     const page = Math.max(1, parseInt(query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
     const type = query.type || 'variable';
 
-    // =========================
-    // 🔑 CACHE FILTERS (REQUEST INTENT)
-    // =========================
-    // IMPORTANT:
-    // - Use placeholders so presence/absence changes cache key
-    // - Do NOT use SQL filters here
     const cacheFilters = {
         categoryID: query.categoryID ?? '__none__',
         sectionid: query.sectionid ?? '__none__',
@@ -963,62 +560,34 @@ async function getShopProductsPublic(query) {
         sortOrder: query.sortOrder ?? 'DESC',
     };
 
-    // Build cache key
     const cacheKey = SCOPE.PRODUCTS_PAGE(page, limit, cacheFilters);
-
-    // =========================
-    // 🚀 CACHE CHECK (BEFORE DB)
-    // =========================
     const cached = await getCache(cacheKey);
-    if (cached) {
-        return cached;
-    }
+    if (cached) return cached;
 
-    // =========================
-    // SQL FILTERS (IMPLEMENTATION)
-    // =========================
     const filters = [];
     const values = [];
 
-    // Category filter
     if (query.categoryID) {
-        const ids = String(query.categoryID)
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-            .map(Number)
-            .filter(n => !Number.isNaN(n));
-
+        const ids = String(query.categoryID).split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(n => !Number.isNaN(n));
         if (ids.length > 0) {
-            const orConds = ids.map(
-                () => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`
-            );
-            filters.push(`(${orConds.join(' OR ')})`);
+            filters.push(`(${ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`).join(' OR ')})`);
             values.push(...ids);
         }
     }
 
-    // Section filter
     if (query.sectionid) {
-        const sectionIds = String(query.sectionid)
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean);
-
+        const sectionIds = String(query.sectionid).split(',').map(s => s.trim()).filter(Boolean);
         if (sectionIds.length > 0) {
-            const orConds = sectionIds.map(() => `sectionid = ?`);
-            filters.push(`(${orConds.join(' OR ')})`);
+            filters.push(`(${sectionIds.map(() => `sectionid = ?`).join(' OR ')})`);
             values.push(...sectionIds);
         }
     }
 
-    // Type filter
     if (type && String(type).toLowerCase() !== 'all') {
         filters.push(`type = ?`);
         values.push(type);
     }
 
-    // Price bands OR min/max
     const priceBands = typeof query.priceBands === 'string'
         ? query.priceBands.split(',').map(s => s.trim()).filter(Boolean)
         : [];
@@ -1033,62 +602,31 @@ async function getShopProductsPublic(query) {
         }
         if (bandConds.length > 0) filters.push(`(${bandConds.join(' OR ')})`);
     } else {
-        const minPrice = query.minPrice !== undefined && query.minPrice !== ''
-            ? Number(query.minPrice)
-            : null;
-        const maxPrice = query.maxPrice !== undefined && query.maxPrice !== ''
-            ? Number(query.maxPrice)
-            : null;
-
-        if (minPrice !== null && !Number.isNaN(minPrice)) {
-            filters.push(`salePrice >= ?`);
-            values.push(minPrice);
-        }
-        if (maxPrice !== null && !Number.isNaN(maxPrice)) {
-            filters.push(`salePrice <= ?`);
-            values.push(maxPrice);
-        }
+        const minPrice = query.minPrice !== undefined && query.minPrice !== '' ? Number(query.minPrice) : null;
+        const maxPrice = query.maxPrice !== undefined && query.maxPrice !== '' ? Number(query.maxPrice) : null;
+        if (minPrice !== null && !Number.isNaN(minPrice)) { filters.push(`salePrice >= ?`); values.push(minPrice); }
+        if (maxPrice !== null && !Number.isNaN(maxPrice)) { filters.push(`salePrice <= ?`); values.push(maxPrice); }
     }
 
-    // Stock filter
     if (query.stock) {
         const stock = String(query.stock).toLowerCase();
-        if (stock === 'in') {
-            filters.push(`(status = ? OR status IS NULL)`);
-            values.push('In Stock');
-        } else if (stock === 'out') {
-            filters.push(`status = ?`);
-            values.push('Out of Stock');
-        }
+        if (stock === 'in') { filters.push(`(status = ? OR status IS NULL)`); values.push('In Stock'); }
+        else if (stock === 'out') { filters.push(`status = ?`); values.push('Out of Stock'); }
     }
 
-    // Search
-    if (query.search) {
-        filters.push(`name LIKE ?`);
-        values.push(`%${query.search}%`);
-    }
+    if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
+    if (query.offerID) { filters.push(`offerID = ?`); values.push(query.offerID); }
 
-    // Offer filter
-    if (query.offerID) {
-        filters.push(`offerID = ?`);
-        values.push(query.offerID);
-    }
-
-    // Sorting
     const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
     const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-    // =========================
-    // SQL QUERIES
-    // =========================
     let baseQuery = `
         SELECT productID, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
                brand, brandID, featuredImage, categories, sectionid, createdAt
         FROM products
     `;
-
     if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
@@ -1096,21 +634,12 @@ async function getShopProductsPublic(query) {
     if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
 
     const offset = (page - 1) * limit;
+    const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
 
-    const [rows] = await db.query(
-        `${baseQuery} LIMIT ? OFFSET ?`,
-        [...values, limit, offset]
-    );
-
-    // Parse JSON fields
     rows.forEach(row => {
         try {
-            if (typeof row.featuredImage === 'string') {
-                row.featuredImage = JSON.parse(row.featuredImage);
-            }
-            if (typeof row.categories === 'string') {
-                row.categories = JSON.parse(row.categories);
-            }
+            if (typeof row.featuredImage === 'string') row.featuredImage = JSON.parse(row.featuredImage);
+            if (typeof row.categories === 'string') row.categories = JSON.parse(row.categories);
         } catch (e) {
             console.error('JSON parse error for product:', row.productID, e);
         }
@@ -1132,69 +661,32 @@ async function getShopProductsPublic(query) {
         },
     };
 
-    // =========================
-    // 💾 SAVE CACHE
-    // =========================
-    await setCache(cacheKey, data, 300); // 5 minutes TTL
-
+    await setCache(cacheKey, data, 300);
     return data;
 }
 
-module.exports = {
-    getShopProductsPublic,
-};
-
-
 const deleteProduct = async (productID) => {
     try {
-        if (!productID) {
-            return {
-                success: false,
-                message: 'Product ID is required'
-            };
-        }
-
+        if (!productID) return { success: false, message: 'Product ID is required' };
         const result = await model.deleteProduct(productID);
-
         if (result.success) {
-            return {
-                success: true,
-                message: 'Product deleted successfully',
-                affectedRows: result.affectedRows
-            };
-        } else {
-            return {
-                success: false,
-                message: 'Failed to delete product',
-                error: result.error
-            };
+            return { success: true, message: 'Product deleted successfully', affectedRows: result.affectedRows };
         }
+        return { success: false, message: 'Failed to delete product', error: result.error };
     } catch (error) {
-        return {
-            success: false,
-            message: 'Error deleting product',
-            error: error.message
-        };
+        return { success: false, message: 'Error deleting product', error: error.message };
     }
 };
 
-/**
- * Bulk delete products by productID array.
- * Uses existing single delete logic so related variations and other links are also removed.
- * @param {string[]} productIDs
- */
 const bulkDeleteProducts = async (productIDs = []) => {
     if (!Array.isArray(productIDs) || productIDs.length === 0) {
         return { success: false, message: 'productIDs must be a non-empty array' };
     }
-
     const results = [];
     for (const id of productIDs) {
-        // Reuse the existing deleteProduct logic which already deletes variations etc.
         const result = await deleteProduct(id);
         results.push({ productID: id, ...result });
     }
-
     const allOk = results.every(r => r.success);
     return {
         success: allOk,
@@ -1203,48 +695,28 @@ const bulkDeleteProducts = async (productIDs = []) => {
     };
 };
 
-/**
- * Bulk update discountType and discountValue for products.
- * Optionally also updates salePrice based on these values when updateSalePrice = true.
- */
 const bulkUpdateSale = async ({ productIDs = [], discountType, discountValue, updateSalePrice = false }) => {
-    if (!Array.isArray(productIDs) || productIDs.length === 0) {
-        return { success: false, message: 'productIDs must be a non-empty array' };
-    }
-    if (!discountType || typeof discountValue === 'undefined' || discountValue === null) {
-        return { success: false, message: 'discountType and discountValue are required' };
-    }
+    if (!Array.isArray(productIDs) || productIDs.length === 0) return { success: false, message: 'productIDs must be a non-empty array' };
+    if (!discountType || typeof discountValue === 'undefined' || discountValue === null) return { success: false, message: 'discountType and discountValue are required' };
 
     const validTypes = new Set(['percentage', 'fixed', 'flat']);
     const normType = String(discountType).toLowerCase();
-    if (!validTypes.has(normType)) {
-        return { success: false, message: 'Invalid discountType. Use percentage, fixed or flat.' };
-    }
+    if (!validTypes.has(normType)) return { success: false, message: 'Invalid discountType. Use percentage, fixed or flat.' };
 
     const numericDiscount = Number(discountValue);
-    if (Number.isNaN(numericDiscount)) {
-        return { success: false, message: 'discountValue must be a number' };
-    }
+    if (Number.isNaN(numericDiscount)) return { success: false, message: 'discountValue must be a number' };
 
     const placeholders = productIDs.map(() => '?').join(',');
-
-    // Always update discountType and discountValue
-    let sql = `
-        UPDATE products
-        SET discountType = ?, discountValue = ?
-    `;
-
+    let sql = `UPDATE products SET discountType = ?, discountValue = ?`;
     const values = [normType, numericDiscount];
 
-    // Optionally recalculate salePrice from regularPrice
     if (updateSalePrice) {
         sql += `,
             salePrice = CASE
                 WHEN ? = 'percentage' THEN GREATEST(0, ROUND(regularPrice * (1 - (? / 100)), 2))
                 WHEN ? IN ('fixed', 'flat') THEN GREATEST(0, regularPrice - ?)
                 ELSE salePrice
-            END
-        `;
+            END`;
         values.push(normType, numericDiscount, normType, numericDiscount);
     }
 
@@ -1252,77 +724,39 @@ const bulkUpdateSale = async ({ productIDs = [], discountType, discountValue, up
     values.push(...productIDs);
 
     const [result] = await db.query(sql, values);
-
-    return {
-        success: true,
-        message: 'Bulk sale updated successfully',
-        affectedRows: result.affectedRows
-    };
+    return { success: true, message: 'Bulk sale updated successfully', affectedRows: result.affectedRows };
 };
 
-/**
- * Bulk assign a sectionid to products.
- */
 const bulkAssignSection = async ({ productIDs = [], sectionid }) => {
-    if (!Array.isArray(productIDs) || productIDs.length === 0) {
-        return { success: false, message: 'productIDs must be a non-empty array' };
-    }
-    if (!sectionid) {
-        return { success: false, message: 'sectionid is required' };
-    }
+    if (!Array.isArray(productIDs) || productIDs.length === 0) return { success: false, message: 'productIDs must be a non-empty array' };
+    if (!sectionid) return { success: false, message: 'sectionid is required' };
 
     const placeholders = productIDs.map(() => '?').join(',');
-    const sql = `UPDATE products SET sectionid = ? WHERE productID IN (${placeholders})`;
-    const values = [sectionid, ...productIDs];
-    const [result] = await db.query(sql, values);
-
-    return {
-        success: true,
-        message: 'Section assigned successfully to selected products',
-        affectedRows: result.affectedRows
-    };
+    const [result] = await db.query(
+        `UPDATE products SET sectionid = ? WHERE productID IN (${placeholders})`,
+        [sectionid, ...productIDs]
+    );
+    return { success: true, message: 'Section assigned successfully to selected products', affectedRows: result.affectedRows };
 };
 
-/**
- * Bulk remove sectionid from products (set to NULL).
- */
 const bulkRemoveSection = async ({ productIDs = [] }) => {
-    if (!Array.isArray(productIDs) || productIDs.length === 0) {
-        return { success: false, message: 'productIDs must be a non-empty array' };
-    }
+    if (!Array.isArray(productIDs) || productIDs.length === 0) return { success: false, message: 'productIDs must be a non-empty array' };
 
     const placeholders = productIDs.map(() => '?').join(',');
-    const sql = `UPDATE products SET sectionid = NULL WHERE productID IN (${placeholders})`;
-    const [result] = await db.query(sql, productIDs);
-
-    return {
-        success: true,
-        message: 'Section removed successfully from selected products',
-        affectedRows: result.affectedRows
-    };
+    const [result] = await db.query(
+        `UPDATE products SET sectionid = NULL WHERE productID IN (${placeholders})`,
+        productIDs
+    );
+    return { success: true, message: 'Section removed successfully from selected products', affectedRows: result.affectedRows };
 };
 
-/**
- * Handle cross-sell mappings for a product
- * @param {string} productID - The product ID
- * @param {number[]} crossSellProductIDs - Array of cross-sell product IDs
- * @returns {Promise<{success: boolean, message: string}>}
- */
 const handleCrossSells = async (productID, crossSellProductIDs) => {
-    if (!productID) {
-        return { success: false, message: 'Product ID is required' };
-    }
-
+    if (!productID) return { success: false, message: 'Product ID is required' };
     try {
-        // Delete existing cross-sells
         await crossSellModel.deleteCrossSells(productID);
-
-        // Insert new cross-sells if provided
         if (Array.isArray(crossSellProductIDs) && crossSellProductIDs.length > 0) {
-            const result = await crossSellModel.insertCrossSells(productID, crossSellProductIDs);
-            return result;
+            return await crossSellModel.insertCrossSells(productID, crossSellProductIDs);
         }
-
         return { success: true, message: 'Cross-sells updated successfully' };
     } catch (error) {
         console.error('Error handling cross-sells:', error);
@@ -1330,42 +764,25 @@ const handleCrossSells = async (productID, crossSellProductIDs) => {
     }
 };
 
-// Search products by query string
 async function searchProducts(query) {
     try {
         if (!query || typeof query !== 'string' || query.trim().length === 0) {
-            return {
-                success: true,
-                data: [],
-                total: 0
-            };
+            return { success: true, data: [], total: 0 };
         }
-
         const trimmedQuery = query.trim();
         const searchTerm = `%${trimmedQuery}%`;
         const startMatch = `${trimmedQuery}%`;
 
-        // Search in both name and description
         const searchQuery = `
-            SELECT 
-                productID, 
-                name, 
-                description, 
-                regularPrice, 
-                salePrice, 
-                discountType, 
-                discountValue, 
-                type, 
-                status, 
-                brand, 
-                featuredImage, 
-                categories, 
-                createdAt 
+            SELECT
+                productID, name, description, regularPrice, salePrice,
+                discountType, discountValue, type, status, brand,
+                featuredImage, categories, createdAt
             FROM products
-            WHERE (name LIKE ?  OR productID LIKE ?)
-            AND status != 'deleted'
-            ORDER BY 
-                CASE 
+            WHERE (name LIKE ? OR productID LIKE ?)
+              AND status != 'deleted'
+            ORDER BY
+                CASE
                     WHEN name LIKE ? THEN 1
                     WHEN name LIKE ? THEN 2
                     ELSE 3
@@ -1374,30 +791,20 @@ async function searchProducts(query) {
             LIMIT 20
         `;
 
-        const [rows] = await db.query(searchQuery, [
-            searchTerm, // name LIKE ?
-            searchTerm, // productID LIKE ?
-            startMatch, // Exact start match gets highest priority
-            searchTerm  // Contains match gets priority 2
-        ]);
-
-        return {
-            success: true,
-            data: rows,
-            total: rows.length
-        };
+        const [rows] = await db.query(searchQuery, [searchTerm, searchTerm, startMatch, searchTerm]);
+        return { success: true, data: rows, total: rows.length };
     } catch (error) {
         console.error('Error searching products:', error);
-        return {
-            success: false,
-            message: 'Error searching products',
-            error: error.message,
-            data: [],
-            total: 0
-        };
+        return { success: false, message: 'Error searching products', error: error.message, data: [], total: 0 };
     }
 }
 
+// ─────────────────────────────────────────────
+// Single export block
+// FIX: removed orphan mid-file
+// `module.exports = { getShopProductsPublic }`
+// that was dead code (overwritten by this block)
+// ─────────────────────────────────────────────
 module.exports = {
     generateUniqueProductID,
     uploadVariationMap,
@@ -1414,5 +821,5 @@ module.exports = {
     bulkAssignSection,
     bulkRemoveSection,
     handleCrossSells,
-    searchProducts
+    searchProducts,
 };
