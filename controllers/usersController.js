@@ -89,6 +89,17 @@ const loginUser = async (req, res) => {
 const getUserByUID = async (req, res) => {
     try {
         const { uid } = req.params;
+
+        // SECURITY FIX: Ownership check (IDOR Protection)
+        // Allow access only if the authenticated user is the owner OR has administrative privileges
+        if (req.user.uid !== uid && req.user.role !== 'admin' && req.user.role !== 'manager') {
+            console.warn(`[SECURITY] Unauthorized profile access attempt by ${req.user.uid} on target UID: ${uid}`);
+            return res.status(403).json({ 
+                success: false, 
+                message: "Access denied: You do not have permission to view this profile." 
+            });
+        }
+
         console.log('getUserByUID called with UID:', uid);
 
         const user = await usersService.getUserByuid(uid);

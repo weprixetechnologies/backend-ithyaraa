@@ -206,8 +206,11 @@ async function getCartItems(uid) {
             ci.*,
             v.variationSlug AS variationName,
             v.variationValues,
+            v.variationStock,
             p.type AS productType,
-            p.offerID AS currentProductOfferID
+            p.status AS productStatus,
+            p.offerID AS currentProductOfferID,
+            p.description
         FROM cart_items ci
         LEFT JOIN variations v ON ci.variationID = v.variationID
         LEFT JOIN products p ON ci.productID = p.productID
@@ -494,6 +497,40 @@ async function getComboItems(comboID) {
     }));
 }
 
+// Update selected status for cart items in bulk
+async function bulkUnselectCartItems(cartItemIDs) {
+    if (!cartItemIDs || cartItemIDs.length === 0) return;
+    const placeholders = cartItemIDs.map(() => '?').join(',');
+    await db.query(
+        `UPDATE cart_items SET selected = FALSE WHERE cartItemID IN (${placeholders})`,
+        cartItemIDs
+    );
+}
+
+async function getComboItemsForMultipleCombos(comboIDs) {
+    if (!comboIDs || comboIDs.length === 0) return [];
+    const placeholders = comboIDs.map(() => '?').join(',');
+    const query = `
+        SELECT 
+            oci.comboID,
+            oci.productID, 
+            oci.variationID, 
+            p.name, 
+            p.featuredImage, 
+            p.status AS productStatus,
+            p.description,
+            v.variationSlug AS variationName,
+            v.variationStock
+        FROM order_combo_items oci
+        JOIN products p ON oci.productID = p.productID
+        LEFT JOIN variations v ON oci.variationID = v.variationID
+        WHERE oci.comboID IN (${placeholders})
+    `;
+
+    const [rows] = await db.query(query, comboIDs);
+    return rows;
+}
+
 // Update selected status for cart items
 async function updateCartItemsSelected(uid, selectedItems) {
     try {
@@ -502,7 +539,7 @@ async function updateCartItemsSelected(uid, selectedItems) {
             `UPDATE cart_items SET selected = FALSE WHERE uid = ?`,
             [uid]
         );
-        
+
         // Then, set specified items to selected
         if (selectedItems && selectedItems.length > 0) {
             const placeholders = selectedItems.map(() => '?').join(',');
@@ -511,7 +548,7 @@ async function updateCartItemsSelected(uid, selectedItems) {
                 [uid, ...selectedItems]
             );
         }
-        
+
         return { success: true };
     } catch (error) {
         console.error('Error updating cart items selected status:', error);
@@ -541,7 +578,7 @@ async function clearCartByUid(uid) {
             await db.query(`DELETE FROM cartDetail WHERE uid = ?`, [uid]);
             console.log(`[Cart Model] CartDetail cleared for uid: ${uid} (cart is now empty)`);
         }
-        
+
         return { success: true, deletedCount: deleteResult.affectedRows };
     } catch (error) {
         console.error(`[Cart Model] Error clearing cart for uid: ${uid}:`, error);
@@ -563,6 +600,26 @@ async function getBrandShippingCharges(brandIDs) {
     return map;
 }
 
+async function getCartItemWithProductType(cartItemID) {
+    const [rows] = await db.query(
+        `SELECT ci.*, p.type as productType 
+         FROM cart_items ci 
+         JOIN products p ON ci.productID = p.productID 
+         WHERE ci.cartItemID = ? LIMIT 1`,
+        [cartItemID]
+    );
+    return rows[0] || null;
+}
+
+async function getVariationStock(variationID) {
+    if (!variationID) return 0;
+    const [rows] = await db.query(
+        `SELECT variationStock FROM variations WHERE variationID = ? LIMIT 1`,
+        [variationID]
+    );
+    return rows[0]?.variationStock ?? 0;
+}
+
 module.exports = {
     getProductByID,
     getOrCreateCart,
@@ -582,5 +639,9 @@ module.exports = {
     resetFlashForCartItem, setCartModified,
     updateCartItemsSelected,
     clearCartByUid,
-    getBrandShippingCharges
+    getBrandShippingCharges,
+    getCartItemWithProductType,
+    getVariationStock,
+    bulkUnselectCartItems,
+    getComboItemsForMultipleCombos
 };

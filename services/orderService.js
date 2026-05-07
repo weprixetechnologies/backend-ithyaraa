@@ -101,7 +101,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     if (subtotalAfterDiscount < 999) {
         const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
         const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
-        
+
         const brandShippingMap = uniqueBrandIDs.length > 0 ? await cartModel.getBrandShippingCharges(uniqueBrandIDs) : new Map();
         const globalShippingFee = hasInhouse ? (Number(await settingsModel.getSetting('shipping_fee')) || 50) : 0;
 
@@ -124,13 +124,13 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                 inhouseShippingAssigned = true;
             }
         });
-        
+
         baseShipping = totalShippingFee;
     } else {
         baseShipping = 0; // Free shipping above 999
         selectedItems.forEach(item => { item.brandShippingFee = 0; });
     }
-    
+
     finalSummary.shippingFee = baseShipping;
 
     // Add handling fee for COD orders (8 INR)
@@ -235,40 +235,40 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
             if (referByUid === uid) {
                 console.log('[Refer] Skipping refer commission: self-referral not allowed');
             } else {
-            // Fetch referrer user
-            const referrerUsers = await batchFetchUsers([referByUid]);
-            const referrerUser = referrerUsers[0];
+                // Fetch referrer user
+                const referrerUsers = await batchFetchUsers([referByUid]);
+                const referrerUser = referrerUsers[0];
 
-            if (referrerUser) {
-                // Calculate total commission for this referrer (dynamic % or 10% default)
-                let totalCommission = 0;
-                const commissionRate = (referrerUser.commissionPercentage != null) 
-                    ? (Number(referrerUser.commissionPercentage) / 100) 
-                    : 0.10;
-                
-                for (const item of cartData.items) {
-                    const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
-                    totalCommission += itemAmount * commissionRate;
+                if (referrerUser) {
+                    // Calculate total commission for this referrer (dynamic % or 10% default)
+                    let totalCommission = 0;
+                    const commissionRate = (referrerUser.commissionPercentage != null)
+                        ? (Number(referrerUser.commissionPercentage) / 100)
+                        : 0.10;
+
+                    for (const item of cartData.items) {
+                        const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
+                        totalCommission += itemAmount * commissionRate;
+                    }
+
+                    if (totalCommission > 0) {
+                        totalCommission = Math.round(totalCommission * 100) / 100;
+                        creditedUsers.add(referrerUser.uid);
+
+                        // Execute both operations in parallel (link to order for delivery/return handling)
+                        await Promise.all([
+                            usersModel.incrementPendingPayment(referrerUser.uid, totalCommission),
+                            affiliateModel.createAffiliateTransaction({
+                                txnID: randomUUID(),
+                                uid: referrerUser.uid,
+                                status: 'pending',
+                                amount: totalCommission,
+                                type: 'incoming',
+                                orderID: newOrder.orderID
+                            })
+                        ]);
+                    }
                 }
-
-                if (totalCommission > 0) {
-                    totalCommission = Math.round(totalCommission * 100) / 100;
-                    creditedUsers.add(referrerUser.uid);
-
-                    // Execute both operations in parallel (link to order for delivery/return handling)
-                    await Promise.all([
-                        usersModel.incrementPendingPayment(referrerUser.uid, totalCommission),
-                        affiliateModel.createAffiliateTransaction({
-                            txnID: randomUUID(),
-                            uid: referrerUser.uid,
-                            status: 'pending',
-                            amount: totalCommission,
-                            type: 'incoming',
-                            orderID: newOrder.orderID
-                        })
-                    ]);
-                }
-            }
             }
         } catch (referByError) {
             console.error('ReferBy processing error:', referByError);
@@ -510,7 +510,7 @@ async function getOrderDetailsByOrderID(orderID, uid) {
         // Fetch brand names if we have any brand IDs
         const uniqueBrandIDs = [...new Set(items.filter(i => i.brandID).map(i => i.brandID))];
         const brandNameMap = new Map();
-        
+
         if (uniqueBrandIDs.length > 0) {
             try {
                 const [brandRows] = await db.query(
@@ -942,7 +942,7 @@ async function updateOrderStatus(orderId, orderStatus) {
                 }
             }
         }
-        
+
         // Settlement Hook: Record 'cancelled' if order is cancelled
         if (normalizedStatus === 'cancelled' && oldStatus !== 'cancelled') {
             const [orderItems] = await db.query('SELECT orderItemID FROM order_items WHERE orderID = ?', [orderId]);
@@ -1530,7 +1530,7 @@ async function returnOrder(uid, { orderID, orderItemID = null, returnType = 'rep
     }
 
     const orderTotal = Number(order.total) || 0;
-    
+
     const returnTypeStr = String(returnType).toLowerCase();
     const isReplacement = returnTypeStr === 'replacement';
     const approvalStatus = isReplacement ? 'replacement_approval' : 'refund_approval';
@@ -1567,8 +1567,8 @@ async function returnOrder(uid, { orderID, orderItemID = null, returnType = 'rep
 
     await orderModel.recomputeOrderStatusFromReturnItems(orderID);
 
-    return { 
-        success: true, 
+    return {
+        success: true,
         message: 'Return request submitted for approval. Our team will review it shortly.',
         status: approvalStatus
     };
@@ -1586,7 +1586,7 @@ async function approveReturnRequest(orderItemID, action = 'approve', rejectionRe
     const [itemRows] = await db.query('SELECT * FROM order_items WHERE orderItemID = ?', [orderItemID]);
     const item = itemRows && itemRows[0] ? itemRows[0] : null;
     if (!item) throw new Error('Order item not found');
-    
+
     const validApprovalStates = ['return_approval', 'replacement_approval', 'refund_approval'];
     if (!validApprovalStates.includes(item.returnStatus)) {
         throw new Error('This item is not in an approval pending state');

@@ -368,8 +368,10 @@ async function getCart(uid) {
                 p.featuredImage, 
                 p.brandID,
                 p.brand,
+                p.status AS productStatus,
                 v.variationSlug AS variationName,
-                v.variationValues
+                v.variationValues,
+                v.variationStock
             FROM order_combo_items oci
             JOIN products p ON oci.productID = p.productID
             LEFT JOIN variations v ON oci.variationID = v.variationID
@@ -396,6 +398,8 @@ async function getCart(uid) {
                 brand: row.brand,
                 variationName: row.variationName,
                 variationValues,
+                variationStock: row.variationStock,
+                productStatus: row.productStatus
             };
             const list = map.get(row.comboID) || [];
             list.push(entry);
@@ -500,6 +504,62 @@ async function getCart(uid) {
             }
             item.lineTotalBefore = Number((item.unitPriceBefore * item.quantity).toFixed(2));
             item.lineTotalAfter = Number((item.unitPriceAfter * item.quantity).toFixed(2));
+
+            // --- STOCK & AVAILABILITY LOGIC ---
+            item.isAvailable = true;
+            item.stockStatus = 'in_stock';
+
+            if (item.productType === 'customproduct') {
+                // Always in stock
+                item.isAvailable = true;
+                item.stockStatus = 'in_stock';
+            } else if (item.productType === 'combo') {
+                const children = item.comboItems || [];
+                let minStock = Infinity;
+                let isOut = false;
+
+                for (const child of children) {
+                    const isProductOut = child.productStatus === 'Out of Stock';
+                    const isVariationOut = child.variationID && (child.variationStock === null || child.variationStock <= 0);
+                    
+                    if (isProductOut || isVariationOut) {
+                        isOut = true;
+                        break;
+                    }
+                    if (child.variationID && child.variationStock < item.quantity) {
+                        minStock = Math.min(minStock, child.variationStock);
+                    }
+                }
+
+                if (isOut) {
+                    item.isAvailable = false;
+                    item.stockStatus = 'out_of_stock';
+                } else if (minStock < item.quantity) {
+                    item.isAvailable = false;
+                    item.stockStatus = 'low_stock';
+                    item.variationStock = minStock; // Provide the limiting stock
+                }
+            } else if (item.productType === 'variable') {
+                if (item.variationID) {
+                    const stock = item.variationStock;
+                    if (stock === null || stock <= 0) {
+                        item.isAvailable = false;
+                        item.stockStatus = 'out_of_stock';
+                    } else if (stock < item.quantity) {
+                        item.isAvailable = false;
+                        item.stockStatus = 'low_stock';
+                    }
+                } else if (item.productStatus === 'Out of Stock') {
+                    item.isAvailable = false;
+                    item.stockStatus = 'out_of_stock';
+                }
+            } else {
+                // Regular product
+                if (item.productStatus === 'Out of Stock') {
+                    item.isAvailable = false;
+                    item.stockStatus = 'out_of_stock';
+                }
+            }
         });
 
         // Write recomputed pricing (flash + offers) to DB
@@ -516,7 +576,7 @@ async function getCart(uid) {
         if (summary.total < 999) {
             const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
             const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
-            
+
             let shippingFee = 0;
             if (uniqueBrandIDs.length > 0) {
                 const brandShippingMap = await cartModel.getBrandShippingCharges(uniqueBrandIDs);
@@ -524,12 +584,12 @@ async function getCart(uid) {
                     shippingFee += (brandShippingMap.get(bid) || 0);
                 });
             }
-            
+
             if (hasInhouse) {
                 const globalShippingFee = await settingsModel.getSetting('shipping_fee');
                 shippingFee += (Number(globalShippingFee) || 50);
             }
-            
+
             summary.shipping = shippingFee;
         } else {
             summary.shipping = 0;
@@ -664,6 +724,62 @@ async function getCart(uid) {
         item.lineTotalAfter = Number((item.unitPriceAfter * item.quantity).toFixed(2));
 
         console.log(`[TOTALS] Item ${item.cartItemID}: unitPriceBefore=${item.unitPriceBefore}, unitPriceAfter=${item.unitPriceAfter}, lineTotalBefore=${item.lineTotalBefore}, lineTotalAfter=${item.lineTotalAfter}`);
+
+        // --- STOCK & AVAILABILITY LOGIC ---
+        item.isAvailable = true;
+        item.stockStatus = 'in_stock';
+
+        if (item.productType === 'customproduct') {
+            // Always in stock
+            item.isAvailable = true;
+            item.stockStatus = 'in_stock';
+        } else if (item.productType === 'combo') {
+            const children = item.comboItems || [];
+            let minStock = Infinity;
+            let isOut = false;
+
+            for (const child of children) {
+                const isProductOut = child.productStatus === 'Out of Stock';
+                const isVariationOut = child.variationID && (child.variationStock === null || child.variationStock <= 0);
+                
+                if (isProductOut || isVariationOut) {
+                    isOut = true;
+                    break;
+                }
+                if (child.variationID && child.variationStock < item.quantity) {
+                    minStock = Math.min(minStock, child.variationStock);
+                }
+            }
+
+            if (isOut) {
+                item.isAvailable = false;
+                item.stockStatus = 'out_of_stock';
+            } else if (minStock < item.quantity) {
+                item.isAvailable = false;
+                item.stockStatus = 'low_stock';
+                item.variationStock = minStock;
+            }
+        } else if (item.productType === 'variable') {
+            if (item.variationID) {
+                const stock = item.variationStock;
+                if (stock === null || stock <= 0) {
+                    item.isAvailable = false;
+                    item.stockStatus = 'out_of_stock';
+                } else if (stock < item.quantity) {
+                    item.isAvailable = false;
+                    item.stockStatus = 'low_stock';
+                }
+            } else if (item.productStatus === 'Out of Stock') {
+                item.isAvailable = false;
+                item.stockStatus = 'out_of_stock';
+            }
+        } else {
+            // Regular product
+            if (item.productStatus === 'Out of Stock') {
+                item.isAvailable = false;
+                item.stockStatus = 'out_of_stock';
+            }
+        }
     });
 
 
@@ -679,7 +795,7 @@ async function getCart(uid) {
     if (summary.total < 999) {
         const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
         const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
-        
+
         let shippingFee = 0;
         if (uniqueBrandIDs.length > 0) {
             const brandShippingMap = await cartModel.getBrandShippingCharges(uniqueBrandIDs);
@@ -687,12 +803,12 @@ async function getCart(uid) {
                 shippingFee += (brandShippingMap.get(bid) || 0);
             });
         }
-        
+
         if (hasInhouse) {
             const globalShippingFee = await settingsModel.getSetting('shipping_fee');
             shippingFee += (Number(globalShippingFee) || 50);
         }
-        
+
         summary.shipping = shippingFee;
     } else {
         summary.shipping = 0;
@@ -800,13 +916,13 @@ function applyBuyXAtXxx(affectedItems, offer) {
 const updateCartItemsSelected = async (uid, selectedItems) => {
     const cartModel = require('../model/cartModel');
     const result = await cartModel.updateCartItemsSelected(uid, selectedItems);
-    
+
     if (result.success) {
         // Recalculate cart totals
         const cart = await cartModel.getOrCreateCart(uid);
         await cartModel.updateCartTotals(cart.cartID);
     }
-    
+
     return result;
 };
 
@@ -843,4 +959,175 @@ const removeCartItem = async (uid, cartItemID) => {
 };
 
 
-module.exports = { addToCart, getCart, removeCartItem, addCartCombo, updateCartItemsSelected };
+const updateCartItemQuantityWithStockCheck = async (uid, cartItemID, requestedQuantity) => {
+    // 1. Fetch cart item joined with product type
+    const cartItem = await cartModel.getCartItemWithProductType(cartItemID);
+    if (!cartItem) {
+        throw new Error('Cart item not found');
+    }
+
+    // 2. Security check: Ensure item belongs to the user
+    if (cartItem.uid !== uid) {
+        throw new Error('Access denied');
+    }
+
+    // 3. Only variable items update allowed
+    if (cartItem.productType !== 'variable') {
+        throw new Error('Only Variable Products Update Allowed');
+    }
+
+    // 4. Fetch variation stock
+    const availableStock = await cartModel.getVariationStock(cartItem.variationID);
+    
+    let finalQuantity = requestedQuantity;
+    let message = null;
+
+    // 5. Stock check logic
+    if (requestedQuantity > availableStock) {
+        finalQuantity = availableStock;
+        message = `Max ${availableStock} possible out of ${requestedQuantity} requested`;
+    } else if (finalQuantity < 1) {
+        finalQuantity = 1; // Minimum quantity is 1
+    }
+
+    // 6. Update quantity in DB
+    // Calculate new totals using unitPriceBefore/After (to preserve any discounts/flash sale prices)
+    const lineTotalBefore = Number((cartItem.unitPriceBefore * finalQuantity).toFixed(2));
+    const lineTotalAfter = Number((cartItem.unitPriceAfter * finalQuantity).toFixed(2));
+
+    await cartModel.updateCartItemQuantity(cartItemID, finalQuantity, lineTotalBefore, lineTotalAfter);
+
+    // 7. Update cart totals
+    await cartModel.updateCartTotals(cartItem.cartID);
+
+    // 8. Fetch updated cart details
+    const updatedCart = await getCart(uid);
+
+    return {
+        success: true,
+        message: message,
+        cart: updatedCart
+    };
+};
+
+const autoUpdateCartSelection = async (uid) => {
+    // 1. Fetch all cart items joined with stock and status info
+    const items = await cartModel.getCartItems(uid);
+    if (!items || items.length === 0) {
+        return { message: 'Cart is empty', items: [] };
+    }
+
+    const results = [];
+    const unselectIDs = [];
+    const comboIDs = [...new Set(items.filter(i => i.comboID).map(i => i.comboID))];
+
+    // Optimized: Fetch all combo items in one go
+    let allComboItems = [];
+    if (comboIDs.length > 0) {
+        allComboItems = await cartModel.getComboItemsForMultipleCombos(comboIDs);
+    }
+
+    // Group combo items by comboID for quick access (DSA: Map)
+    const comboItemsMap = new Map();
+    allComboItems.forEach(ci => {
+        if (!comboItemsMap.has(ci.comboID)) comboItemsMap.set(ci.comboID, []);
+        comboItemsMap.get(ci.comboID).push(ci);
+    });
+
+    for (const item of items) {
+        let stockStatus = 'in_stock';
+        let canRequest = item.quantity;
+        let shouldUnselect = false;
+
+        // Custom products are always assumed to be in stock as per user request
+        if (item.productType === 'customproduct') {
+            results.push({
+                cartItemId: item.cartItemID,
+                canRequest: item.quantity,
+                stockStatus: 'in_stock',
+                currentRequested: item.quantity,
+                productType: item.productType
+            });
+            continue;
+        }
+
+        if (item.comboID) {
+            // Combo Stock Check
+            const children = comboItemsMap.get(item.comboID) || [];
+            let minStock = Infinity;
+            let isOut = false;
+
+            for (const child of children) {
+                const isProductOut = child.productStatus === 'Out of Stock';
+                const isVariationOut = child.variationID && (child.variationStock === null || child.variationStock <= 0);
+
+                if (isProductOut || isVariationOut) {
+                    isOut = true;
+                    break;
+                }
+                if (child.variationID && child.variationStock < item.quantity) {
+                    minStock = Math.min(minStock, child.variationStock);
+                }
+            }
+
+            if (isOut) {
+                shouldUnselect = true;
+                stockStatus = 'out_of_stock';
+                canRequest = 0;
+            } else if (minStock < item.quantity) {
+                shouldUnselect = true;
+                stockStatus = 'low_stock';
+                canRequest = minStock;
+            }
+        } else if (item.productType === 'variable') {
+            // Variable Product Check
+            if (item.variationID) {
+                if (item.variationStock === null || item.variationStock <= 0) {
+                    shouldUnselect = true;
+                    stockStatus = 'out_of_stock';
+                    canRequest = 0;
+                } else if (item.variationStock < item.quantity) {
+                    shouldUnselect = true; // User said: "if variationStock < quantity in cart then unselect it"
+                    stockStatus = 'low_stock';
+                    canRequest = item.variationStock;
+                }
+            }
+        } else {
+            // Regular Product Check
+            if (item.productStatus === 'Out of Stock') {
+                shouldUnselect = true;
+                stockStatus = 'out_of_stock';
+                canRequest = 0;
+            }
+        }
+
+        if (shouldUnselect) {
+            unselectIDs.push(item.cartItemID);
+        }
+
+        results.push({
+            cartItemId: item.cartItemID,
+            canRequest,
+            stockStatus,
+            currentRequested: item.quantity,
+            productType: item.productType
+        });
+    }
+
+    // 2. Perform bulk unselect
+    if (unselectIDs.length > 0) {
+        await cartModel.bulkUnselectCartItems(unselectIDs);
+        // 3. Update totals (since selected items changed)
+        const cart = await cartModel.getOrCreateCart(uid);
+        if (cart) {
+            await cartModel.updateCartTotals(cart.cartID);
+        }
+    }
+
+    return {
+        message: unselectIDs.length > 0 ? `${unselectIDs.length} items unselected due to stock issues` : 'All items in stock',
+        items: results
+    };
+};
+
+module.exports = { addToCart, getCart, removeCartItem, addCartCombo, updateCartItemsSelected, updateCartItemQuantityWithStockCheck, autoUpdateCartSelection };

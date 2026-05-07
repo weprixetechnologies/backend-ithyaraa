@@ -25,9 +25,9 @@ async function addCartItem(req, res) {
         }
 
         const result = await cartService.addToCart(uid, productID, Number(quantity), variationID, variationName, referBy, customInputs, selectedDressType);
-        res.status(200).json({ 
-            success: true, 
-            cartItem: result.cartItem, 
+        res.status(200).json({
+            success: true,
+            cartItem: result.cartItem,
             cartDetail: result.cartDetail,
             crossSellProducts: result.crossSellProducts || []
         });
@@ -110,12 +110,12 @@ async function updateCartItemsSelected(req, res) {
         }
 
         const result = await cartService.updateCartItemsSelected(uid, selectedItems);
-        
+
         if (result.success) {
             // Recalculate cart totals after updating selection
             const cart = await cartService.getCart(uid);
-            return res.status(200).json({ 
-                success: true, 
+            return res.status(200).json({
+                success: true,
                 message: 'Cart items selection updated',
                 cart: cart
             });
@@ -128,4 +128,38 @@ async function updateCartItemsSelected(req, res) {
     }
 }
 
-module.exports = { addCartItem, getCart, removeFromCart, addCartCombo, updateCartItemsSelected };
+async function updateCartItemQuantity(req, res) {
+    try {
+        const { uid } = req.user;
+        const { cartItemID, quantity } = req.body;
+
+        if (!cartItemID || quantity === undefined) {
+            return res.status(400).json({ success: false, message: 'cartItemID and quantity are required' });
+        }
+
+        const result = await cartService.updateCartItemQuantityWithStockCheck(uid, cartItemID, Number(quantity));
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Error updating cart item quantity:', error);
+        if (error.message === 'Only Variable Products Update Allowed' || error.message === 'Cart item not found' || error.message === 'Access denied') {
+            return res.status(400).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const autoUpdateCartSelection = async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const result = await cartService.autoUpdateCartSelection(uid);
+        return res.status(200).json({
+            success: true,
+            ...result
+        });
+    } catch (error) {
+        console.error('Error auto-updating cart selection:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = { addCartItem, getCart, removeFromCart, addCartCombo, updateCartItemsSelected, updateCartItemQuantity, autoUpdateCartSelection };

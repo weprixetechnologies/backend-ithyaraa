@@ -38,6 +38,7 @@ const SCOPE = {
   // ========== HOMEPAGE ==========
   // Top-level home data (used by section-items/home API)
   HOME_DATA: 'cache:home:data',
+  CUSTOM_TABBED_CATEGORIES: 'cache:home:custom_tabbed',
 };
 
 module.exports = { SCOPE };

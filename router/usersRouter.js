@@ -5,6 +5,7 @@ const usersController = require('./../controllers/usersController')
 const otpController = require('./../controllers/otpController')
 const verificationController = require('./../controllers/verificationController')
 const authMiddleware = require('./../middleware/authUserMiddleware')
+const authAdminMiddleware = require('./../middleware/authAdminMiddleware')
 
 userRouter.post('/create-user', usersController.createUser);
 userRouter.post('/login', usersController.loginUser);
@@ -16,7 +17,7 @@ userRouter.get('/test', (req, res) => {
 });
 userRouter.get("/detail/:uid", authMiddleware.verifyAccessToken, usersController.getUserByUID);
 userRouter.get("/detail-by-user", authMiddleware.verifyAccessToken, usersController.getUserByUIDbyUser);
-userRouter.get('/all-users', usersController.getAllUsers);
+userRouter.get('/all-users', authAdminMiddleware.verifyAccessToken, usersController.getAllUsers);
 userRouter.put(
     "/update-by-user",
     authMiddleware.verifyAccessToken,

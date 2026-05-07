@@ -312,7 +312,6 @@ const editAttributeService = async (attributesArray, productID) => {
     }
 
     try {
-        await model.deleteVariationsByProductID(productID);
         const results = [];
 
         for (const attr of attributesArray) {

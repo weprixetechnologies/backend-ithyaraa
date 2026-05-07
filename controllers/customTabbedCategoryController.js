@@ -1,9 +1,20 @@
 const customTabbedCategoryService = require('../services/customTabbedCategoryService');
+const { getCache, setCache, deleteCache } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
 
 // Public: GET /api/products/shop/customtabbed
 const getCustomTabbedCategories = async (req, res) => {
     try {
+        const cacheKey = SCOPE.CUSTOM_TABBED_CATEGORIES;
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            return res.status(200).json(cached);
+        }
+
         const tiles = await customTabbedCategoryService.listCustomTabbedCategories(true);
+        
+        try { await setCache(cacheKey, tiles); } catch (e) { console.error(e); }
+
         return res.status(200).json(tiles);
     } catch (error) {
         console.error('getCustomTabbedCategories error:', error);
@@ -39,6 +50,10 @@ const upsertCustomTabbedCategory = async (req, res) => {
             isActive,
         });
 
+        if (result.success) {
+            try { await deleteCache(SCOPE.CUSTOM_TABBED_CATEGORIES); } catch (e) { console.error(e); }
+        }
+
         return res.status(result.success ? 200 : 400).json(result);
     } catch (error) {
         console.error('upsertCustomTabbedCategory error:', error);
@@ -54,6 +69,11 @@ const deleteCustomTabbedCategory = async (req, res) => {
     try {
         const { id } = req.params;
         const result = await customTabbedCategoryService.deleteCustomTabbedCategory(id);
+        
+        if (result.success) {
+            try { await deleteCache(SCOPE.CUSTOM_TABBED_CATEGORIES); } catch (e) { console.error(e); }
+        }
+
         return res.status(200).json(result);
     } catch (error) {
         console.error('deleteCustomTabbedCategory error:', error);

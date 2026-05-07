@@ -8,4 +8,6 @@ router.post('/update-cart-selected', authUserMiddleware.verifyAccessToken, cartC
 router.post('/get-cart', authUserMiddleware.verifyAccessToken, cartController.getCart);
 router.post("/remove-cart", authUserMiddleware.verifyAccessToken, cartController.removeFromCart);
 router.post('/add-cart-combo', authUserMiddleware.verifyAccessToken, cartController.addCartCombo);
+router.post('/update-quantities', authUserMiddleware.verifyAccessToken, cartController.updateCartItemQuantity);
+router.post('/auto-update-selection', authUserMiddleware.verifyAccessToken, cartController.autoUpdateCartSelection);
 module.exports = router;
