@@ -1248,12 +1248,18 @@ const buyNowController = async (req, res) => {
                     /([^:]\/)\/+/g,
                     '$1'
                 );
+                if (req.body && req.body.device === 'app') {
+                    redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${preBookingID}`;
+                }
                 callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;
             } else {
                 redirectUrl = `${frontendUrlBase}/order-status/order-summary/${orderID}`.replace(
                     /([^:]\/)\/+/g,
                     '$1'
                 );
+                if (req.body && req.body.device === 'app') {
+                    redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${orderID}`;
+                }
                 callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
             }
 

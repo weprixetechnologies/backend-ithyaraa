@@ -51,9 +51,9 @@ const handleTokenPayment = async (req, res) => {
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://ithyaraa.com').replace(/\/+$/, '');
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
 
-        const redirectUrl = type === 'presale'
-            ? `${frontendUrlBase}/order-status/presale-summary/${orderID}`.replace(/([^:]\/)\/+/g, '$1')
-            : `${frontendUrlBase}/order-status/order-summary/${orderID}`.replace(/([^:]\/)\/+/g, '$1');
+        // Since the token flow is exclusively used by the mobile app, 
+        // we always redirect back to the app using the deep link.
+        const redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${orderID}`;
 
         const callbackUrl = type === 'presale'
             ? `${backendUrl}/api/phonepe/webhook/presale`

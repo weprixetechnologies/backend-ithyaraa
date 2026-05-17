@@ -102,7 +102,11 @@ const placePrebookingOrderController = async (req, res) => {
         // Normalize FRONTEND_URL - remove trailing slashes
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
-        const redirectUrl = `${frontendUrlBase}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
+        let redirectUrl = `${frontendUrlBase}/presale/order-status/${booking.preBookingID}`.replace(/([^:]\/)\/+/g, '$1');
+
+        if (req.body && req.body.device === 'app') {
+            redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${booking.preBookingID}`;
+        }
         // Use presale-specific webhook endpoint - ensure no trailing slashes
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/presale`;

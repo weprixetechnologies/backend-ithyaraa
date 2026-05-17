@@ -302,7 +302,11 @@ const placeOrderController = async (req, res) => {
         // Normalize FRONTEND_URL - remove trailing slashes
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
-        const redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
+        let redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
+
+        if (req.body && req.body.device === 'app') {
+            redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${order.orderID}`;
+        }
         // Use order-specific webhook endpoint - ensure no trailing slashes
         const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
