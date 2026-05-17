@@ -5,7 +5,7 @@ const adminBrandOrdersController = require('../../controllers/adminBrandOrdersCo
 const authAdminMiddleware = require('../../middleware/authAdminMiddleware');
 
 // Get all brands
-router.get('/brands', authAdminMiddleware.verifyAccessToken, brandController.getAllBrands);
+router.get('/brands', brandController.getAllBrands);
 
 // Search brands by name
 router.get('/brands/search/by-name', authAdminMiddleware.verifyAccessToken, adminBrandOrdersController.searchBrands);
@@ -14,7 +14,7 @@ router.get('/brands/search/by-name', authAdminMiddleware.verifyAccessToken, admi
 router.get('/brands/:brandID/reviews/stats', brandController.getBrandReviewStats);
 
 // Get brand by UID
-router.get('/brands/:uid', authAdminMiddleware.verifyAccessToken, brandController.getBrandByUID);
+router.get('/brands/:uid', brandController.getBrandByUID);
 
 // Create brand
 router.post('/brands', authAdminMiddleware.verifyAccessToken, brandController.createBrand);
