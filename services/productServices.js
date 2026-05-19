@@ -35,6 +35,19 @@ const generateUniqueVariationID = async () => {
     return variationID;
 };
 
+const generateMultipleUniqueVariationIDs = async (count) => {
+    const ids = [];
+    const generated = new Set();
+    while (ids.length < count) {
+        const variationID = await generateUniqueVariationID();
+        if (!generated.has(variationID)) {
+            generated.add(variationID);
+            ids.push(variationID);
+        }
+    }
+    return ids;
+};
+
 const generateUniqueProductID = async () => {
     let unique = false;
     let productID = '';
