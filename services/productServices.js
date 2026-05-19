@@ -547,6 +547,7 @@ async function getShopProductsPublic(query) {
 
     const cacheFilters = {
         categoryID: query.categoryID ?? '__none__',
+        brandID: query.brandID ?? '__none__',
         sectionid: query.sectionid ?? '__none__',
         type: type !== 'all' ? type : '__all__',
         priceBands: query.priceBands ?? '__none__',
@@ -570,6 +571,14 @@ async function getShopProductsPublic(query) {
         const ids = String(query.categoryID).split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(n => !Number.isNaN(n));
         if (ids.length > 0) {
             filters.push(`(${ids.map(() => `JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?))`).join(' OR ')})`);
+            values.push(...ids);
+        }
+    }
+
+    if (query.brandID) {
+        const ids = String(query.brandID).split(',').map(s => s.trim()).filter(Boolean);
+        if (ids.length > 0) {
+            filters.push(`(${ids.map(() => `brandID = ?`).join(' OR ')})`);
             values.push(...ids);
         }
     }

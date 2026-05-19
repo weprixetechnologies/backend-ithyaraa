@@ -1,6 +1,7 @@
 const model = require('../model/sectionItemsModel');
 const cisModel = require('../model/customImageSectionsModel');
 const pgModel = require('../model/productGroupsModel');
+const presalePgModel = require('../model/presaleSectionGroupsModel');
 const fcModel = require('../model/featuredCouponsModel');
 // const cacheHelper = require('../utils/cacheHelper');
 const { deleteCache, getCache, setCache } = require('../utils/cacheHelper');
@@ -25,6 +26,14 @@ const createItem = async (req, res) => {
         const cis = await cisModel.getSectionByID(maybeNumeric);
         if (cis && cis.success && cis.data && cis.data.sectionID) {
           itemId = cis.data.sectionID;
+        }
+      }
+    } else if (t === 'presalesection' || t === 'presale section') {
+      const maybeNumeric = Number(id);
+      if (!Number.isNaN(maybeNumeric)) {
+        const pg = await presalePgModel.getGroupByID(maybeNumeric);
+        if (pg && pg.success && pg.data && pg.data.sectionID) {
+          itemId = pg.data.sectionID;
         }
       }
     } else if (t === 'productsection' || t === 'product section') {
@@ -136,6 +145,14 @@ const updateItem = async (req, res) => {
         const cis = await cisModel.getSectionByID(maybeNumeric);
         if (cis && cis.success && cis.data && cis.data.sectionID) {
           itemId = cis.data.sectionID;
+        }
+      }
+    } else if (t === 'presalesection' || t === 'presale section') {
+      const maybeNumeric = Number(incomingId);
+      if (!Number.isNaN(maybeNumeric)) {
+        const pg = await presalePgModel.getGroupByID(maybeNumeric);
+        if (pg && pg.success && pg.data && pg.data.sectionID) {
+          itemId = pg.data.sectionID;
         }
       }
     } else if (t === 'productsection' || t === 'product section') {

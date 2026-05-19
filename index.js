@@ -51,6 +51,7 @@ const homepageSectionsRouter = require('./router/homepageSectionsRouter')
 const sliderBannersRouter = require('./router/sliderBannersRouter')
 const featuredBlocksRouter = require('./router/featuredBlocksRouter')
 const productGroupsRouter = require('./router/productGroupsRouter')
+const presaleSectionGroupsRouter = require('./router/presaleSectionGroupsRouter')
 const newsletterRouter = require('./router/newsletterRouter')
 const homeCategoryRouter = require('./router/homeCategoryRouter')
 const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
@@ -158,6 +159,7 @@ app.use('/api/admin', adminAuthRouter);
 app.use('/api/admin', adminSupportRouter);
 // Product groups (homepage grouping) - admin endpoints
 app.use('/api/admin/product-groups', productGroupsRouter);
+app.use('/api/admin/presale-section-groups', presaleSectionGroupsRouter);
 // Custom image sections
 const customImageSectionsRouter = require('./router/customImageSectionsRouter');
 app.use('/api/admin/custom-image-sections', customImageSectionsRouter);

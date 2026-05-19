@@ -68,6 +68,74 @@ const listItems = async ({ type = null } = {}) => {
         }
       }
 
+      // --- presalesection enrichment ---
+      const presalesectionItemIds = rows
+        .filter(r => r.type && (String(r.type).trim().toLowerCase() === 'presalesection' || String(r.type).trim().toLowerCase() === 'presale section'))
+        .map(r => r.itemId)
+        .filter((v, i, a) => v !== null && v !== undefined && a.indexOf(v) === i);
+
+      let presalePgByItemId = {};
+      let presaleGroupProductsMap = {};
+
+      if (presalesectionItemIds.length > 0) {
+        const placeholders = presalesectionItemIds.map(() => '?').join(',');
+        const [pgs] = await db.query(
+          `SELECT * FROM presale_section_groups WHERE sectionID IN (${placeholders})`,
+          presalesectionItemIds
+        );
+
+        const pgIds = [];
+        pgs.forEach(p => {
+          presalePgByItemId[p.sectionID] = p;
+          pgIds.push(p.id);
+        });
+
+        if (pgIds.length > 0) {
+          const ph = pgIds.map(() => '?').join(',');
+          const [groupProducts] = await db.query(
+            `SELECT gp.groupID, gp.presaleProductID, gp.position,
+                    p.name AS productName, p.presaleProductID AS prodPresaleProductID, p.regularPrice, p.salePrice,
+                    p.featuredImage, p.brand AS brandName, p.type,
+                    p.preSaleStartDate, p.preSaleEndDate, p.expectedDeliveryDate, p.earlyBirdDiscount, p.earlyBirdEndDate
+             FROM presale_section_group_products gp
+             LEFT JOIN presale_products p ON p.presaleProductID = gp.presaleProductID
+             WHERE gp.groupID IN (${ph})
+             ORDER BY gp.groupID, gp.position ASC`,
+            pgIds
+          );
+          presaleGroupProductsMap = groupProducts.reduce((acc, gp) => {
+            let parsedFeatured = gp.featuredImage;
+            try {
+              if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) {
+                parsedFeatured = JSON.parse(gp.featuredImage);
+              }
+            } catch (e) {
+              parsedFeatured = gp.featuredImage;
+            }
+
+            acc[gp.groupID] = acc[gp.groupID] || [];
+            acc[gp.groupID].push({
+              productID: gp.presaleProductID,
+              position: gp.position,
+              name: gp.productName,
+              productID_external: gp.prodPresaleProductID,
+              regularPrice: gp.regularPrice,
+              salePrice: gp.salePrice,
+              offerID: null,
+              featuredImage: parsedFeatured,
+              brandName: gp.brandName,
+              type: gp.type || 'presale',
+              preSaleStartDate: gp.preSaleStartDate,
+              preSaleEndDate: gp.preSaleEndDate,
+              expectedDeliveryDate: gp.expectedDeliveryDate,
+              earlyBirdDiscount: gp.earlyBirdDiscount,
+              earlyBirdEndDate: gp.earlyBirdEndDate
+            });
+            return acc;
+          }, {});
+        }
+      }
+
       // --- productsection enrichment ---
       const productsectionItemIds = rows
         .filter(r => r.type && String(r.type).trim().toLowerCase() === 'productsection')
@@ -171,6 +239,22 @@ const listItems = async ({ type = null } = {}) => {
               updatedAt: cis.updatedAt
             } : null,
             images: cis ? (imagesMap[cis.id] || []) : []
+          };
+        } else if (t === 'presalesection' || t === 'presale section') {
+          const pg = presalePgByItemId[r.itemId] || null;
+          return {
+            ...r,
+            group: pg ? {
+              id: pg.id,
+              sectionID: pg.sectionID,
+              title: pg.title,
+              orderIndex: pg.orderIndex,
+              imageUrl: pg.imageUrl,
+              isBannerised: pg.isBannerised,
+              createdAt: pg.createdAt,
+              updatedAt: pg.updatedAt
+            } : null,
+            products: pg ? (presaleGroupProductsMap[pg.id] || []) : []
           };
         } else if (t === 'productsection') {
           const pg = pgByItemId[r.itemId] || null;
@@ -340,6 +424,85 @@ const listItems = async ({ type = null } = {}) => {
       }));
 
       return { success: true, data: enriched };
+    } else if (rawType === 'presalesection' || rawType === 'presale section') {
+      const [rows] = await db.query(
+        `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
+                pg.id AS pg_id, pg.sectionID AS pg_sectionID, pg.title AS pg_title, pg.orderIndex AS pg_orderIndex,
+                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised,
+                pg.createdAt AS pg_createdAt, pg.updatedAt AS pg_updatedAt
+         FROM section_items si
+         LEFT JOIN presale_section_groups pg ON pg.sectionID = si.itemId
+         WHERE LOWER(si.type) = ?
+         ORDER BY si.orderIndex ASC`,
+        [rawType]
+      );
+
+      const pgIds = rows.map(r => r.pg_id).filter(id => id !== null && id !== undefined);
+      let groupProductsMap = {};
+      if (pgIds.length > 0) {
+        const placeholders = pgIds.map(() => '?').join(',');
+        const [groupProducts] = await db.query(
+          `SELECT gp.groupID, gp.presaleProductID, gp.position,
+                  p.name AS productName, p.presaleProductID AS prodPresaleProductID, p.regularPrice, p.salePrice,
+                  p.featuredImage, p.brand AS brandName, p.type,
+                  p.preSaleStartDate, p.preSaleEndDate, p.expectedDeliveryDate, p.earlyBirdDiscount, p.earlyBirdEndDate
+           FROM presale_section_group_products gp
+           LEFT JOIN presale_products p ON p.presaleProductID = gp.presaleProductID
+           WHERE gp.groupID IN (${placeholders})
+           ORDER BY gp.groupID, gp.position ASC`,
+          pgIds
+        );
+        groupProductsMap = groupProducts.reduce((acc, gp) => {
+          let parsedFeatured = gp.featuredImage;
+          try {
+            if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) {
+              parsedFeatured = JSON.parse(gp.featuredImage);
+            }
+          } catch (e) {
+            parsedFeatured = gp.featuredImage;
+          }
+
+          acc[gp.groupID] = acc[gp.groupID] || [];
+          acc[gp.groupID].push({
+            productID: gp.presaleProductID,
+            position: gp.position,
+            name: gp.productName,
+            productID_external: gp.prodPresaleProductID,
+            regularPrice: gp.regularPrice,
+            salePrice: gp.salePrice,
+            offerID: null,
+            featuredImage: parsedFeatured,
+            brandName: gp.brandName,
+            type: gp.type || 'presale',
+            preSaleStartDate: gp.preSaleStartDate,
+            preSaleEndDate: gp.preSaleEndDate,
+            expectedDeliveryDate: gp.expectedDeliveryDate,
+            earlyBirdDiscount: gp.earlyBirdDiscount,
+            earlyBirdEndDate: gp.earlyBirdEndDate
+          });
+          return acc;
+        }, {});
+      }
+
+      const enriched = rows.map(r => ({
+        entryId: r.entryId,
+        type: r.type,
+        orderIndex: r.orderIndex,
+        itemId: r.itemId,
+        group: r.pg_id ? {
+          id: r.pg_id,
+          sectionID: r.pg_sectionID,
+          title: r.pg_title,
+          orderIndex: r.pg_orderIndex,
+          imageUrl: r.pg_imageUrl,
+          isBannerised: r.pg_isBannerised,
+          createdAt: r.pg_createdAt,
+          updatedAt: r.pg_updatedAt
+        } : null,
+        products: r.pg_id ? (groupProductsMap[r.pg_id] || []) : []
+      }));
+
+      return { success: true, data: enriched };
     } else if (rawType === 'featuredcoupon') {
       const [rows] = await db.query(
         `SELECT * FROM section_items WHERE LOWER(type) = ? ORDER BY orderIndex ASC`,
@@ -483,6 +646,49 @@ const getItemById = async (id) => {
             featuredImage: parsedFeatured,
             brandName: gp.brandName,
             type: gp.type
+          };
+        });
+      }
+      return { success: true, data: { ...r, group: pg, products } };
+    } else if (t === 'presalesection' || t === 'presale section') {
+      const [pgRows] = await db.query('SELECT * FROM presale_section_groups WHERE sectionID = ? LIMIT 1', [r.itemId]);
+      const pg = pgRows && pgRows[0] ? pgRows[0] : null;
+      let products = [];
+      if (pg) {
+        const [groupProducts] = await db.query(
+          `SELECT gp.groupID, gp.presaleProductID, gp.position,
+                  p.name AS productName, p.presaleProductID AS prodPresaleProductID, p.regularPrice, p.salePrice,
+                  p.featuredImage, p.brand AS brandName, p.type,
+                  p.preSaleStartDate, p.preSaleEndDate, p.expectedDeliveryDate, p.earlyBirdDiscount, p.earlyBirdEndDate
+           FROM presale_section_group_products gp
+           LEFT JOIN presale_products p ON p.presaleProductID = gp.presaleProductID
+           WHERE gp.groupID = ?
+           ORDER BY gp.position ASC`,
+          [pg.id]
+        );
+        products = groupProducts.map(gp => {
+          let parsedFeatured = gp.featuredImage;
+          try {
+            if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) parsedFeatured = JSON.parse(gp.featuredImage);
+          } catch (e) {
+            parsedFeatured = gp.featuredImage;
+          }
+          return {
+            productID: gp.presaleProductID,
+            position: gp.position,
+            name: gp.productName,
+            productID_external: gp.prodPresaleProductID,
+            regularPrice: gp.regularPrice,
+            salePrice: gp.salePrice,
+            offerID: null,
+            featuredImage: parsedFeatured,
+            brandName: gp.brandName,
+            type: gp.type || 'presale',
+            preSaleStartDate: gp.preSaleStartDate,
+            preSaleEndDate: gp.preSaleEndDate,
+            expectedDeliveryDate: gp.expectedDeliveryDate,
+            earlyBirdDiscount: gp.earlyBirdDiscount,
+            earlyBirdEndDate: gp.earlyBirdEndDate
           };
         });
       }
