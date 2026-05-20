@@ -3,12 +3,12 @@ const db = require('../utils/dbconnect');
 const createItem = async ({ itemId, type, orderIndex = 0 }) => {
   try {
     const [result] = await db.query(
-      `INSERT INTO section_items (itemId, type, orderIndex) VALUES (?, ?, ?)`,
+      `INSERT INTO offer_section_items (itemId, type, orderIndex) VALUES (?, ?, ?)`,
       [itemId, type, orderIndex]
     );
     return { success: true, id: result.insertId };
   } catch (error) {
-    console.error('sectionItemsModel.createItem error', error);
+    console.error('offerSectionItemsModel.createItem error', error);
     return { success: false, error: error.message };
   }
 };
@@ -19,7 +19,7 @@ const listItems = async ({ type = null } = {}) => {
 
     // If no type specified, fetch all and enrich
     if (!rawType) {
-      const [rows] = await db.query('SELECT * FROM section_items ORDER BY orderIndex ASC, id ASC');
+      const [rows] = await db.query('SELECT * FROM offer_section_items ORDER BY orderIndex ASC, id ASC');
 
       // --- imagesection enrichment ---
       const imagesectionItemIds = rows
@@ -313,28 +313,6 @@ const listItems = async ({ type = null } = {}) => {
         }
       }
 
-      // --- featuredcoupon enrichment ---
-      const featuredcouponItemIds = rows
-        .filter(r => r.type && String(r.type).trim().toLowerCase() === 'featuredcoupon')
-        .map(r => r.itemId)
-        .filter((v, i, a) => v !== null && v !== undefined && a.indexOf(v) === i);
-
-      let fcByItemId = {};
-
-      if (featuredcouponItemIds.length > 0) {
-        const numericIds = featuredcouponItemIds.map(Number).filter(n => !isNaN(n));
-        if (numericIds.length > 0) {
-          const placeholders = numericIds.map(() => '?').join(',');
-          const [fcs] = await db.query(
-            `SELECT * FROM featured_coupons WHERE id IN (${placeholders})`,
-            numericIds
-          );
-          fcs.forEach(fc => {
-            fcByItemId[String(fc.id)] = fc;
-          });
-        }
-      }
-
       const enriched = rows.map(r => {
         const t = r.type ? String(r.type).trim().toLowerCase() : null;
         if (t === 'imagesection') {
@@ -401,20 +379,6 @@ const listItems = async ({ type = null } = {}) => {
             } : null,
             products: pg ? (comboGroupProductsMap[pg.id] || []) : []
           };
-        } else if (t === 'featuredcoupon') {
-          const fc = fcByItemId[String(r.itemId)] || null;
-          return {
-            ...r,
-            coupon: fc ? {
-              id: fc.id,
-              popupImage: fc.popupImage,
-              iconImage: fc.iconImage,
-              couponCode: fc.couponCode,
-              isActive: Boolean(fc.isActive),
-              createdAt: fc.createdAt,
-              updatedAt: fc.updatedAt
-            } : null
-          };
         }
         return r;
       });
@@ -422,385 +386,11 @@ const listItems = async ({ type = null } = {}) => {
       return { success: true, data: enriched };
     }
 
-    // specific type filters (case-insensitive)
-    if (rawType === 'imagesection') {
-      const [rows] = await db.query(
-        `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
-                cis.id AS cis_id, cis.sectionID AS cis_sectionID, cis.title AS cis_title,
-                cis.imageUrl AS cis_imageUrl, cis.layoutID AS cis_layoutID, cis.isBannerised AS cis_isBannerised,
-                cis.createdAt AS cis_createdAt, cis.updatedAt AS cis_updatedAt
-         FROM section_items si
-         LEFT JOIN custom_image_sections cis ON cis.sectionID = si.itemId
-         WHERE LOWER(si.type) = ?
-         ORDER BY si.orderIndex ASC`,
-        [rawType]
-      );
-
-      const cisIds = rows.map(r => r.cis_id).filter(id => id !== null && id !== undefined);
-      let imagesMap = {};
-      if (cisIds.length > 0) {
-        const placeholders = cisIds.map(() => '?').join(',');
-        const [images] = await db.query(
-          `SELECT * FROM section_images WHERE section_id IN (${placeholders}) ORDER BY position ASC`,
-          cisIds
-        );
-        imagesMap = images.reduce((acc, img) => {
-          let parsedFilters = img.filters;
-          try {
-            if (typeof img.filters === 'string' && img.filters.trim().length > 0) {
-              parsedFilters = JSON.parse(img.filters);
-            }
-          } catch (e) {
-            parsedFilters = img.filters;
-          }
-          const parsedImg = { ...img, filters: parsedFilters };
-          acc[img.section_id] = acc[img.section_id] || [];
-          acc[img.section_id].push(parsedImg);
-          return acc;
-        }, {});
-      }
-
-      const enriched = rows.map(r => ({
-        entryId: r.entryId,
-        type: r.type,
-        orderIndex: r.orderIndex,
-        itemId: r.itemId,
-        section: r.cis_id ? {
-          id: r.cis_id,
-          sectionID: r.cis_sectionID,
-          title: r.cis_title,
-          imageUrl: r.cis_imageUrl,
-          layoutID: r.cis_layoutID,
-          isBannerised: r.cis_isBannerised,
-          createdAt: r.cis_createdAt,
-          updatedAt: r.cis_updatedAt
-        } : null,
-        images: r.cis_id ? (imagesMap[r.cis_id] || []) : []
-      }));
-
-      return { success: true, data: enriched };
-    } else if (rawType === 'productsection' || rawType === 'product section') {
-      const [rows] = await db.query(
-        `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
-                pg.id AS pg_id, pg.sectionID AS pg_sectionID, pg.title AS pg_title, pg.orderIndex AS pg_orderIndex,
-                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised,
-                pg.createdAt AS pg_createdAt, pg.updatedAt AS pg_updatedAt
-         FROM section_items si
-         LEFT JOIN product_groups pg ON pg.sectionID = si.itemId
-         WHERE LOWER(si.type) = ?
-         ORDER BY si.orderIndex ASC`,
-        [rawType]
-      );
-
-      const pgIds = rows.map(r => r.pg_id).filter(id => id !== null && id !== undefined);
-      let groupProductsMap = {};
-      if (pgIds.length > 0) {
-        const placeholders = pgIds.map(() => '?').join(',');
-        const [groupProducts] = await db.query(
-          `SELECT gp.groupID, gp.productID, gp.position,
-                  p.name AS productName, p.productID AS prodProductID, p.regularPrice, p.salePrice,
-                  p.offerID, p.featuredImage, p.brand AS brandName, p.type
-           FROM group_products gp
-           LEFT JOIN products p ON p.productID = gp.productID
-           WHERE gp.groupID IN (${placeholders})
-           ORDER BY gp.groupID, gp.position ASC`,
-          pgIds
-        );
-        groupProductsMap = groupProducts.reduce((acc, gp) => {
-          let parsedFeatured = gp.featuredImage;
-          try {
-            if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) {
-              parsedFeatured = JSON.parse(gp.featuredImage);
-            }
-          } catch (e) {
-            parsedFeatured = gp.featuredImage;
-          }
-
-          acc[gp.groupID] = acc[gp.groupID] || [];
-          acc[gp.groupID].push({
-            productID: gp.productID,
-            position: gp.position,
-            name: gp.productName,
-            productID_external: gp.prodProductID,
-            regularPrice: gp.regularPrice,
-            salePrice: gp.salePrice,
-            offerID: gp.offerID,
-            featuredImage: parsedFeatured,
-            brandName: gp.brandName,
-            type: gp.type
-          });
-          return acc;
-        }, {});
-      }
-
-      const enriched = rows.map(r => ({
-        entryId: r.entryId,
-        type: r.type,
-        orderIndex: r.orderIndex,
-        itemId: r.itemId,
-        group: r.pg_id ? {
-          id: r.pg_id,
-          sectionID: r.pg_sectionID,
-          title: r.pg_title,
-          orderIndex: r.pg_orderIndex,
-          imageUrl: r.pg_imageUrl,
-          isBannerised: r.pg_isBannerised,
-          createdAt: r.pg_createdAt,
-          updatedAt: r.pg_updatedAt
-        } : null,
-        products: r.pg_id ? (groupProductsMap[r.pg_id] || []) : []
-      }));
-
-      return { success: true, data: enriched };
-    } else if (rawType === 'combosection') {
-      const [rows] = await db.query(
-        `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
-                pg.id AS pg_id, pg.sectionID AS pg_sectionID, pg.title AS pg_title, pg.orderIndex AS pg_orderIndex,
-                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised,
-                pg.createdAt AS pg_createdAt, pg.updatedAt AS pg_updatedAt
-         FROM section_items si
-         LEFT JOIN combo_section_groups pg ON pg.sectionID = si.itemId
-         WHERE LOWER(si.type) = ?
-         ORDER BY si.orderIndex ASC`,
-        [rawType]
-      );
-
-      const pgIds = rows.map(r => r.pg_id).filter(id => id !== null && id !== undefined);
-      let comboGroupProductsMap = {};
-      if (pgIds.length > 0) {
-        const placeholders = pgIds.map(() => '?').join(',');
-        const [groupProducts] = await db.query(
-          `SELECT gp.groupID, gp.comboProductID, gp.position,
-                  p.name AS productName, p.productID AS prodProductID, p.regularPrice, p.salePrice,
-                  p.offerID, p.featuredImage, p.brand AS brandName, p.type
-           FROM combo_section_group_products gp
-           LEFT JOIN products p ON p.productID = gp.comboProductID
-           WHERE gp.groupID IN (${placeholders})
-           ORDER BY gp.groupID, gp.position ASC`,
-          pgIds
-        );
-
-        const comboProductIDs = groupProducts.map(gp => gp.comboProductID).filter(Boolean);
-        let comboItemsMap = {};
-        if (comboProductIDs.length > 0) {
-          const phCombo = comboProductIDs.map(() => '?').join(',');
-          const [cItems] = await db.query(
-            `SELECT ci.comboID, ci.productID, ci.productName, ci.featuredImage,
-                    p.regularPrice, p.salePrice, p.type, p.status, p.brand
-             FROM combo_item ci
-             LEFT JOIN products p ON p.productID = ci.productID
-             WHERE ci.comboID IN (${phCombo})`,
-            comboProductIDs
-          );
-
-          const childProductIDs = cItems.map(ci => ci.productID).filter(Boolean);
-          let childVariationsMap = {};
-          if (childProductIDs.length > 0) {
-            const phChild = childProductIDs.map(() => '?').join(',');
-            const [vars] = await db.query(
-              `SELECT * FROM variations WHERE productID IN (${phChild})`,
-              childProductIDs
-            );
-            vars.forEach(v => {
-              let parsedVals = v.variationValues;
-              try {
-                if (typeof v.variationValues === 'string') parsedVals = JSON.parse(v.variationValues);
-              } catch(e) {}
-              childVariationsMap[v.productID] = childVariationsMap[v.productID] || [];
-              childVariationsMap[v.productID].push({ ...v, variationValues: parsedVals });
-            });
-          }
-
-          cItems.forEach(ci => {
-            let parsedImg = ci.featuredImage;
-            try {
-              if (typeof ci.featuredImage === 'string') parsedImg = JSON.parse(ci.featuredImage);
-            } catch(e) {}
-            
-            comboItemsMap[ci.comboID] = comboItemsMap[ci.comboID] || [];
-            comboItemsMap[ci.comboID].push({
-              productID: ci.productID,
-              name: ci.productName,
-              featuredImage: parsedImg,
-              regularPrice: ci.regularPrice,
-              salePrice: ci.salePrice,
-              type: ci.type,
-              status: ci.status,
-              brand: ci.brand,
-              variations: childVariationsMap[ci.productID] || []
-            });
-          });
-        }
-
-        comboGroupProductsMap = groupProducts.reduce((acc, gp) => {
-          let parsedFeatured = gp.featuredImage;
-          try {
-            if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) {
-              parsedFeatured = JSON.parse(gp.featuredImage);
-            }
-          } catch (e) {
-            parsedFeatured = gp.featuredImage;
-          }
-
-          acc[gp.groupID] = acc[gp.groupID] || [];
-          acc[gp.groupID].push({
-            productID: gp.comboProductID,
-            position: gp.position,
-            name: gp.productName,
-            productID_external: gp.prodProductID,
-            regularPrice: gp.regularPrice,
-            salePrice: gp.salePrice,
-            offerID: gp.offerID,
-            featuredImage: parsedFeatured,
-            brandName: gp.brandName,
-            type: gp.type || 'combo',
-            products: comboItemsMap[gp.comboProductID] || []
-          });
-          return acc;
-        }, {});
-      }
-
-      const enriched = rows.map(r => ({
-        entryId: r.entryId,
-        type: r.type,
-        orderIndex: r.orderIndex,
-        itemId: r.itemId,
-        group: r.pg_id ? {
-          id: r.pg_id,
-          sectionID: r.pg_sectionID,
-          title: r.pg_title,
-          orderIndex: r.pg_orderIndex,
-          imageUrl: r.pg_imageUrl,
-          isBannerised: r.pg_isBannerised,
-          createdAt: r.pg_createdAt,
-          updatedAt: r.pg_updatedAt
-        } : null,
-        products: r.pg_id ? (comboGroupProductsMap[r.pg_id] || []) : []
-      }));
-
-      return { success: true, data: enriched };
-    } else if (rawType === 'presalesection' || rawType === 'presale section') {
-      const [rows] = await db.query(
-        `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
-                pg.id AS pg_id, pg.sectionID AS pg_sectionID, pg.title AS pg_title, pg.orderIndex AS pg_orderIndex,
-                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised,
-                pg.createdAt AS pg_createdAt, pg.updatedAt AS pg_updatedAt
-         FROM section_items si
-         LEFT JOIN presale_section_groups pg ON pg.sectionID = si.itemId
-         WHERE LOWER(si.type) = ?
-         ORDER BY si.orderIndex ASC`,
-        [rawType]
-      );
-
-      const pgIds = rows.map(r => r.pg_id).filter(id => id !== null && id !== undefined);
-      let groupProductsMap = {};
-      if (pgIds.length > 0) {
-        const placeholders = pgIds.map(() => '?').join(',');
-        const [groupProducts] = await db.query(
-          `SELECT gp.groupID, gp.presaleProductID, gp.position,
-                  p.name AS productName, p.presaleProductID AS prodPresaleProductID, p.regularPrice, p.salePrice,
-                  p.featuredImage, p.brand AS brandName, p.type,
-                  p.preSaleStartDate, p.preSaleEndDate, p.expectedDeliveryDate, p.earlyBirdDiscount, p.earlyBirdEndDate
-           FROM presale_section_group_products gp
-           LEFT JOIN presale_products p ON p.presaleProductID = gp.presaleProductID
-           WHERE gp.groupID IN (${placeholders})
-           ORDER BY gp.groupID, gp.position ASC`,
-          pgIds
-        );
-        groupProductsMap = groupProducts.reduce((acc, gp) => {
-          let parsedFeatured = gp.featuredImage;
-          try {
-            if (typeof gp.featuredImage === 'string' && gp.featuredImage.trim().length > 0) {
-              parsedFeatured = JSON.parse(gp.featuredImage);
-            }
-          } catch (e) {
-            parsedFeatured = gp.featuredImage;
-          }
-
-          acc[gp.groupID] = acc[gp.groupID] || [];
-          acc[gp.groupID].push({
-            productID: gp.presaleProductID,
-            position: gp.position,
-            name: gp.productName,
-            productID_external: gp.prodPresaleProductID,
-            regularPrice: gp.regularPrice,
-            salePrice: gp.salePrice,
-            offerID: null,
-            featuredImage: parsedFeatured,
-            brandName: gp.brandName,
-            type: gp.type || 'presale',
-            preSaleStartDate: gp.preSaleStartDate,
-            preSaleEndDate: gp.preSaleEndDate,
-            expectedDeliveryDate: gp.expectedDeliveryDate,
-            earlyBirdDiscount: gp.earlyBirdDiscount,
-            earlyBirdEndDate: gp.earlyBirdEndDate
-          });
-          return acc;
-        }, {});
-      }
-
-      const enriched = rows.map(r => ({
-        entryId: r.entryId,
-        type: r.type,
-        orderIndex: r.orderIndex,
-        itemId: r.itemId,
-        group: r.pg_id ? {
-          id: r.pg_id,
-          sectionID: r.pg_sectionID,
-          title: r.pg_title,
-          orderIndex: r.pg_orderIndex,
-          imageUrl: r.pg_imageUrl,
-          isBannerised: r.pg_isBannerised,
-          createdAt: r.pg_createdAt,
-          updatedAt: r.pg_updatedAt
-        } : null,
-        products: r.pg_id ? (groupProductsMap[r.pg_id] || []) : []
-      }));
-
-      return { success: true, data: enriched };
-    } else if (rawType === 'featuredcoupon') {
-      const [rows] = await db.query(
-        `SELECT * FROM section_items WHERE LOWER(type) = ? ORDER BY orderIndex ASC`,
-        [rawType]
-      );
-
-      const numericIds = rows.map(r => Number(r.itemId)).filter(n => !isNaN(n));
-      let fcMap = {};
-      if (numericIds.length > 0) {
-        const placeholders = numericIds.map(() => '?').join(',');
-        const [fcs] = await db.query(
-          `SELECT * FROM featured_coupons WHERE id IN (${placeholders})`,
-          numericIds
-        );
-        fcs.forEach(fc => { fcMap[String(fc.id)] = fc; });
-      }
-
-      const enriched = rows.map(r => {
-        const fc = fcMap[String(r.itemId)] || null;
-        return {
-          entryId: r.id,
-          type: r.type,
-          orderIndex: r.orderIndex,
-          itemId: r.itemId,
-          coupon: fc ? {
-            id: fc.id,
-            popupImage: fc.popupImage,
-            iconImage: fc.iconImage,
-            couponCode: fc.couponCode,
-            isActive: Boolean(fc.isActive),
-            createdAt: fc.createdAt,
-            updatedAt: fc.updatedAt
-          } : null
-        };
-      });
-
-      return { success: true, data: enriched };
-    } else {
-      const [rows] = await db.query('SELECT * FROM section_items WHERE type = ? ORDER BY orderIndex ASC', [type]);
-      return { success: true, data: rows };
-    }
+    // Fallback: Specific type list
+    const [rows] = await db.query('SELECT * FROM offer_section_items WHERE type = ? ORDER BY orderIndex ASC', [type]);
+    return { success: true, data: rows };
   } catch (error) {
-    console.error('sectionItemsModel.listItems error', error);
+    console.error('offerSectionItemsModel.listItems error', error);
     return { success: false, error: error.message };
   }
 };
@@ -812,7 +402,7 @@ const reorderItems = async (items = []) => {
     for (const it of items) {
       const iid = it.id;
       const idx = parseInt(it.orderIndex, 10) || 0;
-      await connection.query('UPDATE section_items SET orderIndex = ? WHERE id = ?', [idx, iid]);
+      await connection.query('UPDATE offer_section_items SET orderIndex = ? WHERE id = ?', [idx, iid]);
     }
     await connection.commit();
     connection.release();
@@ -820,14 +410,14 @@ const reorderItems = async (items = []) => {
   } catch (error) {
     await connection.rollback();
     connection.release();
-    console.error('sectionItemsModel.reorderItems error', error);
+    console.error('offerSectionItemsModel.reorderItems error', error);
     return { success: false, error: error.message };
   }
 };
 
 const getItemById = async (id) => {
   try {
-    const [rows] = await db.query('SELECT * FROM section_items WHERE id = ? LIMIT 1', [id]);
+    const [rows] = await db.query('SELECT * FROM offer_section_items WHERE id = ? LIMIT 1', [id]);
     if (!rows || rows.length === 0) return { success: false, message: 'Not found' };
     const r = rows[0];
     const t = r.type ? String(r.type).trim().toLowerCase() : null;
@@ -1020,30 +610,11 @@ const getItemById = async (id) => {
         });
       }
       return { success: true, data: { ...r, group: pg, products } };
-    } else if (t === 'featuredcoupon') {
-      const numId = Number(r.itemId);
-      let coupon = null;
-      if (!isNaN(numId)) {
-        const [fcRows] = await db.query('SELECT * FROM featured_coupons WHERE id = ? LIMIT 1', [numId]);
-        if (fcRows && fcRows[0]) {
-          const fc = fcRows[0];
-          coupon = {
-            id: fc.id,
-            popupImage: fc.popupImage,
-            iconImage: fc.iconImage,
-            couponCode: fc.couponCode,
-            isActive: Boolean(fc.isActive),
-            createdAt: fc.createdAt,
-            updatedAt: fc.updatedAt
-          };
-        }
-      }
-      return { success: true, data: { ...r, coupon } };
     }
 
     return { success: true, data: r };
   } catch (error) {
-    console.error('sectionItemsModel.getItemById error', error);
+    console.error('offerSectionItemsModel.getItemById error', error);
     return { success: false, error: error.message };
   }
 };
@@ -1057,22 +628,22 @@ const updateItem = async (id, { itemId, type, orderIndex } = {}) => {
     if (orderIndex !== undefined) { updates.push('orderIndex = ?'); values.push(orderIndex); }
     if (updates.length === 0) return { success: false, message: 'No fields to update' };
     values.push(id);
-    const [result] = await db.query(`UPDATE section_items SET ${updates.join(', ')} WHERE id = ?`, values);
+    const [result] = await db.query(`UPDATE offer_section_items SET ${updates.join(', ')} WHERE id = ?`, values);
     if (result.affectedRows === 0) return { success: false, message: 'Not found' };
     return { success: true };
   } catch (error) {
-    console.error('sectionItemsModel.updateItem error', error);
+    console.error('offerSectionItemsModel.updateItem error', error);
     return { success: false, error: error.message };
   }
 };
 
 const deleteItem = async (id) => {
   try {
-    const [result] = await db.query('DELETE FROM section_items WHERE id = ?', [id]);
+    const [result] = await db.query('DELETE FROM offer_section_items WHERE id = ?', [id]);
     if (result.affectedRows === 0) return { success: false, message: 'Not found' };
     return { success: true };
   } catch (error) {
-    console.error('sectionItemsModel.deleteItem error', error);
+    console.error('offerSectionItemsModel.deleteItem error', error);
     return { success: false, error: error.message };
   }
 };

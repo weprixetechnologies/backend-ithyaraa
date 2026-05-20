@@ -52,6 +52,9 @@ const sliderBannersRouter = require('./router/sliderBannersRouter')
 const featuredBlocksRouter = require('./router/featuredBlocksRouter')
 const productGroupsRouter = require('./router/productGroupsRouter')
 const presaleSectionGroupsRouter = require('./router/presaleSectionGroupsRouter')
+const comboSectionGroupsRouter = require('./router/comboSectionGroupsRouter');
+const offerSectionItemsRouter = require('./router/offerSectionItemsRouter');
+const offerPublicRouter = require('./router/offerRouter');
 const newsletterRouter = require('./router/newsletterRouter')
 const homeCategoryRouter = require('./router/homeCategoryRouter')
 const newsletterAdminRouter = require('./router/admin/newsletterAdminRouter')
@@ -104,6 +107,7 @@ app.use('/api/user', userRouter); //user apis
 app.use('/api/admin', userAdminRouter); //admin user management apis
 app.use('/api/auth', authRouter)
 app.use('/api/products', productRouter)
+app.use('/api/offer', offerPublicRouter);
 app.use('/api/offer', offerRouter)
 app.use('/api/categories', categoryRouter)
 app.use('/api/coupons', couponsRouter)
@@ -167,6 +171,13 @@ app.use('/api/admin/custom-image-sections', customImageSectionsRouter);
 const sectionItemsRouter = require('./router/sectionItemsRouter');
 app.use('/api/section-items', sectionItemsRouter);
 app.use('/api/admin/section-items', sectionItemsRouter);
+
+// Combo section groups
+app.use('/api/admin/combo-section-groups', comboSectionGroupsRouter);
+
+// Offer section items
+app.use('/api/offer-section-items', offerSectionItemsRouter);
+app.use('/api/admin/offer-section-items', offerSectionItemsRouter);
 // Home category tiles (admin managed)
 const homeCategoryAdminRouter = require('./router/admin/homeCategoryAdminRouter');
 app.use('/api/admin/home-categories', homeCategoryAdminRouter);

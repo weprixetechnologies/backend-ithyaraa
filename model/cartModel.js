@@ -50,7 +50,13 @@ async function getOrCreateCart(uid) {
 // Check if cart already has this product
 async function getCartItem(cartID, productID) {
     const [rows] = await db.query(
-        `SELECT * FROM cart_items WHERE cartID = ? AND productID = ? LIMIT 1`,
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartID = ? AND ci.productID = ? LIMIT 1`,
         [cartID, productID]
     );
     return rows[0] || null;
@@ -58,7 +64,13 @@ async function getCartItem(cartID, productID) {
 
 async function getCartItemByID(cartItemID) {
     const [rows] = await db.query(
-        `SELECT * FROM cart_items WHERE cartItemID = ? LIMIT 1`,
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartItemID = ? LIMIT 1`,
         [cartItemID]
     );
     return rows[0] || null;
@@ -117,7 +129,13 @@ async function insertCartItem(data) {
         );
     }
     const [inserted] = await db.query(
-        `SELECT * FROM cart_items WHERE cartItemID = ?`,
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartItemID = ?`,
         [result.insertId]
     );
     return inserted[0];
@@ -135,7 +153,13 @@ async function updateCartItemQuantity(cartItemID, quantity, lineTotalBefore, lin
         [quantity, lineTotalBefore, lineTotalAfter, cartItemID]
     );
     const [updated] = await db.query(
-        `SELECT * FROM cart_items WHERE cartItemID = ?`,
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartItemID = ?`,
         [cartItemID]
     );
     return updated[0];
@@ -143,8 +167,13 @@ async function updateCartItemQuantity(cartItemID, quantity, lineTotalBefore, lin
 
 async function getCartItemWithVariation(cartID, productID, variationID) {
     const [rows] = await db.query(
-        `SELECT * FROM cart_items 
-         WHERE cartID = ? AND productID = ? AND variationID <=> ? 
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartID = ? AND ci.productID = ? AND ci.variationID <=> ? 
          LIMIT 1`,
         [cartID, productID, variationID]
     );
@@ -210,10 +239,14 @@ async function getCartItems(uid) {
             p.type AS productType,
             p.status AS productStatus,
             p.offerID AS currentProductOfferID,
-            p.description
+            p.description,
+            CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                 ELSE COALESCE(u.name, 'Ithyaraa') 
+            END AS brandName
         FROM cart_items ci
         LEFT JOIN variations v ON ci.variationID = v.variationID
         LEFT JOIN products p ON ci.productID = p.productID
+        LEFT JOIN users u ON ci.brandID = u.uid
         WHERE ci.uid = ?
         ORDER BY ci.cartItemID ASC
     `;
@@ -405,7 +438,7 @@ async function deleteCartItem(cartItemID) {
 
 async function getProductByIDCombo(productID) {
     const [rows] = await db.query(
-        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice 
+        `SELECT productID, name, featuredImage, offerID, salePrice, regularPrice, brandID 
          FROM products WHERE productID = ?`,
         [productID]
     );
@@ -432,17 +465,28 @@ async function insertCartItemCombo(item) {
     const [result] = await db.query(
         `INSERT INTO cart_items 
          (cartID, uid, productID, quantity, regularPrice, salePrice, overridePrice,
-          unitPriceBefore, unitPriceAfter, lineTotalBefore, lineTotalAfter, offerID, name, featuredImage, comboID, selected)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, TRUE)`,
+          unitPriceBefore, unitPriceAfter, lineTotalBefore, lineTotalAfter, offerID, name, featuredImage, comboID, selected, brandID)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, TRUE, ?)`,
         [
             item.cartID, item.uid, item.productID, item.quantity,
             item.regularPrice, item.salePrice, item.overridePrice,
             item.unitPriceBefore, item.unitPriceAfter,
             item.lineTotalBefore, item.lineTotalAfter,
-            item.offerID, item.name, item.featuredImage, item.comboID
+            item.offerID, item.name, item.featuredImage, item.comboID,
+            item.brandID
         ]
     );
-    return { ...item, cartItemID: result.insertId };
+    const [inserted] = await db.query(
+        `SELECT ci.*, 
+                CASE WHEN ci.brandID IS NULL OR ci.brandID = 'inhouse' THEN 'Ithyaraa' 
+                     ELSE COALESCE(u.name, 'Ithyaraa') 
+                END AS brandName 
+         FROM cart_items ci 
+         LEFT JOIN users u ON ci.brandID = u.uid 
+         WHERE ci.cartItemID = ?`,
+        [result.insertId]
+    );
+    return inserted[0];
 }
 
 async function insertComboItemCombo(comboItem) {

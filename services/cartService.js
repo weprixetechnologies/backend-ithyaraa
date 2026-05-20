@@ -219,7 +219,8 @@ async function addCartCombo(uid, quantity, mainProductID, products) {
         offerID: mainProduct.offerID,
         name: mainProduct.name,
         featuredImage: mainProduct.featuredImage,
-        comboID: comboID
+        comboID: comboID,
+        brandID: mainProduct.brandID
     });
 
     // 4. Insert all child products into order_combo_items (no check for duplicates)

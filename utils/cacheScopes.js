@@ -39,6 +39,9 @@ const SCOPE = {
   // Top-level home data (used by section-items/home API)
   HOME_DATA: 'cache:home:data',
   CUSTOM_TABBED_CATEGORIES: 'cache:home:custom_tabbed',
+
+  // ========== OFFER PAGE ==========
+  OFFER_PAGE_DATA: 'cache:offer:page_data',
 };
 
 module.exports = { SCOPE };
