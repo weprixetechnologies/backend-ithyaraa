@@ -28,8 +28,28 @@ async function listSizeCharts() {
     return charts;
 }
 
+async function getSizeChartByID(id) {
+    return sizeChartModel.getSizeChartByID(id);
+}
+
+async function getProductsUsingSizeChart(imgUrl) {
+    return sizeChartModel.getProductsUsingSizeChart(imgUrl);
+}
+
+async function nullifyProductsSizeChart(imgUrl) {
+    return sizeChartModel.nullifyProductsSizeChart(imgUrl);
+}
+
+async function deleteSizeChart(id) {
+    return sizeChartModel.deleteSizeChart(id);
+}
+
 module.exports = {
     createSizeChart,
     listSizeCharts,
+    getSizeChartByID,
+    getProductsUsingSizeChart,
+    nullifyProductsSizeChart,
+    deleteSizeChart,
 };
 

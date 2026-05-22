@@ -6,6 +6,7 @@ const authAdminMiddleware = require('../middleware/authAdminMiddleware');
 // Size chart APIs (admin-only) - mounted at /api/size-charts
 router.post('/', authAdminMiddleware.verifyAccessToken, controller.createSizeChart);
 router.get('/', authAdminMiddleware.verifyAccessToken, controller.listSizeCharts);
+router.delete('/:id', authAdminMiddleware.verifyAccessToken, controller.deleteSizeChart);
 
 module.exports = router;
 

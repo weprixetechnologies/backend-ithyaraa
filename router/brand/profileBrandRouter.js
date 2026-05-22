@@ -133,5 +133,8 @@ profileBrandRouter.post('/size-charts', authBrandMiddleware.verifyAccessToken, s
 // GET /api/brand/size-charts - List size charts for brand (filtered by brandID in controller)
 profileBrandRouter.get('/size-charts', authBrandMiddleware.verifyAccessToken, sizeChartController.listSizeCharts);
 
+// DELETE /api/brand/size-charts/:id - Delete size chart for brand
+profileBrandRouter.delete('/size-charts/:id', authBrandMiddleware.verifyAccessToken, sizeChartController.deleteSizeChart);
+
 module.exports = profileBrandRouter;
 
