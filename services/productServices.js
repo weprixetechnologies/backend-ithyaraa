@@ -356,7 +356,7 @@ const getProductCount = async (query) => {
     const allowedFilters = [
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
-        'overridePrice', 'tab1', 'tab2', 'productID',
+        'overridePrice', 'tab1', 'tab2', 'tab3', 'productID',
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
     const likeFields = ['name', 'type', 'productID', 'sectionid'];
@@ -406,7 +406,7 @@ const fetchPaginatedProducts = async (query) => {
     const allowedFilters = [
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
-        'overridePrice', 'tab1', 'tab2', 'productID',
+        'overridePrice', 'tab1', 'tab2', 'tab3', 'productID',
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
     const likeFields = ['name', 'productID', 'sectionid'];

@@ -61,6 +61,7 @@ const createPresaleProduct = async (productData) => {
             overridePrice,
             tab1,
             tab2,
+            tab3,
             featuredImage,
             productAttributes,
             categories,
@@ -85,12 +86,12 @@ const createPresaleProduct = async (productData) => {
             INSERT INTO presale_products (
                 presaleProductID, name, description, regularPrice, salePrice,
                 discountType, discountValue, type, status, offerID, overridePrice,
-                tab1, tab2, featuredImage, productAttributes, categories,
+                tab1, tab2, tab3, featuredImage, productAttributes, categories,
                 brand, galleryImage, brandID, custom_inputs, allowCustomerImageUpload, sizeChartUrl,
                 expectedDeliveryDate, minOrderQuantity, maxOrderQuantity,
                 totalAvailableQuantity, reservedQuantity, preSaleStartDate,
                 preSaleEndDate, earlyBirdDiscount, earlyBirdEndDate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
@@ -107,6 +108,7 @@ const createPresaleProduct = async (productData) => {
             overridePrice || null,
             tab1 || null,
             tab2 || null,
+            tab3 || null,
             featuredImage ? JSON.stringify(featuredImage) : null,
             productAttributes ? JSON.stringify(productAttributes) : null,
             categories ? JSON.stringify(categories) : null,

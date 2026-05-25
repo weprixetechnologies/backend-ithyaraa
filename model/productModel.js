@@ -29,6 +29,7 @@ const uploadProduct = async ({
     overridePrice,
     tab1,
     tab2,
+    tab3,
     productID,
     sectionid,
     featuredImage,
@@ -56,6 +57,7 @@ const uploadProduct = async ({
             overridePrice,
             tab1,
             tab2,
+            tab3,
             productID,
             sectionid,
             featuredImage,
@@ -68,7 +70,7 @@ const uploadProduct = async ({
             dressTypes,
             allowCustomerImageUpload,
             sizeChartUrl
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -84,6 +86,7 @@ const uploadProduct = async ({
         overridePrice ?? null,
         tab1,
         tab2,
+        tab3,
         productID,
         sectionid ?? null,
         JSON.stringify(featuredImage),
@@ -124,7 +127,7 @@ const uploadProduct = async ({
 const editProductModel = async (product) => {
     const {
         name, description, regularPrice, salePrice, discountType, discountValue,
-        type, status, offerID, overridePrice, tab1, tab2,
+        type, status, offerID, overridePrice, tab1, tab2, tab3,
         productID, featuredImage, attributes, categories, brand, galleryImage,
         custom_inputs, dressTypes, allowCustomerImageUpload,
         sectionid, brandID, sizeChartUrl
@@ -144,6 +147,7 @@ const editProductModel = async (product) => {
             overridePrice = ?,
             tab1 = ?,
             tab2 = ?,
+            tab3 = ?,
             sectionid = ?,
             featuredImage = ?,
             productAttributes = ?,
@@ -171,6 +175,7 @@ const editProductModel = async (product) => {
         overridePrice ?? null, // FIX: was || null (would null out overridePrice = 0 or false)
         tab1,
         tab2,
+        tab3,
         sectionid ?? null,
         JSON.stringify(featuredImage),
         attributes ? JSON.stringify(attributes) : null,
