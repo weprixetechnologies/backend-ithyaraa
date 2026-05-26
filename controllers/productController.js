@@ -319,6 +319,7 @@ const deleteProduct = async (req, res) => {
 
         if (!productID) {
             return res.status(400).json({ success: false, message: 'Product ID is required' });
+
         }
 
         const result = await service.deleteProduct(productID);
@@ -327,10 +328,13 @@ const deleteProduct = async (req, res) => {
             try { await invalidateProductCaches(productID); } catch (e) { console.error('deleteProduct cache error', e); }
             return res.status(200).json({ success: true, message: result.message, affectedRows: result.affectedRows });
         } else {
+            console.log('Error 3');
+            
             return res.status(500).json({ success: false, message: result.message, error: result.error });
         }
     } catch (error) {
         console.error('Error in deleteProduct:', error);
+        console.log('Error 4' , error);
         return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
     }
 };

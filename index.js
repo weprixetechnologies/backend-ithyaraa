@@ -69,6 +69,7 @@ const flashSalePublicRouter = require('./router/flashSalePublicRouter')
 const cacheAdminRouter = require('./router/admin/cacheAdminRouter')
 const featuredCouponsRouter = require('./router/featuredCouponsRouter')
 const deliveryExperienceRouter = require('./router/deliveryExperienceRouter')
+const brandApplicationRouter = require('./router/brandApplicationRouter')
 
 
 // Support Routes
@@ -141,6 +142,10 @@ app.use('/api/reels', reelsRouter)
 app.use('/api/support', userSupportRouter)
 // Alias for public newsletters feed: GET /api/newsletters
 app.get('/api/newsletters', newsletterController.listNewsletters)
+// Brand onboarding application submission (public — no auth)
+app.use('/api/brand-applications', brandApplicationRouter)
+
+
 
 // ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
 app.use('/api/admin', adminDashboardRouter);

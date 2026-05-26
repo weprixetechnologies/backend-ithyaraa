@@ -3,6 +3,7 @@ const router = express.Router();
 const brandController = require('../../controllers/brandController');
 const adminBrandOrdersController = require('../../controllers/adminBrandOrdersController');
 const authAdminMiddleware = require('../../middleware/authAdminMiddleware');
+const brandApplicationController = require('../../controllers/brandApplicationController');
 
 // Get all brands
 router.get('/brands', brandController.getAllBrands);
@@ -30,6 +31,20 @@ router.put('/brands/:uid', authAdminMiddleware.verifyAccessToken, brandControlle
 
 // Delete brand
 router.delete('/brands/:uid', authAdminMiddleware.verifyAccessToken, brandController.deleteBrand);
+
+// ─── Brand Onboarding Applications ───────────────────────────────────────────
+
+// List all applications (optionally filtered: ?status=pending|approved|rejected)
+router.get('/brand-applications', authAdminMiddleware.verifyAccessToken, brandApplicationController.listApplications);
+
+// Get a single application's full detail
+router.get('/brand-applications/:id', authAdminMiddleware.verifyAccessToken, brandApplicationController.getApplicationDetail);
+
+// Approve an application — creates brand user account automatically
+router.post('/brand-applications/:id/approve', authAdminMiddleware.verifyAccessToken, brandApplicationController.approveApplication);
+
+// Reject an application
+router.post('/brand-applications/:id/reject', authAdminMiddleware.verifyAccessToken, brandApplicationController.rejectApplication);
 
 module.exports = router;
 
