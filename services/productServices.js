@@ -5,6 +5,27 @@ const db = require('./../utils/dbconnect');
 const { getCache, setCache } = require('../utils/cacheHelper');
 const { SCOPE } = require('../utils/cacheScopes');
 
+// services/product.service.js
+const getDeletedProducts = async ({ page, limit }) => {
+    const offset = (page - 1) * limit;
+    console.log('Req - 2');
+
+    const { products, total } = await model.getDeletedProducts({ limit, offset });
+    console.log('Req - 3');
+
+    return {
+        products,
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+            hasNextPage: page < Math.ceil(total / limit),
+            hasPrevPage: page > 1
+        }
+    };
+};
+
 const generateRandomID = () => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let id = '';
@@ -36,15 +57,42 @@ const generateUniqueVariationID = async () => {
 };
 
 const generateMultipleUniqueVariationIDs = async (count) => {
+    const start = Date.now();
+    console.log(`[VariationID] Generating ${count} unique variation ID(s)...`);
     const ids = [];
     const generated = new Set();
+    let queryCount = 0;
     while (ids.length < count) {
-        const variationID = await generateUniqueVariationID();
-        if (!generated.has(variationID)) {
-            generated.add(variationID);
-            ids.push(variationID);
+        // Generate a batch of candidates (overshoot to handle unlikely collisions)
+        const batchSize = Math.max(count - ids.length, 5);
+        const candidates = [];
+        for (let i = 0; i < batchSize; i++) {
+            let candidate;
+            do {
+                candidate = `VAR-${generateRandomString(7)}`;
+            } while (generated.has(candidate));
+            generated.add(candidate);
+            candidates.push(candidate);
+        }
+        // Single DB query to check all candidates at once
+        const placeholders = candidates.map(() => '?').join(',');
+        const [rows] = await db.query(
+            `SELECT variationID FROM variations WHERE variationID IN (${placeholders})`,
+            candidates
+        );
+        queryCount++;
+        const existingSet = new Set(rows.map(r => r.variationID));
+        if (existingSet.size > 0) {
+            console.log(`[VariationID] ${existingSet.size} collision(s) found in batch, retrying remaining...`);
+        }
+        for (const c of candidates) {
+            if (!existingSet.has(c) && ids.length < count) {
+                ids.push(c);
+            }
         }
     }
+    const duration = Date.now() - start;
+    console.log(`[VariationID] ✅ Generated ${count} ID(s) in ${duration}ms using ${queryCount} DB query(s)`);
     return ids;
 };
 
@@ -87,6 +135,9 @@ const generateVariationSlug = (variation) => {
 };
 
 const uploadVariationMap = async ({ variations, productID }) => {
+    const start = Date.now();
+    console.log(`[Variations] Starting variation upload for product ${productID}...`);
+
     if (!variations) {
         return { success: false, message: 'No variation data provided' };
     }
@@ -97,6 +148,7 @@ const uploadVariationMap = async ({ variations, productID }) => {
             return { success: false, message: 'Variations array is empty' };
         }
 
+        console.log(`[Variations] ${variationsArray.length} variation(s) to process`);
         const variationIDs = await generateMultipleUniqueVariationIDs(variationsArray.length);
 
         const preparedVariations = variationsArray.map((variation, i) => ({
@@ -106,10 +158,15 @@ const uploadVariationMap = async ({ variations, productID }) => {
             variationSlug: generateVariationSlug(variation), // explicitly guaranteed
         }));
 
+        console.log(`[Variations] Bulk inserting ${preparedVariations.length} variation(s) into DB...`);
         const result = await model.bulkUploadVariations(preparedVariations);
         if (!result.success) {
+            console.error(`[Variations] ❌ Bulk insert failed:`, result.error);
             return { success: false, message: 'Variation upload failed', error: result.error };
         }
+
+        const duration = Date.now() - start;
+        console.log(`[Variations] ✅ ${variationsArray.length} variation(s) uploaded in ${duration}ms`);
 
         return {
             success: true,
@@ -289,31 +346,38 @@ const editVariationMap = async ({ variations, productID }) => {
 };
 
 const uploadAttributeService = async (attributesArray) => {
+    const start = Date.now();
+    console.log(`[Attributes] Starting attribute upload (${attributesArray?.length || 0} attribute(s))...`);
+
     if (!Array.isArray(attributesArray) || attributesArray.length === 0) {
         return { success: false, message: 'An array of attributes is required' };
     }
 
-    const results = [];
-    for (const attr of attributesArray) {
-        const { name, values } = attr;
-        if (!name || !Array.isArray(values) || values.length === 0) {
-            console.warn(`Skipping attribute "${name}" due to invalid format`);
-            results.push({ success: false, name, message: 'Invalid attribute format (missing name or non-array/empty values)' });
-            continue;
-        }
-        try {
-            const result = await attributeModel.uploadAttribute({ name, values });
-            if (result.success) {
-                results.push({ success: true, name, id: result.insertId || result.insertedId });
-            } else {
-                console.error(`Failed to upload attribute "${name}":`, result.error);
-                results.push({ success: false, name, message: result.error });
+    const results = await Promise.all(
+        attributesArray.map(async (attr) => {
+            const { name, values } = attr;
+            if (!name || !Array.isArray(values) || values.length === 0) {
+                console.warn(`[Attributes] ⚠️ Skipping "${name}" — invalid format`);
+                return { success: false, name, message: 'Invalid attribute format (missing name or non-array/empty values)' };
             }
-        } catch (error) {
-            console.error(`Error uploading attribute "${name}":`, error.message);
-            results.push({ success: false, name, message: error.message });
-        }
-    }
+            try {
+                const result = await attributeModel.uploadAttribute({ name, values });
+                if (result.success) {
+                    return { success: true, name, id: result.insertId || result.insertedId };
+                } else {
+                    console.error(`[Attributes] ❌ Failed "${name}":`, result.error);
+                    return { success: false, name, message: result.error };
+                }
+            } catch (error) {
+                console.error(`[Attributes] ❌ Error "${name}":`, error.message);
+                return { success: false, name, message: error.message };
+            }
+        })
+    );
+
+    const successCount = results.filter(r => r.success).length;
+    const duration = Date.now() - start;
+    console.log(`[Attributes] ✅ ${successCount}/${results.length} attribute(s) uploaded in ${duration}ms`);
 
     const allSuccessful = results.every(r => r.success);
     return { success: allSuccessful, message: 'Attribute upload process completed', data: results };
@@ -381,8 +445,8 @@ const getProductCount = async (query) => {
         }
     }
 
-    let countQuery = `SELECT COUNT(*) as total FROM products`;
-    if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
+    let countQuery = `SELECT COUNT(*) as total FROM products WHERE isDeleted = 0`;
+    if (filters.length > 0) countQuery += ` AND ${filters.join(' AND ')}`;
 
     const [rows] = await db.execute(countQuery, values);
     return { totalItems: rows[0]?.total || 0 };
@@ -436,9 +500,9 @@ const fetchPaginatedProducts = async (query) => {
             productID, name, sectionid, regularPrice, salePrice,
             discountType, discountValue, offerID, featuredImage,
             brand, categories, type, status, createdAt
-        FROM products
+        FROM products WHERE productID IS NOT NULL AND isDeleted = 0
     `;
-    if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
+    if (filters.length > 0) baseQuery += ` AND ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY createdAt DESC`;
 
     return paginate({ baseQuery, values, page, limit, db });
@@ -646,13 +710,13 @@ async function getShopProductsPublic(query) {
         SELECT productID, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
                brand, brandID, featuredImage, categories, sectionid, createdAt
-        FROM products
+        FROM products WHERE  isDeleted = 0
     `;
-    if (filters.length > 0) baseQuery += ` WHERE ${filters.join(' AND ')}`;
+    if (filters.length > 0) baseQuery += ` AND ${filters.join(' AND ')}`;
     baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
-    let countQuery = `SELECT COUNT(*) AS total FROM products`;
-    if (filters.length > 0) countQuery += ` WHERE ${filters.join(' AND ')}`;
+    let countQuery = `SELECT COUNT(*) AS total FROM products where isDeleted = 0`;
+    if (filters.length > 0) countQuery += ` AND ${filters.join(' AND ')}`;
 
     const offset = (page - 1) * limit;
     const [rows] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
@@ -843,4 +907,5 @@ module.exports = {
     bulkRemoveSection,
     handleCrossSells,
     searchProducts,
+    getDeletedProducts
 };

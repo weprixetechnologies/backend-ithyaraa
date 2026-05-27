@@ -1,5 +1,69 @@
 const db = require('../utils/dbconnect')
 
+// models/product.model.js
+const getDeletedProducts = async ({ limit, offset }) => {
+    console.log('[getDeletedProducts] START', { limit, offset });
+
+    let products, total;
+
+    try {
+        console.log('[getDeletedProducts] Executing products query...');
+        const [rows] = await db.query(
+            `SELECT 
+              *,
+                COUNT(DISTINCT v.variationID) as variationCount
+             FROM products p
+             LEFT JOIN variations v 
+                ON v.productID = p.productID 
+                AND v.isDeleted = 1
+             WHERE p.isDeleted = 1
+             GROUP BY p.productID
+             ORDER BY p.deletedAt DESC
+             LIMIT ? OFFSET ?`,
+            [limit, offset]
+        );
+        products = rows;
+        console.log('[getDeletedProducts] Products query OK', {
+            rowsFetched: products.length,
+            firstRow: products[0] ?? null,
+            lastRow: products[products.length - 1] ?? null
+        });
+    } catch (err) {
+        console.error('[getDeletedProducts] Products query FAILED', {
+            message: err.message,
+            sql: err.sql ?? null,
+            params: { limit, offset }
+        });
+        throw err;
+    }
+
+    try {
+        console.log('[getDeletedProducts] Executing count query...');
+        const [[countRow]] = await db.query(
+            `SELECT COUNT(*) as total FROM products WHERE isDeleted = 1`
+        );
+        total = countRow.total;
+        console.log('[getDeletedProducts] Count query OK', { total });
+    } catch (err) {
+        console.error('[getDeletedProducts] Count query FAILED', {
+            message: err.message,
+            sql: err.sql ?? null
+        });
+        throw err;
+    }
+
+    console.log('[getDeletedProducts] END', {
+        total,
+        limit,
+        offset,
+        currentPage: Math.floor(offset / limit) + 1,
+        totalPages: Math.ceil(total / limit),
+        rowsReturned: products.length
+    });
+
+    return { products, total };
+};
+
 // ─────────────────────────────────────────────
 // Query builder (used by service pagination)
 // NOTE: filters array must be built internally
@@ -433,34 +497,59 @@ const deleteProduct = async (productID) => {
             [productID]
         );
         if (productRows.length === 0) {
-            return { success: false, error: 'Product not found' };
+            return {
+                success: false,
+                error: 'Product not found'
+            };
         }
 
         const [orderRows] = await db.query(
             `SELECT COUNT(*) as count FROM order_items WHERE productID = ?`,
             [productID]
         );
-        if (orderRows[0].count > 0) {
-            return { success: false, error: 'Cannot delete product: It has been ordered by customers' };
-        }
 
-        // Delete related data in parallel where there are no dependencies
+        // Always clean up cart, wishlist, and combo items regardless of delete type
         await Promise.all([
             db.query(`DELETE FROM cart_items WHERE productID = ?`, [productID]),
             db.query(`DELETE FROM wishlist_items WHERE productID = ?`, [productID]),
             db.query(`DELETE FROM make_combo_items WHERE productID = ?`, [productID]),
         ]);
 
-        await deleteVariationsByProductID(productID);
+        // If product was ordered before → soft delete
+        if (orderRows[0].count > 0) {
+            await Promise.all([
+                db.query(
+                    `UPDATE products SET isDeleted = 1, deletedAt = NOW() WHERE productID = ?`,
+                    [productID]
+                ),
+                db.query(
+                    `UPDATE variations SET isDeleted = 1, deletedAt = NOW() WHERE productID = ?`,
+                    [productID]
+                ),
+            ]);
+            return {
+                success: true,
+                type: 'soft_delete',
+                message: 'Product soft deleted and removed from cart, wishlist, and combos'
+            };
+        }
 
+        // No orders → full delete
+        await deleteVariationsByProductID(productID);
         const [result] = await db.query(
             `DELETE FROM products WHERE productID = ?`,
             [productID]
         );
-
-        return { success: result.affectedRows > 0, affectedRows: result.affectedRows };
+        return {
+            success: result.affectedRows > 0,
+            type: 'hard_delete',
+            affectedRows: result.affectedRows
+        };
     } catch (error) {
-        return { success: false, error: error.message };
+        return {
+            success: false,
+            error: error.message
+        };
     }
 };
 const bulkUploadVariations = async (variationsArray) => {
@@ -534,4 +623,5 @@ module.exports = {
     getProductWithVariations,
     getProductByID,
     deleteProduct,
+    getDeletedProducts
 };

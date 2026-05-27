@@ -74,26 +74,26 @@ async function getReviews(productID, options = {}) {
 
     const offset = (page - 1) * limit;
 
-    let whereClause = 'productID = ?';
+    let whereClause = 'r.productID = ?';
     const params = [productID];
 
     // Filter by rating if provided
     if (minRating) {
-        whereClause += ' AND rating >= ?';
+        whereClause += ' AND r.rating >= ?';
         params.push(minRating);
     }
 
     // Filter by status - only show approved reviews
-    whereClause += ' AND status = "approved"';
+    whereClause += ' AND r.status = "approved"';
 
     // Sorting
-    let orderBy = 'createdAt DESC';
+    let orderBy = 'r.createdAt DESC';
     if (sortBy === 'oldest') {
-        orderBy = 'createdAt ASC';
+        orderBy = 'r.createdAt ASC';
     } else if (sortBy === 'highest') {
-        orderBy = 'rating DESC, createdAt DESC';
+        orderBy = 'r.rating DESC, r.createdAt DESC';
     } else if (sortBy === 'lowest') {
-        orderBy = 'rating ASC, createdAt DESC';
+        orderBy = 'r.rating ASC, r.createdAt DESC';
     }
 
     // Get reviews with user info
@@ -109,7 +109,7 @@ async function getReviews(productID, options = {}) {
 
     // Get total count
     const [countResult] = await db.query(
-        `SELECT COUNT(*) as total FROM reviews WHERE ${whereClause}`,
+        `SELECT COUNT(*) as total FROM reviews r WHERE ${whereClause}`,
         params
     );
 

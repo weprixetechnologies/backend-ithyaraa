@@ -22,4 +22,6 @@ productRouter.get('/shop', productController.shopList)
 productRouter.get('/shop/customtabbed', customTabbedCategoryController.getCustomTabbedCategories)
 productRouter.get('/search', productController.searchProducts)
 
+// routes/product.routes.js
+productRouter.get('/deleted', authAdminMiddleware.verifyAccessToken, productController.getDeletedProducts);
 module.exports = productRouter

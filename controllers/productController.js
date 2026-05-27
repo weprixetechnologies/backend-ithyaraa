@@ -20,6 +20,30 @@ const invalidateProductCaches = async (productID = null) => {
     await Promise.allSettled(tasks); // allSettled: one failure won't throw
 };
 
+// GET DELETED PRODUCTS
+// controllers/product.controller.js
+const getDeletedProducts = async (req, res) => {
+    console.log('req received - get delete');
+
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+
+        const result = await service.getDeletedProducts({ page, limit }); //ADD MODEL HERE
+
+        return res.status(200).json({
+            success: true,
+            data: result.products,
+            pagination: result.pagination
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
 // ─────────────────────────────────────────────
 // Add Product
 // ─────────────────────────────────────────────
@@ -460,4 +484,5 @@ module.exports = {
     bulkRemoveSection,
     shopList,
     searchProducts,
+    getDeletedProducts
 };

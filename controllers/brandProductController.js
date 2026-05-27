@@ -7,14 +7,12 @@ const db = require('../utils/dbconnect');
 // Add brand product
 const addBrandProduct = async (req, res) => {
     try {
+        const requestStart = Date.now();
         const payload = req.body;
         const brandID = req.user.uid; // Get brandID from JWT token
         const brandName = req.user.name || req.user.username || 'BRANDNAME'; // Get brand name from JWT token
 
-
-        console.log('Brand Product Payload:', payload);
-        console.log('Brand ID:', brandID);
-        console.log('Brand Name:', brandName);
+        console.log(`[AddProduct] ━━━ New product upload request from brand "${brandName}" (${brandID}) ━━━`);
 
         if (!payload || typeof payload !== 'object') {
             return res.status(400).json({ message: 'Invalid payload' });
@@ -26,64 +24,74 @@ const addBrandProduct = async (req, res) => {
         payload.brandID = brandID;
 
         // 1. Generate Unique Product ID
+        console.log('[AddProduct] Step 1/3: Generating unique product ID...');
+        let stepStart = Date.now();
         const productID = await service.generateUniqueProductID();
         if (!productID) {
             return res.status(500).json({ message: 'Failed to generate product ID' });
         }
+        console.log(`[AddProduct] ✅ Product ID: ${productID} (${Date.now() - stepStart}ms)`);
 
         // 2. Upload Product Core Data
+        console.log('[AddProduct] Step 2/3: Inserting product core data...');
+        stepStart = Date.now();
         const uploadProduct = await model.uploadProduct({ ...payload, productID, brandID, brandName });
         if (!uploadProduct.success) {
+            console.error('[AddProduct] ❌ Product insert failed:', uploadProduct.error);
             return res.status(500).json({
                 message: 'Product upload failed',
                 error: uploadProduct.error
             });
         }
+        console.log(`[AddProduct] ✅ Product inserted (${Date.now() - stepStart}ms)`);
 
-        // 3. Upload Attributes (optional)
-        const attributes = payload.attributes;
-        if (attributes && Array.isArray(attributes) && attributes.length > 0) {
-            try {
-                const attributesResult = await service.uploadAttributeService(attributes);
-                if (!attributesResult.success) {
-                    return res.status(500).json({
-                        message: 'Attribute upload failed',
-                        error: attributesResult.data || attributesResult.message
-                    });
-                }
-            } catch (err) {
-                console.error("Error during attribute upload:", err);
-                return res.status(500).json({
-                    message: 'Attribute upload failed due to an exception',
-                    error: err.message
-                });
-            }
-        }
-
-        // 4. Upload Variations (required for variable products)
+        // 3 & 4. Upload Attributes + Variations in parallel (independent operations)
         const variations = payload.productVariations;
-        if (variations && Array.isArray(variations) && variations.length > 0) {
-            try {
-                const variationsResult = await service.uploadVariationMap({ variations, productID });
-                if (!variationsResult.success) {
-                    return res.status(500).json({
-                        message: 'Variation upload failed',
-                        error: variationsResult.error
-                    });
-                }
-            } catch (err) {
-                console.error('Variation upload error:', err);
-                return res.status(500).json({
-                    message: 'Variation upload service error',
-                    error: err.message
-                });
-            }
-        } else {
+        if (!variations || !Array.isArray(variations) || variations.length === 0) {
             return res.status(400).json({
                 message: 'Variations are required for brand products',
                 error: 'Variable products must have at least one variation'
             });
         }
+
+        const attributes = payload.attributes;
+        console.log(`[AddProduct] Step 3/3: Uploading attributes (${attributes?.length || 0}) + variations (${variations.length}) in parallel...`);
+        stepStart = Date.now();
+        try {
+            const [attributesResult, variationsResult] = await Promise.all([
+                (attributes && Array.isArray(attributes) && attributes.length > 0)
+                    ? service.uploadAttributeService(attributes)
+                    : Promise.resolve({ success: true }),
+                service.uploadVariationMap({ variations, productID })
+            ]);
+            console.log(`[AddProduct] ✅ Attributes + Variations done (${Date.now() - stepStart}ms)`);
+
+            if (attributesResult && !attributesResult.success) {
+                console.error('[AddProduct] ❌ Attribute upload failed:', attributesResult.data || attributesResult.message);
+                return res.status(500).json({
+                    message: 'Attribute upload failed',
+                    error: attributesResult.data || attributesResult.message
+                });
+            }
+
+            if (!variationsResult.success) {
+                console.error('[AddProduct] ❌ Variation upload failed:', variationsResult.error);
+                return res.status(500).json({
+                    message: 'Variation upload failed',
+                    error: variationsResult.error
+                });
+            }
+        } catch (err) {
+            console.error('[AddProduct] ❌ Error during attribute/variation upload:', err);
+            return res.status(500).json({
+                message: 'Attribute or variation upload failed due to an exception',
+                error: err.message
+            });
+        }
+
+        const totalDuration = Date.now() - requestStart;
+        console.log(`[AddProduct] 🎉 Product "${productID}" uploaded successfully in ${totalDuration}ms`);
+        console.log(`[AddProduct] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
         return res.status(201).json({
             success: true,
@@ -94,7 +102,7 @@ const addBrandProduct = async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Error in addBrandProduct:', err);
+        console.error('[AddProduct] ❌ Internal server error:', err);
         return res.status(500).json({
             message: 'Internal server error',
             error: err.message || 'Unknown server error'
