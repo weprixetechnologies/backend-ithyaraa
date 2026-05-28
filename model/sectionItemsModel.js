@@ -371,6 +371,14 @@ const listItems = async ({ type = null } = {}) => {
           };
         } else if (t === 'productsection') {
           const pg = pgByItemId[r.itemId] || null;
+          let parsedFilters = null;
+          if (pg && pg.filters) {
+            try {
+              parsedFilters = typeof pg.filters === 'string' ? JSON.parse(pg.filters) : pg.filters;
+            } catch(e) {
+              parsedFilters = pg.filters;
+            }
+          }
           return {
             ...r,
             group: pg ? {
@@ -380,6 +388,8 @@ const listItems = async ({ type = null } = {}) => {
               orderIndex: pg.orderIndex,
               imageUrl: pg.imageUrl,
               isBannerised: pg.isBannerised,
+              routeTo: pg.routeTo,
+              filters: parsedFilters,
               createdAt: pg.createdAt,
               updatedAt: pg.updatedAt
             } : null,
@@ -483,7 +493,7 @@ const listItems = async ({ type = null } = {}) => {
       const [rows] = await db.query(
         `SELECT si.id AS entryId, si.type, si.orderIndex, si.itemId,
                 pg.id AS pg_id, pg.sectionID AS pg_sectionID, pg.title AS pg_title, pg.orderIndex AS pg_orderIndex,
-                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised,
+                pg.imageUrl AS pg_imageUrl, pg.isBannerised AS pg_isBannerised, pg.routeTo AS pg_routeTo, pg.filters AS pg_filters,
                 pg.createdAt AS pg_createdAt, pg.updatedAt AS pg_updatedAt
          FROM section_items si
          LEFT JOIN product_groups pg ON pg.sectionID = si.itemId
@@ -533,23 +543,35 @@ const listItems = async ({ type = null } = {}) => {
         }, {});
       }
 
-      const enriched = rows.map(r => ({
-        entryId: r.entryId,
-        type: r.type,
-        orderIndex: r.orderIndex,
-        itemId: r.itemId,
-        group: r.pg_id ? {
-          id: r.pg_id,
-          sectionID: r.pg_sectionID,
-          title: r.pg_title,
-          orderIndex: r.pg_orderIndex,
-          imageUrl: r.pg_imageUrl,
-          isBannerised: r.pg_isBannerised,
-          createdAt: r.pg_createdAt,
-          updatedAt: r.pg_updatedAt
-        } : null,
-        products: r.pg_id ? (groupProductsMap[r.pg_id] || []) : []
-      }));
+      const enriched = rows.map(r => {
+        let parsedFilters = null;
+        if (r.pg_filters) {
+          try {
+            parsedFilters = typeof r.pg_filters === 'string' ? JSON.parse(r.pg_filters) : r.pg_filters;
+          } catch(e) {
+            parsedFilters = r.pg_filters;
+          }
+        }
+        return {
+          entryId: r.entryId,
+          type: r.type,
+          orderIndex: r.orderIndex,
+          itemId: r.itemId,
+          group: r.pg_id ? {
+            id: r.pg_id,
+            sectionID: r.pg_sectionID,
+            title: r.pg_title,
+            orderIndex: r.pg_orderIndex,
+            imageUrl: r.pg_imageUrl,
+            isBannerised: r.pg_isBannerised,
+            routeTo: r.pg_routeTo,
+            filters: parsedFilters,
+            createdAt: r.pg_createdAt,
+            updatedAt: r.pg_updatedAt
+          } : null,
+          products: r.pg_id ? (groupProductsMap[r.pg_id] || []) : []
+        };
+      });
 
       return { success: true, data: enriched };
     } else if (rawType === 'combosection') {

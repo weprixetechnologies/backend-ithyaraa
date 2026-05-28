@@ -3,12 +3,14 @@ const db = require('../utils/dbconnect');
 /**
  * Create a new product group
  */
-const createGroup = async ({ sectionID, orderIndex = 0, imageUrl = null, isBannerised = false, title = null }) => {
+const createGroup = async ({ sectionID, orderIndex = 0, imageUrl = null, isBannerised = false, title = null, routeTo = null, filters = null }) => {
   try {
+    const filtersJson = filters ? (typeof filters === 'string' ? filters : JSON.stringify(filters)) : null;
+
     const [result] = await db.query(
-      `INSERT INTO product_groups (sectionID, orderIndex, imageUrl, isBannerised, title)
-       VALUES (?, ?, ?, ?, ?)`,
-      [sectionID, orderIndex, imageUrl, isBannerised ? 1 : 0, title]
+      `INSERT INTO product_groups (sectionID, orderIndex, imageUrl, isBannerised, title, routeTo, filters)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [sectionID, orderIndex, imageUrl, isBannerised ? 1 : 0, title, routeTo, filtersJson]
     );
 
     return { success: true, id: result.insertId };
@@ -155,6 +157,14 @@ const updateGroup = async (groupID, data = {}) => {
       updates.push('isBannerised = ?');
       values.push(data.isBannerised ? 1 : 0);
     }
+    if (data.routeTo !== undefined) {
+      updates.push('routeTo = ?');
+      values.push(data.routeTo);
+    }
+    if (data.filters !== undefined) {
+      updates.push('filters = ?');
+      values.push(data.filters ? (typeof data.filters === 'string' ? data.filters : JSON.stringify(data.filters)) : null);
+    }
 
     if (updates.length === 0) {
       return { success: false, message: 'No fields to update' };
@@ -217,7 +227,7 @@ const listGroups = async ({ page = 1, limit = 20, sectionID = null, includeProdu
 
     // fetch page
     const [rows] = await db.query(
-      `SELECT id, sectionID, title, orderIndex, imageUrl, isBannerised, createdAt, updatedAt
+      `SELECT id, sectionID, title, orderIndex, imageUrl, isBannerised, routeTo, filters, createdAt, updatedAt
        FROM product_groups
        ${where}
        ORDER BY orderIndex ASC, id ASC

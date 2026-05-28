@@ -16,7 +16,9 @@ const createGroupService = async (groupData) => {
       title: groupData.title !== undefined ? (groupData.title === null ? null : String(groupData.title)) : undefined,
       orderIndex: groupData.orderIndex !== undefined ? parseInt(groupData.orderIndex, 10) : 0,
       imageUrl: groupData.imageUrl || null,
-      isBannerised: !!groupData.isBannerised
+      isBannerised: !!groupData.isBannerised,
+      routeTo: groupData.routeTo !== undefined ? groupData.routeTo : undefined,
+      filters: groupData.filters !== undefined ? groupData.filters : undefined
     };
 
     const result = await model.createGroup(payload);
@@ -78,6 +80,8 @@ const updateGroupService = async (groupID, data) => {
     if (data.orderIndex !== undefined) payload.orderIndex = parseInt(data.orderIndex, 10);
     if (data.imageUrl !== undefined) payload.imageUrl = data.imageUrl;
     if (data.isBannerised !== undefined) payload.isBannerised = !!data.isBannerised;
+    if (data.routeTo !== undefined) payload.routeTo = data.routeTo;
+    if (data.filters !== undefined) payload.filters = data.filters;
 
     const result = await model.updateGroup(gid, payload);
     if (!result.success) return { success: false, message: 'Failed to update group', error: result.error || result.message };
