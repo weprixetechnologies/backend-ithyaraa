@@ -22,6 +22,10 @@ const sendOtp = async (phoneNumber) => {
     // Delete any existing OTP for this phone number
     await deleteOtpByPhoneNumber(phoneNumber);
 
+    // Reset attempt counter in Redis
+    const { redis } = require('../config/redis');
+    await redis.del(`otp_attempts:${phoneNumber}`);
+
     // Send OTP via Twilio
     await client.messages.create({
         body: `Your OTP is: ${otp}`,
@@ -35,17 +39,45 @@ const sendOtp = async (phoneNumber) => {
     return { success: true, message: "OTP sent successfully" };
 };
 async function verifyOtp(phoneNumber, otp) {
+    const { redis } = require('../config/redis');
+    const attemptsKey = `otp_attempts:${phoneNumber}`;
+
     // hash incoming OTP
     const hashedOtp = hashOtp(otp);
 
-    // 1. Get OTP record using hashedOtp
+    // 1. Check attempts count in Redis
+    const attempts = parseInt(await redis.get(attemptsKey) || '0', 10);
+    if (attempts >= 5) {
+        await otpModel.deleteOtpByPhoneNumber(phoneNumber);
+        await redis.del(attemptsKey);
+        return { success: false, message: 'Too many incorrect attempts. Please request a new OTP.' };
+    }
+
+    // 2. Get OTP record using hashedOtp
     const otpRecord = await otpModel.getOtpRecord(phoneNumber, hashedOtp);
     if (!otpRecord) {
+        const newAttempts = await redis.incr(attemptsKey);
+        if (newAttempts === 1) {
+            await redis.expire(attemptsKey, 300); // 5 min TTL
+        }
+        if (newAttempts >= 5) {
+            await otpModel.deleteOtpByPhoneNumber(phoneNumber);
+            await redis.del(attemptsKey);
+            return { success: false, message: 'Too many incorrect attempts. Please request a new OTP.' };
+        }
         return { success: false, message: 'Invalid OTP' };
     }
 
-    // 2. Delete OTP once used
+    // 3. Check if OTP is expired
+    if (new Date() > new Date(otpRecord.expiry)) {
+        await otpModel.deleteOtpByPhoneNumber(phoneNumber);
+        await redis.del(attemptsKey);
+        return { success: false, message: 'OTP has expired' };
+    }
+
+    // 4. Clean up once verified successfully
     await otpModel.deleteOtpByPhoneNumber(phoneNumber);
+    await redis.del(attemptsKey);
 
     return { success: true, message: 'OTP verified successfully' };
 }

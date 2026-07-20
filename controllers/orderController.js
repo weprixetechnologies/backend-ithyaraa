@@ -13,15 +13,9 @@ const db = require('../utils/dbconnect');
 const RETURN_WINDOW_DAYS = parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7;
 
 // Load from environment only
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
-const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
-const keyIndex = process.env.KEY_INDEX || '1';
-
-if (process.env.NODE_ENV === "production") {
-    if (!merchantId || !key || !keyIndex) {
-        throw new Error("Missing PhonePe production credentials");
-    }
-}
+const merchantId = process.env.MERCHANT_ID;
+const key = process.env.KEY;
+const keyIndex = process.env.KEY_INDEX;
 
 const phonePeUrl = process.env.NODE_ENV === "production"
     ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
@@ -55,8 +49,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:7885'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:7885'
         };
 
         // Generate invoice PDF for attachment
@@ -300,7 +294,7 @@ const placeOrderController = async (req, res) => {
 
         const merchantOrderId = randomUUID();
         // Normalize FRONTEND_URL - remove trailing slashes
-        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         let redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
 
@@ -308,7 +302,7 @@ const placeOrderController = async (req, res) => {
             redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${order.orderID}`;
         }
         // Use order-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
         console.log('[ORDER] PhonePe callback URL:', callbackUrl);
@@ -529,9 +523,40 @@ const updateOrderController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const updated = await orderService.updateOrder(orderID, req.body || {});
+        // Fetch order detail to verify ownership and state
+        const order = await orderModel.getOrderByID(orderID);
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        // 1. Verify ownership
+        if (order.uid !== req.user.uid) {
+            return res.status(403).json({ success: false, message: 'Access denied: You do not own this order' });
+        }
+
+        // 2. Verify order status (can only modify before the order ships)
+        const allowedStatuses = ['pending', 'preparing'];
+        if (!allowedStatuses.includes(String(order.orderStatus).toLowerCase())) {
+            return res.status(400).json({ success: false, message: 'Order cannot be updated after it has been shipped or processed' });
+        }
+
+        // 3. Restrict fields (only addressID is allowed)
+        const { addressID } = req.body || {};
+        if (addressID === undefined) {
+            return res.status(400).json({ success: false, message: 'Only addressID is allowed to be updated post-order' });
+        }
+
+        // 4. Validate that the target address belongs to the user
+        const addressModel = require('../model/addressModel');
+        const address = await addressModel.getAddressByID(addressID);
+        if (!address || address.uid !== req.user.uid) {
+            return res.status(400).json({ success: false, message: 'Invalid or unauthorized address ID' });
+        }
+
+        // Perform the update with clean data
+        const updated = await orderService.updateOrder(orderID, { addressID });
         if (!updated) {
-            return res.status(404).json({ success: false, message: 'Order not found or no valid fields to update' });
+            return res.status(404).json({ success: false, message: 'Order not found or update failed' });
         }
 
         return res.status(200).json({ success: true, order: updated });

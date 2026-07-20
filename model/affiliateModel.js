@@ -72,6 +72,44 @@ const createAffiliateTransaction = async ({ txnID, uid, status = 'pending', amou
     return result;
 };
 
+// Create an affiliate commission transaction and update user balance in a single transaction
+const recordAffiliateCommission = async ({ uid, amount, orderID }) => {
+    const txnID = require('crypto').randomUUID();
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Increment user's pendingPayment balance
+        await connection.execute(
+            `UPDATE users SET pendingPayment = COALESCE(pendingPayment, 0) + ? WHERE uid = ?`,
+            [amount, uid]
+        );
+
+        // 2. Create the affiliate transaction record
+        const type = 'incoming';
+        const status = 'pending';
+        let query, params;
+        const [colOrder] = await connection.execute(`SHOW COLUMNS FROM affiliateTransactions LIKE 'orderID'`);
+        if (colOrder.length > 0) {
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type, orderID) VALUES (?, ?, ?, ?, ?, ?)`;
+            params = [txnID, uid, status, amount, type, orderID];
+        } else {
+            query = `INSERT INTO affiliateTransactions (txnID, uid, status, amount, type) VALUES (?, ?, ?, ?, ?)`;
+            params = [txnID, uid, status, amount, type];
+        }
+        await connection.execute(query, params);
+
+        await connection.commit();
+        return { success: true, txnID };
+    } catch (error) {
+        await connection.rollback();
+        console.error('Error recording affiliate commission:', error);
+        throw error;
+    } finally {
+        connection.release();
+    }
+};
+
 // Admin: Update affiliate transaction status (allowed values: all AFFILIATE_TXN_STATUS including m.*)
 const updateAffiliateTransactionStatus = async (txnID, newStatus) => {
     if (!AFFILIATE_TXN_STATUS.includes(newStatus)) {
@@ -233,6 +271,7 @@ async function getAffiliateTransactions(uid, {
 }
 
 module.exports.getAffiliateTransactions = getAffiliateTransactions;
+module.exports.recordAffiliateCommission = recordAffiliateCommission;
 
 // ==================== Bank Account Functions ====================
 

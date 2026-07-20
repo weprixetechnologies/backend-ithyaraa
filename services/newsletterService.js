@@ -28,7 +28,7 @@ function verifyUnsubscribeToken(token) {
 
 function buildUnsubscribeLink(subscriberId, email) {
     const token = buildUnsubscribeToken({ sid: subscriberId, email });
-    const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || 'https://backend.ithyaraa.com';
+    const baseUrl = process.env.FRONTEND_URL || process.env.BACKEND_URL || 'http://localhost:7885';
     return `${baseUrl.replace(/\/+$/, '')}/unsubscribe-newsletter/${token}`;
 }
 

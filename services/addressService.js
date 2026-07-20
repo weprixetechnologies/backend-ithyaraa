@@ -50,14 +50,18 @@ const getAddresses = async (uid, emailID) => {
     return await addressModel.getAddresses(uid, emailID);
 };
 
-const deleteAddress = async (addressID) => {
+const deleteAddress = async (addressID, uid) => {
     if (!addressID) {
         throw new Error("addressID is required");
     }
 
-    const exists = await addressModel.checkAddressIDExists(addressID);
-    if (!exists) {
+    const address = await addressModel.getAddressByID(addressID);
+    if (!address) {
         throw new Error("Address not found");
+    }
+
+    if (address.uid !== uid) {
+        throw new Error("Access denied: You do not own this address");
     }
 
     const deleted = await addressModel.deleteAddress(addressID);

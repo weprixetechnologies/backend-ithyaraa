@@ -132,11 +132,9 @@ async function createOrder(orderData) {
             });
             console.log('ITEM', item);
 
-
             if (item.comboID) {
-                // Handle combo items - fetch from order_combo_items table
-                console.log(`Processing combo items for comboID: ${item.comboID}`);
-
+                // Handle combo products - deduct from combo items variation stock
+                console.log(`Deducting stock for combo product: ${item.productID}, comboID: ${item.comboID}`);
                 const [comboItems] = await connection.query(
                     `SELECT productID, variationID, quantity 
                      FROM order_combo_items 
@@ -151,6 +149,19 @@ async function createOrder(orderData) {
                     console.log(`Deducting ${deductQty} from variation ${combo.variationID} for product ${combo.productID}`);
 
                     if (combo.variationID) {
+                        // Lock the variation row to check stock availability
+                        const [varRows] = await connection.query(
+                            'SELECT variationStock, variationName FROM variations WHERE variationID = ? FOR UPDATE',
+                            [combo.variationID]
+                        );
+                        if (varRows.length === 0) {
+                            throw new Error(`Product variation not found for ID ${combo.variationID}`);
+                        }
+                        const availStock = varRows[0].variationStock;
+                        if (availStock < deductQty) {
+                            throw new Error(`Insufficient stock for variation "${varRows[0].variationName}" (Requested: ${deductQty}, Available: ${availStock})`);
+                        }
+
                         const [result] = await connection.query(
                             `UPDATE variations
                              SET variationStock = variationStock - ?
@@ -166,11 +177,25 @@ async function createOrder(orderData) {
                 // Handle products with variations - deduct from variation stock
                 console.log(`Deducting ${item.quantity || 1} from variation ${item.variationID}`);
 
+                const requiredQty = item.quantity || 1;
+                // Lock the variation row to check stock availability
+                const [varRows] = await connection.query(
+                    'SELECT variationStock, variationName FROM variations WHERE variationID = ? FOR UPDATE',
+                    [item.variationID]
+                );
+                if (varRows.length === 0) {
+                    throw new Error(`Product variation not found for ID ${item.variationID}`);
+                }
+                const availStock = varRows[0].variationStock;
+                if (availStock < requiredQty) {
+                    throw new Error(`Insufficient stock for variation "${varRows[0].variationName}" (Requested: ${requiredQty}, Available: ${availStock})`);
+                }
+
                 const [result] = await connection.query(
                     `UPDATE variations
                      SET variationStock = variationStock - ?
                      WHERE variationID = ?`,
-                    [item.quantity || 1, item.variationID]
+                    [requiredQty, item.variationID]
                 );
                 console.log(`Stock deduction result:`, result);
 
@@ -187,6 +212,28 @@ async function createOrder(orderData) {
                 console.warn(`Product ${item.productID} has no variationID - stock cannot be deducted automatically`);
                 console.warn(`Manual stock management required for products without variations`);
             }
+        }
+
+        // Deduct wallet from user balance inside transaction
+        const paidWallet = Number(orderData.paidWallet) || 0;
+        if (paidWallet > 0) {
+            // Lock user row first and check balance
+            const [userRows] = await connection.query(
+                'SELECT balance FROM users WHERE uid = ? FOR UPDATE',
+                [orderData.uid]
+            );
+            if (userRows.length === 0) {
+                throw new Error('User not found');
+            }
+            const currentBalance = Number(userRows[0].balance || 0);
+            if (currentBalance < paidWallet) {
+                throw new Error(`Insufficient wallet balance (Required: ${paidWallet}, Available: ${currentBalance})`);
+            }
+
+            await connection.query(
+                'UPDATE users SET balance = balance - ? WHERE uid = ?',
+                [paidWallet, orderData.uid]
+            );
         }
 
         // 3. Commit the order transaction
@@ -609,14 +656,93 @@ async function getOrderBymerchantID(merchantID) {
 }
 
 // Update order payment status
+async function restoreOrderStock(orderID, connectionArg = null) {
+    const connection = connectionArg || await db.getConnection();
+    try {
+        if (!connectionArg) {
+            await connection.beginTransaction();
+        }
+
+        // Fetch order items to restore stock
+        const [items] = await connection.query(
+            'SELECT orderItemID, productID, quantity, variationID, comboID FROM order_items WHERE orderID = ?',
+            [orderID]
+        );
+
+        for (const item of items) {
+            if (item.comboID) {
+                // Fetch combo items
+                const [comboItems] = await connection.query(
+                    'SELECT productID, variationID, quantity FROM order_combo_items WHERE comboID = ?',
+                    [item.comboID]
+                );
+                for (const combo of comboItems) {
+                    if (combo.variationID) {
+                        const deductQty = item.quantity || 1;
+                        await connection.query(
+                            'UPDATE variations SET variationStock = variationStock + ? WHERE variationID = ?',
+                            [deductQty, combo.variationID]
+                        );
+                    }
+                }
+            } else if (item.variationID) {
+                await connection.query(
+                    'UPDATE variations SET variationStock = variationStock + ? WHERE variationID = ?',
+                    [item.quantity || 1, item.variationID]
+                );
+            }
+        }
+
+        if (!connectionArg) {
+            await connection.commit();
+        }
+        return true;
+    } catch (error) {
+        if (!connectionArg) {
+            await connection.rollback();
+        }
+        console.error(`[Stock Restoration] Failed to restore stock for order ${orderID}:`, error);
+        throw error;
+    } finally {
+        if (!connectionArg) {
+            connection.release();
+        }
+    }
+}
+
 async function updateOrderPaymentStatus(merchantID, status) {
     const connection = await db.getConnection();
     try {
-        const [result] = await connection.query(
-            'UPDATE orderDetail SET paymentStatus = ? WHERE merchantID = ?',
-            [status, merchantID]
+        await connection.beginTransaction();
+        const [rows] = await connection.query(
+            'SELECT orderID, paymentStatus FROM orderDetail WHERE merchantID = ? FOR UPDATE',
+            [merchantID]
         );
-        return result.affectedRows > 0;
+        if (rows.length === 0) {
+            await connection.rollback();
+            return { success: false };
+        }
+        
+        const order = rows[0];
+        const oldStatus = order.paymentStatus;
+        
+        await connection.query(
+            'UPDATE orderDetail SET paymentStatus = ? WHERE orderID = ?',
+            [status, order.orderID]
+        );
+        
+        const isFailure = ['failed', 'refunded'].includes(String(status).toLowerCase());
+        const wasPending = ['pending'].includes(String(oldStatus).toLowerCase());
+        if (isFailure && wasPending) {
+            await restoreOrderStock(order.orderID, connection);
+        }
+
+        await connection.commit();
+        return { success: true, oldStatus };
+    } catch (e) {
+        await connection.rollback();
+        console.error('Error updating order payment status:', e);
+        return { success: false };
     } finally {
         connection.release();
     }
@@ -637,6 +763,7 @@ async function addmerchantID(orderID, merchantID) {
 }
 
 module.exports.getOrderByID = getOrderByID;
+module.exports.restoreOrderStock = restoreOrderStock;
 module.exports.getOrderBymerchantID = getOrderBymerchantID;
 module.exports.updateOrderPaymentStatus = updateOrderPaymentStatus;
 module.exports.addmerchantID = addmerchantID;
@@ -657,7 +784,16 @@ async function updateOrderByID(orderID, updateData = {}) {
             'couponCode',
             'couponDiscount',
             'merchantID',
-            'modified'
+            'modified',
+            'shippingName',
+            'shippingPhone',
+            'shippingEmail',
+            'shippingLine1',
+            'shippingLine2',
+            'shippingCity',
+            'shippingState',
+            'shippingPincode',
+            'shippingLandmark'
         ]);
 
         const fields = [];

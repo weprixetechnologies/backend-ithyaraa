@@ -29,13 +29,17 @@ const getAddresses = async (req, res) => {
 const deleteAddress = async (req, res) => {
     try {
         const { addressID } = req.params;
-        const deleted = await addressService.deleteAddress(addressID);
+        const { uid } = req.user;
+        const deleted = await addressService.deleteAddress(addressID, uid);
         if (deleted) {
             res.status(200).json({ message: "Address deleted successfully" });
         } else {
             res.status(404).json({ error: "Address not found" });
         }
     } catch (err) {
+        if (err.message.includes("Access denied")) {
+            return res.status(403).json({ error: err.message });
+        }
         res.status(400).json({ error: err.message });
     }
 };

@@ -72,15 +72,15 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
             const dtype = String(flash.discountType || '').toLowerCase();
             const dval = Number(flash.discountValue || 0);
             if (!Number.isNaN(base) && dval > 0) {
-                if (dtype === 'percentage') flashSalePrice = Math.max(0, +(base * (dval / 100 * -1 + 1)).toFixed(2));
-                else if (dtype === 'fixed') flashSalePrice = Math.max(0, +(base - dval).toFixed(2));
+                if (dtype === 'percentage') flashSalePrice = Math.max(0, Math.round(base * 100 * (1 - dval / 100)) / 100);
+                else if (dtype === 'fixed') flashSalePrice = Math.max(0, (Math.round(base * 100) - Math.round(dval * 100)) / 100);
             }
         }
     } catch (_) { }
 
     // 4. Calculate base price (flash sale price takes precedence over regular sale price)
     const basePrice = flashSalePrice ?? salePrice ?? regularPrice;
-    const lineTotalBefore = Number((basePrice * quantity).toFixed(2));
+    const lineTotalBefore = (Math.round(basePrice * 100) * quantity) / 100;
     const lineTotalAfter = lineTotalBefore; // initially same (no discount yet)
 
     // 4. Check if item with same productID AND variationID exists
@@ -90,7 +90,7 @@ async function addToCart(uid, productID, quantity, variationID, variationName, r
     if (existingItem) {
         // 5. Update quantity if exact same variation exists
         const newQuantity = existingItem.quantity + quantity;
-        const newLineTotalBefore = Number((basePrice * newQuantity).toFixed(2));
+        const newLineTotalBefore = (Math.round(basePrice * 100) * newQuantity) / 100;
         const newLineTotalAfter = newLineTotalBefore;
 
         cartItem = await cartModel.updateCartItemQuantity(
@@ -201,7 +201,7 @@ async function addCartCombo(uid, quantity, mainProductID, products) {
     // 3. Always insert into cart_items (combo parent)
     // const basePrice = mainProduct.salePrice ?? mainProduct.regularPrice;
     const basePrice = mainProduct.salePrice ?? mainProduct.regularPrice;
-    const lineTotalBefore = Number((basePrice * quantity).toFixed(2));
+    const lineTotalBefore = (Math.round(basePrice * 100) * quantity) / 100;
     const lineTotalAfter = lineTotalBefore;
 
     const cartItem = await cartModel.insertCartItemCombo({
@@ -292,10 +292,10 @@ async function getCart(uid) {
             if (dval > 0 && (dtype === 'percentage' || dtype === 'fixed' || dtype === 'flat') && !Number.isNaN(regularBase)) {
                 flashUnit = regularBase;
                 if (dtype === 'percentage') {
-                    flashUnit = Math.max(0, +(regularBase * (1 - dval / 100)).toFixed(2));
+                    flashUnit = Math.max(0, Math.round(regularBase * 100 * (1 - dval / 100)) / 100);
                 } else {
                     // fixed/flat
-                    flashUnit = Math.max(0, +(regularBase - dval).toFixed(2));
+                    flashUnit = Math.max(0, (Math.round(regularBase * 100) - Math.round(dval * 100)) / 100);
                 }
                 item.isFlashSale = 1;
             } else {
@@ -318,8 +318,8 @@ async function getCart(uid) {
 
             item.unitPriceBefore = unitBefore;
             item.unitPriceAfter = unitAfter;
-            item.lineTotalBefore = Number((unitBefore * quantity).toFixed(2));
-            item.lineTotalAfter = Number((unitAfter * quantity).toFixed(2));
+            item.lineTotalBefore = (Math.round(unitBefore * 100) * quantity) / 100;
+            item.lineTotalAfter = (Math.round(unitAfter * 100) * quantity) / 100;
         } else {
             // No flash → use existing sale/regular + override; before/after the same
             let base = !Number.isNaN(saleBase) ? saleBase : regularBase;
@@ -332,7 +332,7 @@ async function getCart(uid) {
             const unit = override != null ? override : base;
             item.unitPriceBefore = unit;
             item.unitPriceAfter = unit;
-            item.lineTotalBefore = Number((unit * quantity).toFixed(2));
+            item.lineTotalBefore = (Math.round(unit * 100) * quantity) / 100;
             item.lineTotalAfter = item.lineTotalBefore;
         }
     }
@@ -435,8 +435,8 @@ async function getCart(uid) {
                 if (item.unitPriceBefore != null && item.quantity != null) {
                     const before = Number(item.unitPriceBefore);
                     const after = (item.unitPriceAfter != null) ? Number(item.unitPriceAfter) : before;
-                    item.lineTotalBefore = Number((before * item.quantity).toFixed(2));
-                    item.lineTotalAfter = Number((after * item.quantity).toFixed(2));
+                    item.lineTotalBefore = (Math.round(before * 100) * item.quantity) / 100;
+                    item.lineTotalAfter = (Math.round(after * 100) * item.quantity) / 100;
                 }
                 continue;
             }
@@ -503,8 +503,8 @@ async function getCart(uid) {
             if (item.unitPriceAfter === undefined || item.unitPriceAfter === null) {
                 item.unitPriceAfter = item.unitPriceBefore;
             }
-            item.lineTotalBefore = Number((item.unitPriceBefore * item.quantity).toFixed(2));
-            item.lineTotalAfter = Number((item.unitPriceAfter * item.quantity).toFixed(2));
+            item.lineTotalBefore = (Math.round(item.unitPriceBefore * 100) * item.quantity) / 100;
+            item.lineTotalAfter = (Math.round(item.unitPriceAfter * 100) * item.quantity) / 100;
 
             // --- STOCK & AVAILABILITY LOGIC ---
             item.isAvailable = true;
@@ -568,9 +568,9 @@ async function getCart(uid) {
 
         // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
         const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-        const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
-        const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
-        const totalDiscount = Number((subtotal - total).toFixed(2));
+        const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
+        const total = selectedItems.reduce((sum, i) => sum + Math.round((i.lineTotalAfter || 0) * 100), 0) / 100;
+        const totalDiscount = (Math.round(subtotal * 100) - Math.round(total * 100)) / 100;
         const summary = { subtotal, total, totalDiscount, anyModifications: items.some(it => it.isFlashSale) };
 
         // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
@@ -595,7 +595,7 @@ async function getCart(uid) {
         } else {
             summary.shipping = 0;
         }
-        summary.total = Number((summary.total + summary.shipping).toFixed(2));
+        summary.total = (Math.round(summary.total * 100) + Math.round(summary.shipping * 100)) / 100;
 
         // Write to cartDetail table
         await cartModel.updateCartDetail(uid, summary);
@@ -646,8 +646,8 @@ async function getCart(uid) {
             if (item.unitPriceBefore != null && item.quantity != null) {
                 const before = Number(item.unitPriceBefore);
                 const after = (item.unitPriceAfter != null) ? Number(item.unitPriceAfter) : before;
-                item.lineTotalBefore = Number((before * item.quantity).toFixed(2));
-                item.lineTotalAfter = Number((after * item.quantity).toFixed(2));
+                item.lineTotalBefore = (Math.round(before * 100) * item.quantity) / 100;
+                item.lineTotalAfter = (Math.round(after * 100) * item.quantity) / 100;
             }
             console.log(`[INIT-COMBO] Item ${item.cartItemID}: preserve combo pricing`);
             continue;
@@ -721,8 +721,8 @@ async function getCart(uid) {
             item.unitPriceAfter = item.unitPriceBefore;
         }
 
-        item.lineTotalBefore = Number((item.unitPriceBefore * item.quantity).toFixed(2));
-        item.lineTotalAfter = Number((item.unitPriceAfter * item.quantity).toFixed(2));
+        item.lineTotalBefore = (Math.round(item.unitPriceBefore * 100) * item.quantity) / 100;
+        item.lineTotalAfter = (Math.round(item.unitPriceAfter * 100) * item.quantity) / 100;
 
         console.log(`[TOTALS] Item ${item.cartItemID}: unitPriceBefore=${item.unitPriceBefore}, unitPriceAfter=${item.unitPriceAfter}, lineTotalBefore=${item.lineTotalBefore}, lineTotalAfter=${item.lineTotalAfter}`);
 
@@ -786,9 +786,9 @@ async function getCart(uid) {
 
     // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
     const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-    const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
-    const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
-    const totalDiscount = Number((subtotal - total).toFixed(2));
+    const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
+    const total = selectedItems.reduce((sum, i) => sum + Math.round((i.lineTotalAfter || 0) * 100), 0) / 100;
+    const totalDiscount = (Math.round(subtotal * 100) - Math.round(total * 100)) / 100;
 
     const summary = { subtotal, total, totalDiscount, anyModifications };
 
@@ -814,7 +814,7 @@ async function getCart(uid) {
     } else {
         summary.shipping = 0;
     }
-    summary.total = Number((summary.total + summary.shipping).toFixed(2));
+    summary.total = (Math.round(summary.total * 100) + Math.round(summary.shipping * 100)) / 100;
 
     console.log(`[SUMMARY] subtotal=${subtotal}, total=${summary.total}, totalDiscount=${totalDiscount}, shipping=${summary.shipping}`);
 
@@ -861,7 +861,7 @@ function applyBuyXGetY(affectedItems, offer) {
         // Use cents math to avoid float issues
         const totalCents = unitArray.reduce((a, b) => a + Math.round(b * 100), 0);
         item.unitPriceAfter = totalCents / (item.quantity * 100);
-        item.unitPriceAfter = Number(item.unitPriceAfter.toFixed(2));
+        item.unitPriceAfter = Math.round(item.unitPriceAfter * 100) / 100;
 
         item.offerApplied = true;
         item.offerStatus = 'applied';
@@ -905,7 +905,7 @@ function applyBuyXAtXxx(affectedItems, offer) {
 
         const totalCents = unitArray.reduce((a, b) => a + Math.round(b * 100), 0);
         item.unitPriceAfter = totalCents / (item.quantity * 100);
-        item.unitPriceAfter = Number(item.unitPriceAfter.toFixed(2));
+        item.unitPriceAfter = Math.round(item.unitPriceAfter * 100) / 100;
 
         item.offerApplied = true;
         item.offerStatus = 'applied';
@@ -993,8 +993,8 @@ const updateCartItemQuantityWithStockCheck = async (uid, cartItemID, requestedQu
 
     // 6. Update quantity in DB
     // Calculate new totals using unitPriceBefore/After (to preserve any discounts/flash sale prices)
-    const lineTotalBefore = Number((cartItem.unitPriceBefore * finalQuantity).toFixed(2));
-    const lineTotalAfter = Number((cartItem.unitPriceAfter * finalQuantity).toFixed(2));
+    const lineTotalBefore = (Math.round(cartItem.unitPriceBefore * 100) * finalQuantity) / 100;
+    const lineTotalAfter = (Math.round(cartItem.unitPriceAfter * 100) * finalQuantity) / 100;
 
     await cartModel.updateCartItemQuantity(cartItemID, finalQuantity, lineTotalBefore, lineTotalAfter);
 

@@ -1,9 +1,10 @@
 const express = require('express')
 const brandAuthRouter = express.Router()
 const brandAuthService = require('../../services/brandAuthService')
+const rateLimiter = require('../../middlewares/rateLimiter')
 
 // POST /api/brand/register
-brandAuthRouter.post('/register', async (req, res) => {
+brandAuthRouter.post('/register', rateLimiter(5, 60), async (req, res) => {
     try {
         const { name, email, password } = req.body || {}
         if (!email || !password) {
@@ -41,7 +42,7 @@ brandAuthRouter.post('/register', async (req, res) => {
 })
 
 // POST /api/brand/login
-brandAuthRouter.post('/login', async (req, res) => {
+brandAuthRouter.post('/login', rateLimiter(5, 60), async (req, res) => {
     try {
         const { email, password } = req.body || {}
         if (!email || !password) {

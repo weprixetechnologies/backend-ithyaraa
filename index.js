@@ -1,5 +1,13 @@
-//EXTERNAL
 require('dotenv').config();
+
+// Validate critical payment environment variables on startup
+const requiredEnv = ['MERCHANT_ID', 'KEY', 'KEY_INDEX'];
+const missingEnv = requiredEnv.filter(name => !process.env[name]);
+if (missingEnv.length > 0) {
+    console.error(`CRITICAL CONFIGURATION ERROR: Missing required environment variables: ${missingEnv.join(', ')}`);
+    process.exit(1);
+}
+
 const express = require('express');
 const app = express();
 const cors = require('cors')
@@ -203,4 +211,15 @@ app.use('/api/brand/support', brandSupportRouter)
 
 app.listen(process.env.PORT, () => {
   console.log('Server Started');
+
+  // Load the order expiry queue worker
+  require('./queue/worker/orderExpiryWorker');
+
+  // Low-frequency safety-net check to catch missed order expiries every hour
+  const orderService = require('./services/orderService');
+  setInterval(() => {
+    orderService.runExpirySafetyNet().catch(err => {
+      console.error('[Safety Net Error] runExpirySafetyNet failed:', err);
+    });
+  }, 60 * 60 * 1000); // Every 1 hour
 });

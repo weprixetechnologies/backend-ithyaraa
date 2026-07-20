@@ -30,16 +30,39 @@ const recordCouponUsageForOrder = async (couponCode, uid, orderID) => {
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
+        
+        // 1. Lock the coupon row to perform a synchronized usage limit check
         const [couponRows] = await connection.query(
-            'SELECT couponID FROM coupons WHERE couponCode = ? LIMIT 1',
+            'SELECT couponID, couponUsage, usageLimit, maxUsagePerUser FROM coupons WHERE couponCode = ? LIMIT 1 FOR UPDATE',
             [couponCode]
         );
         if (!couponRows || couponRows.length === 0) {
             await connection.rollback();
             return { recorded: false, reason: 'coupon_not_found' };
         }
-        const couponID = couponRows[0].couponID;
+        
+        const { couponID, couponUsage, usageLimit, maxUsagePerUser } = couponRows[0];
 
+        // 2. Validate global usage limit
+        if (usageLimit !== null && couponUsage >= usageLimit) {
+            await connection.rollback();
+            return { recorded: false, reason: 'coupon_limit_exceeded' };
+        }
+
+        // 3. Validate max usage per user
+        if (maxUsagePerUser !== null) {
+            const [userUsageRows] = await connection.query(
+                'SELECT COUNT(*) AS cnt FROM coupon_user_usage WHERE couponID = ? AND uid = ?',
+                [couponID, uid]
+            );
+            const userUsage = Number(userUsageRows[0]?.cnt ?? 0);
+            if (userUsage >= maxUsagePerUser) {
+                await connection.rollback();
+                return { recorded: false, reason: 'user_limit_exceeded' };
+            }
+        }
+
+        // 4. Record the usage
         const [insertResult] = await connection.query(
             'INSERT IGNORE INTO coupon_user_usage (couponID, uid, orderID) VALUES (?, ?, ?)',
             [couponID, uid, orderID]
@@ -49,10 +72,12 @@ const recordCouponUsageForOrder = async (couponCode, uid, orderID) => {
             return { recorded: false, reason: 'already_recorded' };
         }
 
+        // 5. Safely increment the usage count
         await connection.query(
-            'UPDATE coupons SET couponUsage = couponUsage + 1 WHERE couponCode = ?',
-            [couponCode]
+            'UPDATE coupons SET couponUsage = couponUsage + 1 WHERE couponID = ?',
+            [couponID]
         );
+        
         await connection.commit();
         return { recorded: true };
     } catch (err) {

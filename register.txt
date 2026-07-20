@@ -41,14 +41,14 @@ The registration process is handled in `src/components/pageComponents/signupActi
 **Flow:**
 1.  **User Enters Details:** Name, Phone, Email, Password, Confirm Password, Refer Code.
 2.  **Send OTP:** User clicks "Sign Up".
-    *   **API:** `POST https://backend.ithyaraa.com/api/user/send-otp`
+    *   **API:** `POST http://localhost:7885/api/user/send-otp`
     *   **Payload:** `{ "phoneNumber": "+91<user_phone>" }`
     *   **Action:** Shows OTP entry screen.
 3.  **Verify OTP:** User enters 6-digit OTP and clicks "Verify OTP".
-    *   **API:** `POST https://backend.ithyaraa.com/api/user/verify-otp`
+    *   **API:** `POST http://localhost:7885/api/user/verify-otp`
     *   **Payload:** `{ "phoneNumber": "+91<user_phone>", "otp": "<user_otp>" }`
 4.  **Create User:** If OTP verification is successful, the app immediately calls the create user API.
-    *   **API:** `POST https://backend.ithyaraa.com/api/user/create-user`
+    *   **API:** `POST http://localhost:7885/api/user/create-user`
     *   **Payload:**
         ```json
         {
@@ -69,7 +69,7 @@ The login process is handled in `src/components/pageComponents/loginAction.jsx`.
 **Flow:**
 1.  **User Enters Credentials:** Phone number and Password.
 2.  **Login:** User clicks "Sign In".
-    *   **API:** `POST https://backend.ithyaraa.com/api/user/login`
+    *   **API:** `POST http://localhost:7885/api/user/login`
     *   **Payload:**
         ```json
         {

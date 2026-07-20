@@ -549,9 +549,9 @@ const getProductDetails = async (productID) => {
             let salePrice = Number(v.variationSalePrice ?? v.variationPrice);
             if (!Number.isNaN(basePrice)) {
                 if (discountType === 'percentage') {
-                    salePrice = Math.max(0, +(basePrice * (1 - discountValue / 100)).toFixed(2));
+                    salePrice = Math.max(0, Math.round(basePrice * 100 * (1 - discountValue / 100)) / 100);
                 } else if (discountType === 'fixed' || discountType === 'flat') {
-                    salePrice = Math.max(0, +(basePrice - discountValue).toFixed(2));
+                    salePrice = Math.max(0, (Math.round(basePrice * 100) - Math.round(discountValue * 100)) / 100);
                 }
             }
             return { ...v, variationSalePrice: String(salePrice.toFixed ? salePrice.toFixed(2) : salePrice) };

@@ -21,11 +21,12 @@ affiliateRouter.put('/approve-payout/:txnID', authAdminMiddleware.verifyAccessTo
 affiliateRouter.put('/reject-payout/:txnID', authAdminMiddleware.verifyAccessToken, affiliateController.rejectPayout);
 
 // User routes for bank account management
-affiliateRouter.post('/bank-account', authAdminMiddleware.verifyAccessToken, affiliateController.addBankAccount);
-affiliateRouter.get('/bank-accounts', authAdminMiddleware.verifyAccessToken, affiliateController.getBankAccounts);
-affiliateRouter.get('/bank-account/:bankAccountID', authAdminMiddleware.verifyAccessToken, affiliateController.getBankAccount);
-affiliateRouter.put('/bank-account/set-default', authAdminMiddleware.verifyAccessToken, affiliateController.setDefaultBankAccount);
-affiliateRouter.delete('/bank-account/:bankAccountID', authAdminMiddleware.verifyAccessToken, affiliateController.deleteBankAccount);
+const authUserMiddleware = require('./../middleware/authUserMiddleware')
+affiliateRouter.post('/bank-account', authUserMiddleware.verifyAccessToken, affiliateController.addBankAccount);
+affiliateRouter.get('/bank-accounts', authUserMiddleware.verifyAccessToken, affiliateController.getBankAccounts);
+affiliateRouter.get('/bank-account/:bankAccountID', authUserMiddleware.verifyAccessToken, affiliateController.getBankAccount);
+affiliateRouter.put('/bank-account/set-default', authUserMiddleware.verifyAccessToken, affiliateController.setDefaultBankAccount);
+affiliateRouter.delete('/bank-account/:bankAccountID', authUserMiddleware.verifyAccessToken, affiliateController.deleteBankAccount);
 
 // Admin routes for bank account management
 affiliateRouter.get('/admin/bank-accounts', authAdminMiddleware.verifyAccessToken, affiliateController.getAllBankAccountRequests);

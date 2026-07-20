@@ -554,12 +554,12 @@ async function handleRegularOrderWebhook(
         console.log('[WEBHOOK-ORDER][DB-BEFORE-UPDATE] processedStatus:', JSON.stringify(processedStatus, null, 2));
 
         // Update regular order payment status
-        const updated = await orderModel.updateOrderPaymentStatus(
+        const updateResult = await orderModel.updateOrderPaymentStatus(
             merchantID,
             paymentStatus
         );
 
-        if (!updated) {
+        if (!updateResult || !updateResult.success) {
             console.warn(`[WEBHOOK-ORDER] Order not found or update failed: ${merchantID}`);
             return;
         }
@@ -568,8 +568,8 @@ async function handleRegularOrderWebhook(
         console.log(`[WEBHOOK-ORDER] Payment Status: ${paymentStatus}`);
         console.log(`[WEBHOOK-ORDER] Is Success: ${processedStatus.isSuccess}`);
 
-        // Send order confirmation and seller notifications if payment successful
-        if (processedStatus.isSuccess) {
+        // Send order confirmation and seller notifications if payment status changed to successful
+        if (processedStatus.isSuccess && updateResult.oldStatus === 'pending' && paymentStatus === 'successful') {
             await sendOrderConfirmationAndNotifications(merchantID);
             console.log(`[WEBHOOK-ORDER] Confirmation emails sent for order ${order.orderID}`);
 
@@ -598,7 +598,7 @@ async function handleRegularOrderWebhook(
                 }
             }
         } else {
-            console.log(`[WEBHOOK-ORDER] Payment not successful - skipping email notifications`);
+            console.log(`[WEBHOOK-ORDER] Skipping email notifications: previousStatus=${updateResult.oldStatus}, newStatus=${paymentStatus}, isSuccess=${processedStatus.isSuccess}`);
         }
 
     } catch (error) {

@@ -7,8 +7,9 @@ const verificationController = require('./../controllers/verificationController'
 const authMiddleware = require('./../middleware/authUserMiddleware')
 const authAdminMiddleware = require('./../middleware/authAdminMiddleware')
 
-userRouter.post('/create-user', usersController.createUser);
-userRouter.post('/login', usersController.loginUser);
+const rateLimiter = require('../middlewares/rateLimiter');
+userRouter.post('/create-user', rateLimiter(5, 60), usersController.createUser);
+userRouter.post('/login', rateLimiter(5, 60), usersController.loginUser);
 
 // Test route to verify router is working
 userRouter.get('/test', (req, res) => {
@@ -26,16 +27,16 @@ userRouter.put(
 
 // Forgot password: send reset link
 userRouter.post('/forgot-password-tokenised', usersController.forgotPasswordTokenised); //will use later
-userRouter.post('/forgot-password', usersController.forgotPasswordController); //in use with otp
-userRouter.post("/verify-otp-reset-password", usersController.verifyOtpResetPassword);
+userRouter.post('/forgot-password', rateLimiter(5, 60), usersController.forgotPasswordController); //in use with otp
+userRouter.post("/verify-otp-reset-password", rateLimiter(5, 60), usersController.verifyOtpResetPassword);
 // Reset password: user clicks link
 userRouter.post('/reset-password-tokenised', usersController.resetPasswordTokenised);
 userRouter.get('/verify-email/:token', usersController.verifyEmail);
 
 // Externally trigger verification email sending
 userRouter.post('/send-verification-email', usersController.sendVerificationEmail);
-userRouter.post('/send-otp', otpController.sendOtpController)
-userRouter.post('/verify-otp', otpController.verifyOtp)
+userRouter.post('/send-otp', rateLimiter(5, 60), otpController.sendOtpController)
+userRouter.post('/verify-otp', rateLimiter(10, 60), otpController.verifyOtp)
 userRouter.get('/check-phone', usersController.checkPhone)
 
 // Payout OTP routes (protected)

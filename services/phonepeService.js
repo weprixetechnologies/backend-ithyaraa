@@ -2,9 +2,9 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 // Load from environment
-const merchantId = process.env.MERCHANT_ID || 'PGTESTPAYUAT86';
-const key = process.env.KEY || '96434309-7796-489d-8924-ab56988a6076';
-const keyIndex = process.env.KEY_INDEX || '1';
+const merchantId = process.env.MERCHANT_ID;
+const key = process.env.KEY;
+const keyIndex = process.env.KEY_INDEX;
 
 // PhonePe Hermes API URLs
 // Matching the payment API pattern:
@@ -84,7 +84,8 @@ async function checkPaymentStatus(merchantID) {
                 'X-VERIFY': xVerify,
                 'X-MERCHANT-ID': merchantId,
                 'Accept': 'application/json'
-            }
+            },
+            timeout: 5000 // 5 seconds timeout to prevent hanging connections
         });
 
         console.log(`[PhonePe Status Check] Response status: ${response.status} ${response.statusText}`);

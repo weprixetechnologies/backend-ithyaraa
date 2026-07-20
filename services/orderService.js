@@ -50,9 +50,9 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     }
 
     // Recalculate summary for selected items only (same as cart: subtotal = sum(regularPrice * quantity))
-    const subtotal = Number(selectedItems.reduce((sum, i) => sum + (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0), 0).toFixed(2));
-    const total = Number(selectedItems.reduce((sum, i) => sum + (i.lineTotalAfter || 0), 0).toFixed(2));
-    const totalDiscount = Number((subtotal - total).toFixed(2));
+    const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
+    const total = selectedItems.reduce((sum, i) => sum + Math.round((i.lineTotalAfter || 0) * 100), 0) / 100;
+    const totalDiscount = (Math.round(subtotal * 100) - Math.round(total * 100)) / 100;
     cartData.summary = { ...cartData.summary, subtotal, total, totalDiscount };
     cartData.items = selectedItems;
 
@@ -155,8 +155,7 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
             paidWallet = Math.min(requested, available, payableBeforeWallet);
             if (paidWallet > 0) {
                 isWalletUsed = true;
-                // Deduct wallet from user balance (don't modify finalSummary.total)
-                await db.query('UPDATE users SET balance = balance - ? WHERE uid = ?', [paidWallet, uid]);
+                // Note: Wallet balance is now deducted transactionally inside orderModel.createOrder
                 // Calculate remaining payable (for payment mode decision only)
                 const remainingPayable = Math.max(0, payableBeforeWallet - paidWallet);
                 // If fully paid via wallet, set paymentMode to FULL_COIN
@@ -175,18 +174,11 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     // Resolve shipping snapshot from address table for this addressID
     const addressModel = require('../model/addressModel');
     const address = await addressModel.getAddressByID(addressID);
+    const addressSnapshot = getAddressSnapshot(address);
     const newOrder = await orderModel.createOrder({
         uid,
         addressID,
-        shippingName: null, // name not stored on address; keep null or derive elsewhere if needed
-        shippingPhone: address ? (address.phoneNumber || address.phonenumber || '') : '',
-        shippingEmail: address ? (address.emailID || address.email || '') : '',
-        shippingLine1: address ? (address.line1 || address.addressLine1 || '') : '',
-        shippingLine2: address ? (address.line2 || address.addressLine2 || '') : '',
-        shippingCity: address ? (address.city || '') : '',
-        shippingState: address ? (address.state || '') : '',
-        shippingPincode: address ? (address.pincode || '') : '',
-        shippingLandmark: address ? (address.landmark || '') : '',
+        ...addressSnapshot,
         paymentMode,
         couponCode,
         couponDiscount,
@@ -241,32 +233,24 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 
                 if (referrerUser) {
                     // Calculate total commission for this referrer (dynamic % or 10% default)
-                    let totalCommission = 0;
                     const commissionRate = (referrerUser.commissionPercentage != null)
                         ? (Number(referrerUser.commissionPercentage) / 100)
                         : 0.10;
-
+                    let totalCommissionPaise = 0;
                     for (const item of cartData.items) {
-                        const itemAmount = (item.salePrice || item.regularPrice || 0) * item.quantity;
-                        totalCommission += itemAmount * commissionRate;
+                        const itemAmountPaise = Math.round((item.salePrice || item.regularPrice || 0) * 100) * item.quantity;
+                        totalCommissionPaise += Math.round(itemAmountPaise * commissionRate);
                     }
 
-                    if (totalCommission > 0) {
-                        totalCommission = Math.round(totalCommission * 100) / 100;
+                    if (totalCommissionPaise > 0) {
+                        let totalCommission = totalCommissionPaise / 100;
                         creditedUsers.add(referrerUser.uid);
-
-                        // Execute both operations in parallel (link to order for delivery/return handling)
-                        await Promise.all([
-                            usersModel.incrementPendingPayment(referrerUser.uid, totalCommission),
-                            affiliateModel.createAffiliateTransaction({
-                                txnID: randomUUID(),
-                                uid: referrerUser.uid,
-                                status: 'pending',
-                                amount: totalCommission,
-                                type: 'incoming',
-                                orderID: newOrder.orderID
-                            })
-                        ]);
+                        // Execute both operations in a unified transaction
+                        await affiliateModel.recordAffiliateCommission({
+                            uid: referrerUser.uid,
+                            amount: totalCommission,
+                            orderID: newOrder.orderID
+                        });
                     }
                 }
             }
@@ -297,24 +281,20 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                         ? (Number(assignedUser.commissionPercentage) / 100)
                         : 0.20;
 
-                    const commission = Math.round(orderTotal * commissionRate * 100) / 100;
+                    const orderTotalPaise = Math.round(orderTotal * 100);
+                    const commissionPaise = Math.round(orderTotalPaise * commissionRate);
+                    const commission = commissionPaise / 100;
                     console.log('Commission:', commission);
 
 
                     if (commission > 0) {
                         creditedUsers.add(assignedUser.uid);
-
-                        await Promise.all([
-                            usersModel.incrementPendingPayment(assignedUser.uid, commission),
-                            affiliateModel.createAffiliateTransaction({
-                                txnID: randomUUID(),
-                                uid: assignedUser.uid,
-                                status: 'pending',
-                                amount: commission,
-                                type: 'incoming',
-                                orderID: newOrder.orderID
-                            })
-                        ]);
+                        // Execute both operations in a unified transaction
+                        await affiliateModel.recordAffiliateCommission({
+                            uid: assignedUser.uid,
+                            amount: commission,
+                            orderID: newOrder.orderID
+                        });
                     }
                 }
             }
@@ -336,6 +316,12 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     } catch (coinErr) {
         console.error('Failed to create pending coins:', coinErr);
         // Non-blocking
+    }
+
+    // Schedule delayed order expiry for online payments
+    if (newOrder && newOrder.orderID && paymentMode === 'online') {
+        const { scheduleOrderExpiry } = require('../queue/orderExpiryProducer');
+        await scheduleOrderExpiry(newOrder.orderID, 30 * 60 * 1000); // 30 minutes
     }
 
     return newOrder;
@@ -443,7 +429,7 @@ async function validateAndApplyCoupon(couponCode, cartData, uid) {
 
         return {
             success: true,
-            discount: parseFloat(Number(discount).toFixed(2)),
+            discount: (Math.round(discount * 100) / 100),
             coupon: {
                 couponID: coupon.couponID,
                 couponCode: coupon.couponCode,
@@ -565,7 +551,29 @@ module.exports.getOrderItemsByUid = getOrderItemsByUid;
 module.exports.getOrderSummaries = getOrderSummaries;
 module.exports.getOrderDetailsByOrderID = getOrderDetailsByOrderID;
 
+function getAddressSnapshot(address) {
+    return {
+        shippingName: null, // name not stored on address; keep null or derive elsewhere if needed
+        shippingPhone: address ? (address.phoneNumber || address.phonenumber || '') : '',
+        shippingEmail: address ? (address.emailID || address.email || '') : '',
+        shippingLine1: address ? (address.line1 || address.addressLine1 || '') : '',
+        shippingLine2: address ? (address.line2 || address.addressLine2 || '') : '',
+        shippingCity: address ? (address.city || '') : '',
+        shippingState: address ? (address.state || '') : '',
+        shippingPincode: address ? (address.pincode || '') : '',
+        shippingLandmark: address ? (address.landmark || '') : ''
+    };
+}
+
 async function updateOrder(orderID, updateData) {
+    if (updateData.addressID !== undefined) {
+        const addressModel = require('../model/addressModel');
+        const address = await addressModel.getAddressByID(updateData.addressID);
+        if (address) {
+            const snapshot = getAddressSnapshot(address);
+            Object.assign(updateData, snapshot);
+        }
+    }
     return await orderModel.updateOrderByID(orderID, updateData);
 }
 
@@ -1055,15 +1063,40 @@ async function updateOrderStatus(orderId, orderStatus) {
 
 // Update payment status
 async function updatePaymentStatus(orderId, paymentStatus) {
+    const connection = await db.getConnection();
     try {
-        const result = await db.query(
+        await connection.beginTransaction();
+
+        const [rows] = await connection.query(
+            'SELECT paymentStatus FROM orderDetail WHERE orderID = ? FOR UPDATE',
+            [orderId]
+        );
+        if (rows.length === 0) {
+            await connection.rollback();
+            return null;
+        }
+
+        const oldStatus = rows[0].paymentStatus;
+
+        const [result] = await connection.query(
             'UPDATE orderDetail SET paymentStatus = ? WHERE orderID = ?',
             [paymentStatus, orderId]
         );
 
-        if (result[0].affectedRows === 0) {
+        if (result.affectedRows === 0) {
+            await connection.rollback();
             return null;
         }
+
+        // Check if transition warrants stock restoration
+        const isFailure = ['failed', 'refunded'].includes(String(paymentStatus).toLowerCase());
+        const wasPending = ['pending'].includes(String(oldStatus).toLowerCase());
+        if (isFailure && wasPending) {
+            const orderModel = require('../model/orderModel');
+            await orderModel.restoreOrderStock(orderId, connection);
+        }
+
+        await connection.commit();
 
         // Return updated order
         const [updatedOrder] = await db.query(
@@ -1073,8 +1106,11 @@ async function updatePaymentStatus(orderId, paymentStatus) {
 
         return updatedOrder[0];
     } catch (error) {
+        await connection.rollback();
         console.error('Error updating payment status:', error);
         throw error;
+    } finally {
+        connection.release();
     }
 }
 
@@ -1791,6 +1827,142 @@ async function performReversals(item, order) {
     }
 }
 
+async function handleOrderExpiry(orderID) {
+    const db = require('../utils/dbconnect');
+    const orderModel = require('../model/orderModel');
+    const phonepeService = require('./phonepeService');
+
+    // 1. Transaction 1: Lock the row, check current status, then release transaction/lock
+    let orderDetail = null;
+    let connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [rows] = await connection.query(
+            'SELECT orderID, paymentStatus, paymentMode, merchantID, txnID, uid FROM orderDetail WHERE orderID = ? FOR UPDATE',
+            [orderID]
+        );
+        if (rows.length === 0) {
+            await connection.rollback();
+            console.log(`[Order Expiry] Order ${orderID} not found in database.`);
+            return;
+        }
+        orderDetail = rows[0];
+        if (orderDetail.paymentStatus !== 'pending') {
+            await connection.rollback();
+            console.log(`[Order Expiry] Order ${orderID} is already in state "${orderDetail.paymentStatus}". No action needed.`);
+            return;
+        }
+        await connection.commit();
+    } catch (err) {
+        await connection.rollback();
+        console.error(`[Order Expiry] Error during initial status check for order ${orderID}:`, err);
+        return;
+    } finally {
+        connection.release();
+    }
+
+    // 2. Outbound Gateway Status Call (no active DB transaction or lock)
+    const merchantTransactionId = orderDetail.merchantID || orderDetail.txnID;
+    let paymentSucceeded = false;
+    let gatewayQueryFailed = false;
+
+    if (merchantTransactionId) {
+        try {
+            const gatewayResult = await phonepeService.checkPaymentStatus(merchantTransactionId);
+            if (gatewayResult.success) {
+                const statusData = gatewayResult.data?.data || gatewayResult.data?.response || gatewayResult.data || {};
+                const processedStatus = phonepeService.processPaymentStatus(statusData);
+                if (processedStatus.isSuccess) {
+                    paymentSucceeded = true;
+                }
+            } else {
+                console.log(`[Order Expiry] Gateway returned success=false for transaction ${merchantTransactionId}: ${gatewayResult.error}`);
+                // Only proceed to cancel if gateway confirmed the transaction does not exist (HTTP 204)
+                if (gatewayResult.httpStatus === 204) {
+                    paymentSucceeded = false;
+                } else {
+                    gatewayQueryFailed = true; // Abstain due to general gateway error/timeout
+                }
+            }
+        } catch (gatewayErr) {
+            console.error(`[Order Expiry] Gateway status check failed for order ${orderID}:`, gatewayErr);
+            gatewayQueryFailed = true;
+        }
+    }
+
+    // If query failed (e.g. timeout or network issue), abstain from acting
+    if (gatewayQueryFailed) {
+        console.log(`[Order Expiry] Gateway status check failed/timed out. Abstaining from order cancellation.`);
+        return;
+    }
+
+    // 3. Transaction 2: Re-lock the row, re-verify status, write outcome, commit
+    connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [rows] = await connection.query(
+            'SELECT orderID, paymentStatus FROM orderDetail WHERE orderID = ? FOR UPDATE',
+            [orderID]
+        );
+        if (rows.length === 0) {
+            await connection.rollback();
+            return;
+        }
+
+        const currentOrder = rows[0];
+        // Re-verify that it is still pending in case it resolved while gateway call was in flight
+        if (currentOrder.paymentStatus !== 'pending') {
+            await connection.rollback();
+            console.log(`[Order Expiry] Order ${orderID} payment status resolved to "${currentOrder.paymentStatus}" during gateway query. Abstaining.`);
+            return;
+        }
+
+        if (paymentSucceeded) {
+            console.log(`[Order Expiry] Gateway check confirms payment SUCCEEDED for order ${orderID}. Updating order...`);
+            await connection.query(
+                "UPDATE orderDetail SET paymentStatus = 'successful' WHERE orderID = ?",
+                [orderID]
+            );
+        } else {
+            console.log(`[Order Expiry] Gateway check confirms payment DID NOT succeed for order ${orderID}. Cancelling order and restoring stock...`);
+            await connection.query(
+                "UPDATE orderDetail SET paymentStatus = 'failed', orderStatus = 'cancelled' WHERE orderID = ?",
+                [orderID]
+            );
+            await orderModel.restoreOrderStock(orderID, connection);
+        }
+
+        await connection.commit();
+    } catch (err) {
+        await connection.rollback();
+        console.error(`[Order Expiry] Error during second transaction commit for order ${orderID}:`, err);
+    } finally {
+        connection.release();
+    }
+}
+
+async function runExpirySafetyNet() {
+    const db = require('../utils/dbconnect');
+    try {
+        console.log('[Expiry Safety Net] Running safety-net scan for stuck pending online orders...');
+        // Find online orders stuck in pending for more than 1 hour (safety buffer)
+        const [stuckOrders] = await db.query(
+            `SELECT orderID FROM orderDetail 
+             WHERE paymentStatus = 'pending' 
+             AND paymentMode = 'online' 
+             AND created < NOW() - INTERVAL 1 HOUR`
+        );
+
+        for (const order of stuckOrders) {
+            console.log(`[Expiry Safety Net] Processing stuck pending order ${order.orderID}`);
+            await handleOrderExpiry(order.orderID);
+        }
+    } catch (err) {
+        console.error('[Expiry Safety Net] Error in safety-net check:', err);
+    }
+}
+
 module.exports.getAdminOrderDetails = getAdminOrderDetails;
 module.exports.getAllOrders = getAllOrders;
 module.exports.updateOrderStatus = updateOrderStatus;
@@ -1800,6 +1972,8 @@ module.exports.generateInvoice = generateInvoice;
 module.exports.emailInvoice = emailInvoice;
 module.exports.emailInvoiceToCustomer = emailInvoiceToCustomer;
 module.exports.approveReturnRequest = approveReturnRequest;
+module.exports.handleOrderExpiry = handleOrderExpiry;
+module.exports.runExpirySafetyNet = runExpirySafetyNet;
 
 // HELPER FUNCTIONS
 
