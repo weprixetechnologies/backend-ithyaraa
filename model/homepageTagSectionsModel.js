@@ -1,30 +1,36 @@
 const db = require('../utils/dbconnect');
 
-// Ensure table exists on model initialization
+let tableEnsuredPromise = null;
 const ensureTable = async () => {
-    try {
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS homepage_tag_sections (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                tag VARCHAR(100) NOT NULL UNIQUE,
-                description TEXT DEFAULT NULL,
-                position INT DEFAULT 0,
-                isActive TINYINT(1) DEFAULT 1,
-                createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        `);
-    } catch (err) {
-        console.error('Error ensuring homepage_tag_sections table:', err);
+    if (!tableEnsuredPromise) {
+        tableEnsuredPromise = (async () => {
+            try {
+                await db.query(`
+                    CREATE TABLE IF NOT EXISTS homepage_tag_sections (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        title VARCHAR(255) NOT NULL,
+                        tag VARCHAR(100) NOT NULL UNIQUE,
+                        description TEXT DEFAULT NULL,
+                        position INT DEFAULT 0,
+                        isActive TINYINT(1) DEFAULT 1,
+                        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    )
+                `);
+            } catch (err) {
+                console.error('Error ensuring homepage_tag_sections table:', err);
+                tableEnsuredPromise = null; // reset so it retries on next call if failed
+            }
+        })();
     }
+    return tableEnsuredPromise;
 };
-ensureTable();
 
 /**
  * Create a new tag section
  */
 const createTagSection = async ({ title, tag, description = null, position = 0, isActive = 1 }) => {
+    await ensureTable();
     try {
         const cleanTag = String(tag).trim().toLowerCase().replace(/\s+/g, '_');
         const [result] = await db.query(
@@ -43,6 +49,7 @@ const createTagSection = async ({ title, tag, description = null, position = 0, 
  * Get all tag sections with product count
  */
 const getAllTagSections = async () => {
+    await ensureTable();
     try {
         const [sections] = await db.query(
             `SELECT id, title, tag, description, position, isActive, createdAt, updatedAt
