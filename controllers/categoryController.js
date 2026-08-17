@@ -94,6 +94,7 @@ const editCategory = async (req, res) => {
 
         try {
             await deleteCache(SCOPE.CATEGORIES_ALL);
+            await deleteCache(SCOPE.CATEGORIES_FEATURED);
             await deleteCache(SCOPE.CATEGORY_DETAIL(categoryID));
         } catch (e) { console.error(e); }
 
@@ -120,6 +121,7 @@ const deleteCategory = async (req, res) => {
 
         try {
             await deleteCache(SCOPE.CATEGORIES_ALL);
+            await deleteCache(SCOPE.CATEGORIES_FEATURED);
             await deleteCache(SCOPE.CATEGORY_DETAIL(categoryID));
         } catch (e) { console.error(e); }
 
@@ -132,8 +134,14 @@ const deleteCategory = async (req, res) => {
 
 const getFeaturedCategories = async (req, res) => {
     try {
+        const cached = await getCache(SCOPE.CATEGORIES_FEATURED);
+        if (cached) {
+            return res.status(200).json({ success: true, data: cached, cached: true });
+        }
+
         const result = await categoryService.fetchFeaturedCategories();
         if (result.success) {
+            try { await setCache(SCOPE.CATEGORIES_FEATURED, result.data); } catch (e) { console.error(e); }
             res.status(200).json(result);
         } else {
             res.status(500).json(result);
@@ -152,7 +160,10 @@ const bulkSetFeatured = async (req, res) => {
     try {
         const result = await categoryService.bulkSetFeaturedCategories(categoryIDs, isFeatured);
         if (result.success) {
-            try { await deleteCache(SCOPE.CATEGORIES_ALL); } catch (e) { console.error(e); }
+            try {
+                await deleteCache(SCOPE.CATEGORIES_ALL);
+                await deleteCache(SCOPE.CATEGORIES_FEATURED);
+            } catch (e) { console.error(e); }
             res.status(200).json(result);
         } else {
             res.status(400).json(result);
@@ -171,7 +182,10 @@ const reorderFeaturedCategories = async (req, res) => {
     try {
         const result = await categoryService.reorderFeaturedCategories(reorderedItems);
         if (result.success) {
-            try { await deleteCache(SCOPE.CATEGORIES_ALL); } catch (e) { console.error(e); }
+            try {
+                await deleteCache(SCOPE.CATEGORIES_ALL);
+                await deleteCache(SCOPE.CATEGORIES_FEATURED);
+            } catch (e) { console.error(e); }
             res.status(200).json(result);
         } else {
             res.status(400).json(result);

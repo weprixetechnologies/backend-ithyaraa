@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/homepageTagSectionsController');
 
+// Public route - Get active sections with products (for frontend)
+router.get('/active', controller.getActiveTagSections);
+
 router.get('/', controller.getAllTagSections);
 router.post('/', controller.createTagSection);
 router.put('/:id', controller.updateTagSection);

@@ -17,6 +17,19 @@ const ensureTable = async () => {
                         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     )
                 `);
+
+                // Check if table is empty and seed default sections if needed
+                const [existing] = await db.query(`SELECT COUNT(*) as cnt FROM homepage_tag_sections`);
+                if (existing[0]?.cnt === 0) {
+                    console.log('[homepage_tag_sections] Seeding default section tags...');
+                    await db.query(`
+                        INSERT INTO homepage_tag_sections (title, tag, description, position, isActive)
+                        VALUES 
+                        ('Curated With Brands', 'brand_picks', 'Timeless Collections You\\'ll Love', 1, 1),
+                        ('The New Edit', 'new_arrivals', 'Collections You Will Definitely Love', 2, 1),
+                        ('Trending Picks', 'dress_month', 'Our Curated Dress of the Month', 3, 1)
+                    `);
+                }
             } catch (err) {
                 console.error('Error ensuring homepage_tag_sections table:', err);
                 tableEnsuredPromise = null; // reset so it retries on next call if failed
@@ -266,6 +279,66 @@ const bulkRemoveTagFromProducts = async (tag, productIDs) => {
     }
 };
 
+/**
+ * Get all active tag sections along with their tagged products
+ */
+const getActiveTagSectionsWithProducts = async (productLimit = 20) => {
+    await ensureTable();
+    try {
+        const [sections] = await db.query(
+            `SELECT id, title, tag, description, position, isActive, createdAt, updatedAt
+             FROM homepage_tag_sections
+             WHERE isActive = 1
+             ORDER BY position ASC, createdAt DESC`
+        );
+
+        if (sections.length === 0) {
+            return { success: true, data: [] };
+        }
+
+        const enriched = await Promise.all(
+            sections.map(async (sec) => {
+                const cleanTag = String(sec.tag).trim().toLowerCase();
+                const tagPattern = `%${cleanTag}%`;
+
+                const [rows] = await db.query(
+                    `SELECT productID, name, sectionid, regularPrice, salePrice, discountType, discountValue,
+                            offerID, featuredImage, brand, categories, type, status, createdAt
+                     FROM products
+                     WHERE (sectionid = ? OR sectionid LIKE ? OR FIND_IN_SET(?, sectionid))
+                       AND isDeleted = 0
+                     ORDER BY createdAt DESC
+                     LIMIT ?`,
+                    [cleanTag, tagPattern, cleanTag, Number(productLimit)]
+                );
+
+                const parsedProducts = rows.map(p => {
+                    let featuredImage = p.featuredImage;
+                    let categories = p.categories;
+                    try { if (typeof featuredImage === 'string') featuredImage = JSON.parse(featuredImage); } catch (_) {}
+                    try { if (typeof categories === 'string') categories = JSON.parse(categories); } catch (_) {}
+                    return { ...p, featuredImage, categories };
+                });
+
+                return {
+                    id: sec.id,
+                    title: sec.title,
+                    tag: sec.tag,
+                    description: sec.description,
+                    position: sec.position,
+                    isActive: Boolean(sec.isActive),
+                    products: parsedProducts
+                };
+            })
+        );
+
+        return { success: true, data: enriched };
+    } catch (error) {
+        console.error('Error in getActiveTagSectionsWithProducts:', error);
+        return { success: false, error: error.message, data: [] };
+    }
+};
+
 module.exports = {
     createTagSection,
     getAllTagSections,
@@ -274,5 +347,6 @@ module.exports = {
     deleteTagSection,
     getProductsByTag,
     bulkAddTagToProducts,
-    bulkRemoveTagFromProducts
+    bulkRemoveTagFromProducts,
+    getActiveTagSectionsWithProducts
 };

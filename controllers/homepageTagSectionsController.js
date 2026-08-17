@@ -132,7 +132,23 @@ const bulkRemoveTag = async (req, res) => {
     }
 };
 
+/**
+ * Get active tag sections with products for public homepage (cached)
+ */
+const getActiveTagSections = async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 20;
+        const result = await service.getActiveTagSectionsCached(limit);
+        if (!result.success) return res.status(500).json(result);
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Error in getActiveTagSections:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
+    getActiveTagSections,
     getAllTagSections,
     createTagSection,
     updateTagSection,

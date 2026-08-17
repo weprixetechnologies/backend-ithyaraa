@@ -2,7 +2,8 @@ const model = require('../model/homepageTagSectionsModel');
 const { getCache, setCache, deleteCache, clearByPattern } = require('../utils/cacheHelper');
 
 const CACHE_TTL_SECTION_PRODUCTS = 3600; // 1 hour TTL
-const getCacheKeyForTag = (tag) => `cache:section_products:${String(tag).trim().toLowerCase()}`;
+const getCacheKeyForTag = (tag) => `section_products:${String(tag).trim().toLowerCase()}`;
+const CACHE_KEY_ACTIVE_SECTIONS = 'homepage_tag_sections:active_with_products';
 
 /**
  * Re-prime (invalidate and immediately re-cache) section products
@@ -11,21 +12,59 @@ const reprimeTagCache = async (tag) => {
     const cleanTag = String(tag).trim().toLowerCase();
     const cacheKey = getCacheKeyForTag(cleanTag);
     try {
-        console.log(`[INSTANT CACHE INVALIDATION] Clearing key: ${cacheKey}`);
+        console.log(`[INSTANT CACHE INVALIDATION] Clearing keys: ${cacheKey}, ${CACHE_KEY_ACTIVE_SECTIONS}`);
         await deleteCache(cacheKey);
+        await clearByPattern(`${CACHE_KEY_ACTIVE_SECTIONS}*`);
         await clearByPattern(`products:page:*`); // Also clear product list caches
 
-        // Fetch fresh products from DB
+        // Fetch fresh products from DB for single tag
         const freshData = await model.getProductsByTag(cleanTag, { page: 1, limit: 50 });
 
         if (freshData && freshData.success) {
             console.log(`[INSTANT RE-CACHE] Setting fresh data into Redis for tag '${cleanTag}' (${freshData.data.length} products)`);
             await setCache(cacheKey, freshData, CACHE_TTL_SECTION_PRODUCTS);
         }
+
+        // Also re-prime active sections with products for homepage
+        const freshActive = await model.getActiveTagSectionsWithProducts(20);
+        if (freshActive && freshActive.success) {
+            console.log(`[INSTANT RE-CACHE] Setting fresh active tag sections into Redis (${freshActive.data.length} sections)`);
+            await setCache(`${CACHE_KEY_ACTIVE_SECTIONS}:20`, freshActive, CACHE_TTL_SECTION_PRODUCTS);
+        }
+
         return freshData;
     } catch (err) {
         console.error(`Error in reprimeTagCache for tag '${cleanTag}':`, err);
     }
+};
+
+/**
+ * Get active tag sections along with their tagged products (Redis cached)
+ */
+const getActiveTagSectionsCached = async (productLimit = 20) => {
+    const cacheKey = `${CACHE_KEY_ACTIVE_SECTIONS}:${productLimit}`;
+    try {
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            console.log(`[CACHE HIT] Active homepage tag sections with products`);
+            return cached;
+        }
+    } catch (err) {
+        console.error('Error fetching cached active tag sections:', err);
+    }
+
+    console.log(`[CACHE MISS] Fetching active homepage tag sections from DB`);
+    const freshData = await model.getActiveTagSectionsWithProducts(productLimit);
+
+    if (freshData && freshData.success) {
+        try {
+            await setCache(cacheKey, freshData, CACHE_TTL_SECTION_PRODUCTS);
+        } catch (err) {
+            console.error('Error setting cache for active tag sections:', err);
+        }
+    }
+
+    return freshData;
 };
 
 /**
@@ -86,8 +125,15 @@ const deleteSectionTag = async (id) => {
     const section = await model.getTagSectionByTag(id);
     const result = await model.deleteTagSection(id);
 
-    if (result.success && section && section.tag) {
-        await deleteCache(getCacheKeyForTag(section.tag));
+    if (result.success) {
+        if (section && section.tag) {
+            await deleteCache(getCacheKeyForTag(section.tag));
+        }
+        await clearByPattern(`${CACHE_KEY_ACTIVE_SECTIONS}*`);
+        const freshActive = await model.getActiveTagSectionsWithProducts(20);
+        if (freshActive && freshActive.success) {
+            await setCache(`${CACHE_KEY_ACTIVE_SECTIONS}:20`, freshActive, CACHE_TTL_SECTION_PRODUCTS);
+        }
     }
     return result;
 };
@@ -117,6 +163,7 @@ const bulkRemoveTag = async (tag, productIDs) => {
 };
 
 module.exports = {
+    getActiveTagSectionsCached,
     getSectionProductsCached,
     createSectionTag,
     updateSectionTag,

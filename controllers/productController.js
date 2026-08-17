@@ -15,6 +15,8 @@ const invalidateProductCaches = async (productID = null) => {
         deleteCache(SCOPE.PRODUCTS_ALL),
         clearByPattern('products:page:*'),
         clearByPattern('shop:products:*'),
+        clearByPattern('homepage_tag_sections:*'),
+        clearByPattern('section_products:*'),
     ];
     if (productID) tasks.push(deleteCache(SCOPE.PRODUCT_DETAIL(productID)));
     await Promise.allSettled(tasks); // allSettled: one failure won't throw
