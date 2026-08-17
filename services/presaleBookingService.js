@@ -38,6 +38,15 @@ async function placePresaleBookingOrder(uid, addressID, productID, paymentMode =
             throw new Error('Product is not available for booking');
         }
 
+        // Validate presale timing window
+        const now = new Date();
+        if (product.preSaleStartDate && now < new Date(product.preSaleStartDate)) {
+            throw new Error('Pre-sale has not started yet');
+        }
+        if (product.preSaleEndDate && now > new Date(product.preSaleEndDate)) {
+            throw new Error('Pre-sale has ended');
+        }
+
         // Validate quantity
         const qty = Math.max(1, parseInt(quantity) || 1);
         if (product.maxOrderQuantity && qty > product.maxOrderQuantity) {

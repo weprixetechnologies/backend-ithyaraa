@@ -820,6 +820,47 @@ const buyNowController = async (req, res) => {
                         unitPriceAfter = unitPriceBefore;
                         lineTotalAfter = Number((unitPriceAfter * qty).toFixed(2));
                     }
+                } else if (offerType === 'buy_x_get_off' && buyCount > 0) {
+                    const totalQty = qty;
+                    const numGroups = Math.floor(totalQty / buyCount);
+                    const eligibleQty = numGroups * buyCount;
+
+                    if (eligibleQty > 0) {
+                        const discountType = offer.discountType || 'percentage';
+                        const discountValue = Number(offer.discountValue || 0);
+                        const base = unitPriceBefore;
+
+                        let qtyLeftEligible = eligibleQty;
+                        const unitArray = [];
+
+                        for (let i = 0; i < totalQty; i++) {
+                            if (qtyLeftEligible > 0) {
+                                let discountedUnitPrice = base;
+                                if (discountType === 'percentage') {
+                                    discountedUnitPrice = base * (1 - discountValue / 100);
+                                } else if (discountType === 'flat') {
+                                    const flatPerUnit = discountValue / buyCount;
+                                    discountedUnitPrice = Math.max(0, base - flatPerUnit);
+                                }
+                                unitArray.push(discountedUnitPrice);
+                                qtyLeftEligible--;
+                            } else {
+                                unitArray.push(base);
+                            }
+                        }
+
+                        const totalCents = unitArray.reduce((a, b) => a + Math.round(b * 100), 0);
+                        unitPriceAfter = Number((totalCents / (totalQty * 100)).toFixed(2));
+                        lineTotalAfter = Number((unitArray.reduce((a, b) => a + b, 0)).toFixed(2));
+
+                        offerApplied = 1;
+                        offerStatus = 'applied';
+                    } else {
+                        offerApplied = 0;
+                        offerStatus = 'missing';
+                        unitPriceAfter = unitPriceBefore;
+                        lineTotalAfter = Number((unitPriceAfter * qty).toFixed(2));
+                    }
                 } else {
                     // Offer row exists but unsupported configuration
                     offerApplied = 0;
@@ -1237,8 +1278,8 @@ const buyNowController = async (req, res) => {
                 });
             }
 
-            const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
-            const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
+            const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+            const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
 
             let redirectUrl;
             let callbackUrl;
@@ -1696,11 +1737,46 @@ const checkOffer = async (req, res) => {
                     qty,
                 });
             }
-        } else {
-            offerApplied = false;
-            offerStatus = 'missing';
-            console.log('[BuyNow][CheckOffer] Unsupported or misconfigured offerType:', offerType);
-        }
+                } else if (offerType === 'buy_x_get_off' && buyCount > 0) {
+                    const numGroups = Math.floor(qty / buyCount);
+                    const eligibleQty = numGroups * buyCount;
+
+                    if (eligibleQty > 0) {
+                        const discountType = offer.discountType || 'percentage';
+                        const discountValue = Number(offer.discountValue || 0);
+                        const base = unitPriceBefore;
+
+                        let qtyLeftEligible = eligibleQty;
+                        const unitArray = [];
+
+                        for (let i = 0; i < qty; i++) {
+                            if (qtyLeftEligible > 0) {
+                                let discountedUnitPrice = base;
+                                if (discountType === 'percentage') {
+                                    discountedUnitPrice = base * (1 - discountValue / 100);
+                                } else if (discountType === 'flat') {
+                                    const flatPerUnit = discountValue / buyCount;
+                                    discountedUnitPrice = Math.max(0, base - flatPerUnit);
+                                }
+                                unitArray.push(discountedUnitPrice);
+                                qtyLeftEligible--;
+                            } else {
+                                unitArray.push(base);
+                            }
+                        }
+
+                        discountedTotal = Number(unitArray.reduce((a, b) => a + b, 0).toFixed(2));
+                        offerApplied = true;
+                        offerStatus = 'applied';
+                    } else {
+                        offerApplied = false;
+                        offerStatus = 'missing';
+                    }
+                } else {
+                    offerApplied = false;
+                    offerStatus = 'missing';
+                    console.log('[BuyNow][CheckOffer] Unsupported or misconfigured offerType:', offerType);
+                }
 
         const savedAmount = Math.max(0, Number((originalTotal - discountedTotal).toFixed(2)));
         // Refresh shipping fee calculation if offer changed discountedTotal
@@ -1731,7 +1807,7 @@ const checkOffer = async (req, res) => {
             couponDiscount: previewCouponDiscount,
             savedAmount,
             shippingFee: finalShippingFee,
-            requiredQty: offerType === 'buy_x_get_y' || offerType === 'buy_x_at_x' ? buyCount + (offerType === 'buy_x_get_y' ? getCount : 0) : null,
+            requiredQty: offerType === 'buy_x_get_y' ? buyCount + getCount : buyCount,
         });
     } catch (err) {
         console.error('Buy Now offer check error:', err);

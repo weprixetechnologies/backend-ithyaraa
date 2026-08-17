@@ -136,6 +136,9 @@ app.use('/api/reviews', reviewRouter)
 app.use('/api/coins', coinRouter)
 app.use('/api/presale', presaleRouter)
 app.use('/api/flash-sale-products', flashSalePublicRouter)
+const homepageTagSectionsRouter = require('./router/admin/homepageTagSectionsRouter');
+
+app.use('/api/homepage-tag-sections', homepageTagSectionsRouter);
 app.use('/api/homepage-sections', homepageSectionsRouter)
 
 app.use('/api/slider-banners', sliderBannersRouter)

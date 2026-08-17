@@ -1,24 +1,57 @@
 const db = require('../utils/dbconnect')
 
+let columnsChecked = false;
+const ensureOfferTableColumns = async () => {
+    if (columnsChecked) return;
+    try {
+        await db.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS discountType varchar(50) DEFAULT NULL`);
+        await db.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS discountValue decimal(10,2) DEFAULT NULL`);
+        await db.query(`ALTER TABLE offers ADD COLUMN IF NOT EXISTS productScope varchar(50) DEFAULT 'different_product'`);
+        columnsChecked = true;
+    } catch (e) {
+        try {
+            const [cols] = await db.query(`SHOW COLUMNS FROM offers`);
+            const colNames = cols.map(c => c.Field);
+            if (!colNames.includes('discountType')) {
+                await db.query(`ALTER TABLE offers ADD COLUMN discountType varchar(50) DEFAULT NULL`);
+            }
+            if (!colNames.includes('discountValue')) {
+                await db.query(`ALTER TABLE offers ADD COLUMN discountValue decimal(10,2) DEFAULT NULL`);
+            }
+            if (!colNames.includes('productScope')) {
+                await db.query(`ALTER TABLE offers ADD COLUMN productScope varchar(50) DEFAULT 'different_product'`);
+            }
+            columnsChecked = true;
+        } catch (err) {
+            console.error('Failed to add columns to offers table:', err);
+        }
+    }
+};
+
 const insertOffer = async (offerData) => {
+    await ensureOfferTableColumns();
     const {
         offerID, offerName, offerType,
         buyAt, buyCount, getCount,
+        discountType, discountValue, productScope,
         offerMobileBanner, offerBanner, products
     } = offerData;
 
     // Handle buyAt based on offer type
-    const processedBuyAt = offerType === 'buy_x_get_y' ? null : (buyAt || null);
+    const processedBuyAt = (offerType === 'buy_x_get_y' || offerType === 'buy_x_get_off') ? null : (buyAt || null);
+    const processedGetCount = offerType === 'buy_x_get_off' ? 0 : (getCount || 0);
 
     const [result] = await db.query(
         `INSERT INTO offers (
             offerID, offerName, offerType,
             buyAt, buyCount, getCount,
+            discountType, discountValue, productScope,
             offerMobileBanner, offerBanner, products
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             offerID, offerName, offerType,
-            processedBuyAt, buyCount, getCount,
+            processedBuyAt, buyCount || 0, processedGetCount,
+            discountType || null, discountValue != null ? Number(discountValue) : null, productScope || 'different_product',
             offerMobileBanner, offerBanner, products
         ]
     );
@@ -37,6 +70,7 @@ const updateProductOfferID = async (productID, offerID) => {
 };
 
 const getFilteredOffers = async (filters = [], values = []) => {
+    await ensureOfferTableColumns();
     let baseQuery = `SELECT * FROM offers`;
 
     if (filters.length > 0) {
@@ -65,6 +99,7 @@ const getTotalOffers = async (filters, values) => {
 };
 
 const updateOffer = async (offerID, data) => {
+    await ensureOfferTableColumns();
     const keys = Object.keys(data);
     const values = Object.values(data);
 
@@ -79,19 +114,24 @@ const updateOffer = async (offerID, data) => {
 
 const updateOfferByID = async (offerID, data) => {
     try {
+        await ensureOfferTableColumns();
         const {
             offerName,
             offerType,
             buyAt,
             buyCount,
             getCount,
+            discountType,
+            discountValue,
+            productScope,
             offerBanner,
             offerMobileBanner,
             products
         } = data;
 
         // Handle buyAt based on offer type
-        const processedBuyAt = offerType === 'buy_x_get_y' ? null : (buyAt || null);
+        const processedBuyAt = (offerType === 'buy_x_get_y' || offerType === 'buy_x_get_off') ? null : (buyAt || null);
+        const processedGetCount = offerType === 'buy_x_get_off' ? 0 : (getCount || 0);
 
         const [result] = await db.query(
             `UPDATE offers 
@@ -100,11 +140,19 @@ const updateOfferByID = async (offerID, data) => {
                  buyAt = ?,
                  buyCount = ?, 
                  getCount = ?, 
+                 discountType = ?,
+                 discountValue = ?,
+                 productScope = ?,
                  offerBanner = ?, 
                  offerMobileBanner = ?,
                  products = ?
              WHERE offerID = ?`,
-            [offerName, offerType, processedBuyAt, buyCount, getCount, offerBanner, offerMobileBanner, products, offerID]
+            [
+                offerName, offerType, processedBuyAt,
+                buyCount || 0, processedGetCount,
+                discountType || null, discountValue != null ? Number(discountValue) : null, productScope || 'different_product',
+                offerBanner, offerMobileBanner, products, offerID
+            ]
         );
 
         return {
@@ -120,8 +168,10 @@ const updateOfferByID = async (offerID, data) => {
         };
     }
 };
+
 const getOfferByID = async (offerID) => {
     try {
+        await ensureOfferTableColumns();
         const [rows] = await db.query('SELECT * FROM offers WHERE offerID = ?', [offerID]);
         return rows.length ? rows[0] : null;
     } catch (error) {

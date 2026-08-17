@@ -99,8 +99,8 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
     const subtotalAfterDiscount = baseSubtotal - baseDiscount;
 
     if (subtotalAfterDiscount < 999) {
-        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
-        const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID && i.brandID !== 'inhouse').map(i => i.brandID))];
+        const hasInhouse = selectedItems.some(i => !i.brandID || i.brandID === 'inhouse' || i.productType === 'combo' || i.productType === 'customproduct');
 
         const brandShippingMap = uniqueBrandIDs.length > 0 ? await cartModel.getBrandShippingCharges(uniqueBrandIDs) : new Map();
         const globalShippingFee = hasInhouse ? (Number(await settingsModel.getSetting('shipping_fee')) || 50) : 0;
@@ -111,14 +111,14 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
 
         selectedItems.forEach(item => {
             item.brandShippingFee = 0; // Default
-            if (item.brandID) {
+            if (item.brandID && item.brandID !== 'inhouse') {
                 if (!processedBrands.has(item.brandID)) {
                     const fee = brandShippingMap.get(item.brandID) || 0;
                     item.brandShippingFee = fee;
                     totalShippingFee += fee;
                     processedBrands.add(item.brandID);
                 }
-            } else if (!inhouseShippingAssigned && (item.productType === 'combo' || item.productType === 'customproduct' || !item.brandID)) {
+            } else if (!inhouseShippingAssigned && (item.productType === 'combo' || item.productType === 'customproduct' || !item.brandID || item.brandID === 'inhouse')) {
                 item.brandShippingFee = globalShippingFee;
                 totalShippingFee += globalShippingFee;
                 inhouseShippingAssigned = true;

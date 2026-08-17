@@ -5,7 +5,7 @@ const path = require('path');
 class BrandInvoiceService {
     constructor() {
         this.ithyaraaInfo = {
-            name: 'ITHYAARA FASHIONS PVT LTD',
+            name: 'ITHYARAA FASHIONS PVT LTD',
             address: {
                 line1: '203, 2nd Floor, SBR, C.V.TOWERS',
                 line2: 'HUDA Techno Enclave, Madhapur',

@@ -67,10 +67,10 @@ const createOffer = async (offerData) => {
 const fetchFilteredOffers = async (query) => {
     const allowedFilters = [
         'offerID', 'offerName', 'offerType', 'buyAt',
-        'buyCount', 'getCount'
+        'buyCount', 'getCount', 'discountType', 'discountValue', 'productScope'
     ];
 
-    const likeFields = ['offerID', 'offerName', 'offerType'];
+    const likeFields = ['offerID', 'offerName', 'offerType', 'discountType', 'productScope'];
 
     const filters = [];
     const values = [];
@@ -96,10 +96,10 @@ const fetchFilteredOffers = async (query) => {
 const fetchOfferCount = async (query) => {
     const allowedFilters = [
         'offerID', 'offerName', 'offerType', 'buyAt',
-        'buyCount', 'getCount'
+        'buyCount', 'getCount', 'discountType', 'discountValue', 'productScope'
     ];
 
-    const likeFields = ['offerID', 'offerName', 'offerType'];
+    const likeFields = ['offerID', 'offerName', 'offerType', 'discountType', 'productScope'];
 
     const filters = [];
     const values = [];
@@ -225,7 +225,7 @@ const fetchActiveOffersWithProducts = async () => {
 
     // 2️⃣ Fetch all offers
     const [offers] = await db.query(`
-        SELECT offerID, offerName, offerType, buyAt, buyCount, getCount, offerMobileBanner, offerBanner
+        SELECT offerID, offerName, offerType, buyAt, buyCount, getCount, discountType, discountValue, productScope, offerMobileBanner, offerBanner
         FROM offers
         ORDER BY createdAt DESC
     `);

@@ -491,6 +491,8 @@ async function getCart(uid) {
                 applyBuyXGetY(affectedItems, offer);
             } else if (offer.offerType === 'buy_x_at_x') {
                 applyBuyXAtXxx(affectedItems, offer);
+            } else if (offer.offerType === 'buy_x_get_off') {
+                applyBuyXGetOff(affectedItems, offer);
             }
             processedOfferIDsFast.add(item.offerID);
         }
@@ -575,8 +577,8 @@ async function getCart(uid) {
 
         // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
         if (summary.total < 999) {
-            const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
-            const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+            const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID && i.brandID !== 'inhouse').map(i => i.brandID))];
+            const hasInhouse = selectedItems.some(i => !i.brandID || i.brandID === 'inhouse' || i.productType === 'combo' || i.productType === 'customproduct');
 
             let shippingFee = 0;
             if (uniqueBrandIDs.length > 0) {
@@ -704,6 +706,8 @@ async function getCart(uid) {
             applyBuyXGetY(affectedItems, offer);
         } else if (offer.offerType === 'buy_x_at_x') {
             applyBuyXAtXxx(affectedItems, offer);
+        } else if (offer.offerType === 'buy_x_get_off') {
+            applyBuyXGetOff(affectedItems, offer);
         }
 
         processedOfferIDs.add(item.offerID);
@@ -794,8 +798,8 @@ async function getCart(uid) {
 
     // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
     if (summary.total < 999) {
-        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID).map(i => i.brandID))];
-        const hasInhouse = selectedItems.some(i => !i.brandID || i.productType === 'combo' || i.productType === 'customproduct');
+        const uniqueBrandIDs = [...new Set(selectedItems.filter(i => i.brandID && i.brandID !== 'inhouse').map(i => i.brandID))];
+        const hasInhouse = selectedItems.some(i => !i.brandID || i.brandID === 'inhouse' || i.productType === 'combo' || i.productType === 'customproduct');
 
         let shippingFee = 0;
         if (uniqueBrandIDs.length > 0) {
@@ -911,6 +915,68 @@ function applyBuyXAtXxx(affectedItems, offer) {
         item.offerStatus = 'applied';
 
         console.log(`[BUY_X_AT_X] Item ${item.cartItemID} unitArray=${unitArray} unitPriceAfter=${item.unitPriceAfter}`);
+    }
+}
+
+function applyBuyXGetOff(affectedItems, offer) {
+    const buyCount = Number(offer.buyCount) || 1;
+    const discountType = offer.discountType || 'percentage';
+    const discountValue = Number(offer.discountValue) || 0;
+    const productScope = offer.productScope || 'different_product';
+
+    console.log(`[BUY_X_GET_OFF] buyCount=${buyCount}, discountType=${discountType}, discountValue=${discountValue}, productScope=${productScope}`);
+
+    const applyToGroup = (groupItems) => {
+        const totalQty = groupItems.reduce((sum, i) => sum + i.quantity, 0);
+        const numGroups = Math.floor(totalQty / buyCount);
+        const eligibleQty = numGroups * buyCount;
+
+        if (eligibleQty <= 0) return;
+
+        let qtyLeftEligible = eligibleQty;
+
+        for (const item of groupItems) {
+            const base = Number(item.unitPriceBefore ?? item.overridePrice ?? item.salePrice ?? item.regularPrice);
+            const unitArray = [];
+
+            for (let i = 0; i < item.quantity; i++) {
+                if (qtyLeftEligible > 0) {
+                    let discountedUnitPrice = base;
+                    if (discountType === 'percentage') {
+                        discountedUnitPrice = base * (1 - discountValue / 100);
+                    } else if (discountType === 'flat') {
+                        const flatPerUnit = discountValue / buyCount;
+                        discountedUnitPrice = Math.max(0, base - flatPerUnit);
+                    }
+                    unitArray.push(discountedUnitPrice);
+                    qtyLeftEligible--;
+                } else {
+                    unitArray.push(base);
+                }
+            }
+
+            const totalCents = unitArray.reduce((a, b) => a + Math.round(b * 100), 0);
+            item.unitPriceAfter = totalCents / (item.quantity * 100);
+            item.unitPriceAfter = Math.round(item.unitPriceAfter * 100) / 100;
+            item.offerApplied = true;
+            item.offerStatus = 'applied';
+
+            console.log(`[BUY_X_GET_OFF] Item ${item.cartItemID || item.productID} unitArray=${unitArray} unitPriceAfter=${item.unitPriceAfter}`);
+        }
+    };
+
+    if (productScope === 'same_product') {
+        const itemsByProduct = {};
+        for (const item of affectedItems) {
+            const pid = item.productID || item.presaleProductID || 'unknown';
+            if (!itemsByProduct[pid]) itemsByProduct[pid] = [];
+            itemsByProduct[pid].push(item);
+        }
+        for (const pid in itemsByProduct) {
+            applyToGroup(itemsByProduct[pid]);
+        }
+    } else {
+        applyToGroup(affectedItems);
     }
 }
 
