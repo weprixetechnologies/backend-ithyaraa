@@ -7,11 +7,7 @@ const adminBrandOrdersModel = require('../model/adminBrandOrdersModel');
  */
 async function searchBrands(searchText) {
     try {
-        if (!searchText || searchText.trim().length === 0) {
-            return [];
-        }
-
-        const brands = await adminBrandOrdersModel.searchBrands(searchText.trim());
+        const brands = await adminBrandOrdersModel.searchBrands(searchText ? searchText.trim() : '');
 
         // Format response (uid for consistency with getAllBrands)
         return brands.map(brand => ({

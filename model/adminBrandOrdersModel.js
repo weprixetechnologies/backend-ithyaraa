@@ -7,18 +7,23 @@ const db = require('../utils/dbconnect');
  */
 async function searchBrands(searchText) {
     try {
-        // Debug logging
-        console.log('=== Model searchBrands ===');
-        console.log('Received searchText:', searchText);
-        console.log('SearchText type:', typeof searchText);
-        console.log('SearchText length:', searchText?.length);
+        const trimmedSearch = searchText ? searchText.trim() : '';
 
-        const trimmedSearch = searchText.trim();
+        // If search text is empty, return all brands
+        if (!trimmedSearch) {
+            const query = `
+                SELECT uid, name, username, emailID
+                FROM users
+                WHERE role = 'brand'
+                ORDER BY name ASC, username ASC
+                LIMIT 100
+            `;
+            const [rows] = await db.query(query);
+            return rows;
+        }
+
         const searchTerm = `%${trimmedSearch}%`;
         const startMatch = `${trimmedSearch}%`;
-
-        console.log('Search term (LIKE):', searchTerm);
-        console.log('Start match (LIKE):', startMatch);
 
         // Use LOWER() for case-insensitive search
         const query = `
@@ -41,12 +46,8 @@ async function searchBrands(searchText) {
         `;
 
         const params = [searchTerm, searchTerm, searchTerm, startMatch, startMatch];
-        console.log('Query params:', params);
 
         const [rows] = await db.query(query, params);
-
-        console.log('Query returned rows:', rows.length);
-        console.log('First result:', rows[0] || 'No results');
 
         return rows;
     } catch (error) {

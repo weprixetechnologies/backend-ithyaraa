@@ -7,28 +7,9 @@ const adminBrandOrdersService = require('../services/adminBrandOrdersService');
 const searchBrands = async (req, res) => {
     try {
         const { name } = req.query;
-
-        // Debug logging
-        console.log('=== Brand Search Debug ===');
-        console.log('Raw query param:', req.query);
-        console.log('Name param:', name);
-        console.log('Name type:', typeof name);
-        console.log('Name length:', name?.length);
-
-        if (!name || name.trim().length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Search name is required'
-            });
-        }
-
-        const trimmedName = name.trim();
-        console.log('Trimmed name:', trimmedName);
-        console.log('Calling service with:', trimmedName);
+        const trimmedName = name ? name.trim() : '';
 
         const brands = await adminBrandOrdersService.searchBrands(trimmedName);
-
-        console.log('Service returned brands count:', brands?.length || 0);
 
         return res.json({
             success: true,
