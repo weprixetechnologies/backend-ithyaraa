@@ -454,8 +454,26 @@ const getProductCount = async (query) => {
 
 const paginate = async ({ baseQuery, values, page, limit, db }) => {
     const offset = (page - 1) * limit;
+
+    // Calculate total matching rows for pagination
+    let countSql = baseQuery.substring(baseQuery.toUpperCase().indexOf('FROM'));
+    const orderByIndex = countSql.toUpperCase().indexOf('ORDER BY');
+    if (orderByIndex !== -1) {
+        countSql = countSql.substring(0, orderByIndex);
+    }
+    const countQuery = `SELECT COUNT(*) as total ${countSql}`;
+    const [countRows] = await db.query(countQuery, values);
+    const total = countRows[0]?.total || 0;
+
     const [data] = await db.query(`${baseQuery} LIMIT ? OFFSET ?`, [...values, limit, offset]);
-    return { currentPage: page, data };
+    return {
+        currentPage: page,
+        total: total,
+        count: total,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit) || 1,
+        data
+    };
 };
 
 const fetchPaginatedProducts = async (query) => {
@@ -471,13 +489,15 @@ const fetchPaginatedProducts = async (query) => {
         'name', 'regularPrice', 'salePrice', 'discountType',
         'discountValue', 'type', 'status', 'offerID',
         'overridePrice', 'tab1', 'tab2', 'tab3', 'productID',
-        'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
+        'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID',
+        'brand', 'brandName', 'minPrice', 'maxPrice'
     ];
     const likeFields = ['name', 'productID', 'sectionid'];
 
     for (const key in query) {
         if (!allowedFilters.includes(key)) continue;
         const value = query[key];
+        if (value === undefined || value === null || value === '') continue;
         const cleanedValue = typeof value === 'string' ? value.replace(/^'+|'+$/g, '') : value;
 
         if (key === 'categoryID') {
@@ -486,6 +506,18 @@ const fetchPaginatedProducts = async (query) => {
         } else if (key === 'categoryName') {
             filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
             values.push(`%${cleanedValue}%`);
+        } else if (key === 'brand' || key === 'brandName') {
+            filters.push(`(brand LIKE ? OR brandID LIKE ?)`);
+            values.push(`%${cleanedValue}%`, `%${cleanedValue}%`);
+        } else if (key === 'brandID') {
+            filters.push(`(brandID = ? OR brand LIKE ?)`);
+            values.push(cleanedValue, `%${cleanedValue}%`);
+        } else if (key === 'minPrice') {
+            filters.push(`COALESCE(NULLIF(salePrice, 0), regularPrice) >= ?`);
+            values.push(Number(cleanedValue));
+        } else if (key === 'maxPrice') {
+            filters.push(`COALESCE(NULLIF(salePrice, 0), regularPrice) <= ?`);
+            values.push(Number(cleanedValue));
         } else if (likeFields.includes(key)) {
             filters.push(`${key} LIKE ?`);
             values.push(`%${cleanedValue}%`);
@@ -499,7 +531,7 @@ const fetchPaginatedProducts = async (query) => {
         SELECT
             productID, name, sectionid, regularPrice, salePrice,
             discountType, discountValue, offerID, featuredImage,
-            brand, categories, type, status, createdAt
+            brand, brandID, categories, type, status, createdAt
         FROM products WHERE productID IS NOT NULL AND isDeleted = 0
     `;
     if (filters.length > 0) baseQuery += ` AND ${filters.join(' AND ')}`;

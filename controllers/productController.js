@@ -273,7 +273,7 @@ const getPaginatedProducts = async (req, res) => {
         const cacheKey = SCOPE.PRODUCTS_PAGE(page || 1, limit || 10, filters);
 
         const cached = await getCache(cacheKey);
-        if (cached) {
+        if (cached && (cached.total !== undefined || cached.count !== undefined)) {
             return res.status(200).json({ success: true, ...cached, cached: true });
         }
 
