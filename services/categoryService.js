@@ -157,6 +157,26 @@ const reorderFeaturedCategories = async (reorderedItems) => {
     }
 };
 
+const fetchBrandsByCategoryID = async (categoryID) => {
+    try {
+        const data = await categoryModel.getBrandsByCategoryID(categoryID);
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error in fetchBrandsByCategoryID service:', error);
+        return { success: false, message: 'Failed to fetch category brands', error: error.message };
+    }
+};
+
+const fetchCategoriesBrandsMap = async () => {
+    try {
+        const data = await categoryModel.getAllCategoriesBrandsMap();
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error in fetchCategoriesBrandsMap service:', error);
+        return { success: false, message: 'Failed to fetch categories brands map', error: error.message };
+    }
+};
+
 module.exports = {
     uploadCategory,
     getAllCategories,
@@ -165,5 +185,8 @@ module.exports = {
     deleteCategory,
     fetchFeaturedCategories,
     bulkSetFeaturedCategories,
-    reorderFeaturedCategories
+    reorderFeaturedCategories,
+    fetchBrandsByCategoryID,
+    fetchCategoriesBrandsMap
 };
+

@@ -5,8 +5,10 @@ const categoryController = require('./../../controllers/categoryController');
 
 // Public routes (no auth required)
 router.get('/public', categoryController.getCategories);
-router.get('/public/:categoryID', categoryController.getCategoryByID);
+router.get('/brands-map', categoryController.getCategoriesBrandsMap);
 router.get('/featured', categoryController.getFeaturedCategories);
+router.get('/public/:categoryID', categoryController.getCategoryByID);
+router.get('/:categoryID/brands', categoryController.getBrandsByCategoryID);
 
 // Admin routes (auth required)
 router.post('/upload-category', authAdminMiddleware.verifyAccessToken, categoryController.postCategory);

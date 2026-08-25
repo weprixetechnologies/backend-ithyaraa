@@ -196,6 +196,54 @@ const reorderFeaturedCategories = async (req, res) => {
     }
 };
 
+const getBrandsByCategoryID = async (req, res) => {
+    const { categoryID } = req.params;
+
+    if (!categoryID) {
+        return res.status(400).json({ success: false, message: 'Category ID is required' });
+    }
+
+    try {
+        const cacheKey = SCOPE.CATEGORY_BRANDS(categoryID);
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            return res.status(200).json({ success: true, data: cached, cached: true });
+        }
+
+        const result = await categoryService.fetchBrandsByCategoryID(categoryID);
+        if (result.success) {
+            try { await setCache(cacheKey, result.data); } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (error) {
+        console.error('getBrandsByCategoryID error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const getCategoriesBrandsMap = async (req, res) => {
+    try {
+        const cacheKey = SCOPE.CATEGORIES_BRANDS_MAP;
+        const cached = await getCache(cacheKey);
+        if (cached) {
+            return res.status(200).json({ success: true, data: cached, cached: true });
+        }
+
+        const result = await categoryService.fetchCategoriesBrandsMap();
+        if (result.success) {
+            try { await setCache(cacheKey, result.data); } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (error) {
+        console.error('getCategoriesBrandsMap error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 module.exports = {
     postCategory,
     getCategories,
@@ -204,5 +252,8 @@ module.exports = {
     deleteCategory,
     getFeaturedCategories,
     bulkSetFeatured,
-    reorderFeaturedCategories
+    reorderFeaturedCategories,
+    getBrandsByCategoryID,
+    getCategoriesBrandsMap
 };
+

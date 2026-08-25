@@ -1737,46 +1737,46 @@ const checkOffer = async (req, res) => {
                     qty,
                 });
             }
-                } else if (offerType === 'buy_x_get_off' && buyCount > 0) {
-                    const numGroups = Math.floor(qty / buyCount);
-                    const eligibleQty = numGroups * buyCount;
+        } else if (offerType === 'buy_x_get_off' && buyCount > 0) {
+            const numGroups = Math.floor(qty / buyCount);
+            const eligibleQty = numGroups * buyCount;
 
-                    if (eligibleQty > 0) {
-                        const discountType = offer.discountType || 'percentage';
-                        const discountValue = Number(offer.discountValue || 0);
-                        const base = unitPriceBefore;
+            if (eligibleQty > 0) {
+                const discountType = offer.discountType || 'percentage';
+                const discountValue = Number(offer.discountValue || 0);
+                const base = unitPriceBefore;
 
-                        let qtyLeftEligible = eligibleQty;
-                        const unitArray = [];
+                let qtyLeftEligible = eligibleQty;
+                const unitArray = [];
 
-                        for (let i = 0; i < qty; i++) {
-                            if (qtyLeftEligible > 0) {
-                                let discountedUnitPrice = base;
-                                if (discountType === 'percentage') {
-                                    discountedUnitPrice = base * (1 - discountValue / 100);
-                                } else if (discountType === 'flat') {
-                                    const flatPerUnit = discountValue / buyCount;
-                                    discountedUnitPrice = Math.max(0, base - flatPerUnit);
-                                }
-                                unitArray.push(discountedUnitPrice);
-                                qtyLeftEligible--;
-                            } else {
-                                unitArray.push(base);
-                            }
+                for (let i = 0; i < qty; i++) {
+                    if (qtyLeftEligible > 0) {
+                        let discountedUnitPrice = base;
+                        if (discountType === 'percentage') {
+                            discountedUnitPrice = base * (1 - discountValue / 100);
+                        } else if (discountType === 'flat') {
+                            const flatPerUnit = discountValue / buyCount;
+                            discountedUnitPrice = Math.max(0, base - flatPerUnit);
                         }
-
-                        discountedTotal = Number(unitArray.reduce((a, b) => a + b, 0).toFixed(2));
-                        offerApplied = true;
-                        offerStatus = 'applied';
+                        unitArray.push(discountedUnitPrice);
+                        qtyLeftEligible--;
                     } else {
-                        offerApplied = false;
-                        offerStatus = 'missing';
+                        unitArray.push(base);
                     }
-                } else {
-                    offerApplied = false;
-                    offerStatus = 'missing';
-                    console.log('[BuyNow][CheckOffer] Unsupported or misconfigured offerType:', offerType);
                 }
+
+                discountedTotal = Number(unitArray.reduce((a, b) => a + b, 0).toFixed(2));
+                offerApplied = true;
+                offerStatus = 'applied';
+            } else {
+                offerApplied = false;
+                offerStatus = 'missing';
+            }
+        } else {
+            offerApplied = false;
+            offerStatus = 'missing';
+            console.log('[BuyNow][CheckOffer] Unsupported or misconfigured offerType:', offerType);
+        }
 
         const savedAmount = Math.max(0, Number((originalTotal - discountedTotal).toFixed(2)));
         // Refresh shipping fee calculation if offer changed discountedTotal

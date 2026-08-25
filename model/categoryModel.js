@@ -150,6 +150,68 @@ const updateFeaturedOrder = async (reorderedItems) => {
     return true;
 };
 
+const getBrandsByCategoryID = async (categoryID) => {
+    const query = `
+        SELECT DISTINCT 
+            u.uid, 
+            u.username, 
+            u.emailID,
+            u.name, 
+            u.profilePhoto, 
+            u.verifiedEmail
+        FROM users u
+        JOIN products p ON (p.brandID = u.uid OR p.brand = u.uid OR p.brand = u.name)
+        WHERE u.role = 'brand'
+          AND (p.status = 'active' OR p.status IS NULL)
+          AND (
+            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS UNSIGNED)))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS CHAR)))
+          )
+        ORDER BY u.name ASC
+    `;
+    const [rows] = await db.query(query, [categoryID, categoryID]);
+    return rows || [];
+};
+
+const getAllCategoriesBrandsMap = async () => {
+    const query = `
+        SELECT DISTINCT 
+            c.categoryID,
+            u.uid, 
+            u.username, 
+            u.emailID,
+            u.name, 
+            u.profilePhoto, 
+            u.verifiedEmail
+        FROM categories c
+        JOIN products p ON (
+            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', c.categoryID))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(c.categoryID AS CHAR)))
+        )
+        JOIN users u ON (p.brandID = u.uid OR p.brand = u.uid OR p.brand = u.name)
+        WHERE u.role = 'brand'
+          AND (p.status = 'active' OR p.status IS NULL)
+        ORDER BY u.name ASC
+    `;
+    const [rows] = await db.query(query);
+    const map = {};
+    if (Array.isArray(rows)) {
+        for (const row of rows) {
+            const catID = String(row.categoryID);
+            if (!map[catID]) map[catID] = [];
+            map[catID].push({
+                uid: row.uid,
+                username: row.username,
+                emailID: row.emailID,
+                name: row.name,
+                profilePhoto: row.profilePhoto,
+                verifiedEmail: row.verifiedEmail
+            });
+        }
+    }
+    return map;
+};
+
 module.exports = {
     getCategoryByID,
     insertCategory,
@@ -159,7 +221,9 @@ module.exports = {
     removeCategoryFromProducts,
     getFeaturedCategories,
     bulkSetFeatured,
-    updateFeaturedOrder
+    updateFeaturedOrder,
+    getBrandsByCategoryID,
+    getAllCategoriesBrandsMap
 };
 
 // Fetch all categories: categoryID and categoryName only
@@ -171,3 +235,4 @@ async function getAllCategoryNamesIDs() {
 }
 
 module.exports.getAllCategoryNamesIDs = getAllCategoryNamesIDs;
+
