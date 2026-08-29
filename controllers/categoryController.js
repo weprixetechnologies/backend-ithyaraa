@@ -226,9 +226,15 @@ const getBrandsByCategoryID = async (req, res) => {
 const getCategoriesBrandsMap = async (req, res) => {
     try {
         const cacheKey = SCOPE.CATEGORIES_BRANDS_MAP;
-        const cached = await getCache(cacheKey);
-        if (cached) {
-            return res.status(200).json({ success: true, data: cached, cached: true });
+        const shouldFlush = req.query.flush === 'true' || req.query.flush === '1' || req.query.refresh === 'true';
+
+        if (shouldFlush) {
+            try { await deleteCache(cacheKey); } catch (e) { console.error(e); }
+        } else {
+            const cached = await getCache(cacheKey);
+            if (cached) {
+                return res.status(200).json({ success: true, data: cached, cached: true });
+            }
         }
 
         const result = await categoryService.fetchCategoriesBrandsMap();
