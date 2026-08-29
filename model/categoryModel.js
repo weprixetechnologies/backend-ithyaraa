@@ -163,13 +163,11 @@ const getBrandsByCategoryID = async (categoryID) => {
         JOIN products p ON (
             p.brandID = u.uid 
             OR p.brand = u.uid 
-            OR p.brand = u.name 
-            OR p.brand = u.username 
-            OR p.brandID = u.username
-            OR LOWER(p.brand) = LOWER(u.name)
-            OR LOWER(p.brand) = LOWER(u.username)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.name COLLATE utf8mb4_general_ci)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
+            OR (p.brandID COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
         )
-        WHERE (LOWER(u.role) = 'brand' OR u.role IS NULL)
+        WHERE (LOWER(CAST(u.role AS CHAR)) = 'brand' OR u.role IS NULL)
           AND (p.isDeleted = 0 OR p.isDeleted IS NULL)
           AND (p.status != 'inactive' OR p.status IS NULL)
           AND (
@@ -177,8 +175,8 @@ const getBrandsByCategoryID = async (categoryID) => {
             OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS CHAR)))
             OR JSON_CONTAINS(p.categories, JSON_QUOTE(CAST(? AS CHAR)))
             OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(? AS CHAR)))
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":', ?, '%')
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":"', ?, '"%')
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', ?, '%'))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', ?, '"%'))
           )
         ORDER BY u.name ASC
     `;
@@ -204,20 +202,18 @@ const getAllCategoriesBrandsMap = async () => {
             OR JSON_CONTAINS(p.categories, JSON_ARRAY(c.categoryID))
             OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(c.categoryID AS CHAR)))
             OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', c.categoryName))
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":', c.categoryID, '%')
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":"', c.categoryID, '"%')
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"', LOWER(c.categoryName), '"%')
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', c.categoryID, '%'))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', c.categoryID, '"%'))
+            OR (LOWER(CAST(p.categories AS CHAR)) COLLATE utf8mb4_general_ci LIKE CONCAT('%"', LOWER(CAST(c.categoryName AS CHAR)) COLLATE utf8mb4_general_ci, '"%'))
         )
         JOIN users u ON (
             p.brandID = u.uid 
             OR p.brand = u.uid 
-            OR p.brand = u.name 
-            OR p.brand = u.username 
-            OR p.brandID = u.username
-            OR LOWER(p.brand) = LOWER(u.name)
-            OR LOWER(p.brand) = LOWER(u.username)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.name COLLATE utf8mb4_general_ci)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
+            OR (p.brandID COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
         )
-        WHERE (LOWER(u.role) = 'brand' OR u.role IS NULL)
+        WHERE (LOWER(CAST(u.role AS CHAR)) = 'brand' OR u.role IS NULL)
           AND (p.isDeleted = 0 OR p.isDeleted IS NULL)
           AND (p.status != 'inactive' OR p.status IS NULL)
         ORDER BY u.name ASC
@@ -264,20 +260,18 @@ const getMegamenuCategoriesBrands = async () => {
             OR JSON_CONTAINS(p.categories, JSON_ARRAY(c.categoryID))
             OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(c.categoryID AS CHAR)))
             OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', c.categoryName))
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":', c.categoryID, '%')
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":"', c.categoryID, '"%')
-            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"', LOWER(c.categoryName), '"%')
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', c.categoryID, '%'))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', c.categoryID, '"%'))
+            OR (LOWER(CAST(p.categories AS CHAR)) COLLATE utf8mb4_general_ci LIKE CONCAT('%"', LOWER(CAST(c.categoryName AS CHAR)) COLLATE utf8mb4_general_ci, '"%'))
         )
         JOIN users u ON (
             p.brandID = u.uid 
             OR p.brand = u.uid 
-            OR p.brand = u.name 
-            OR p.brand = u.username 
-            OR p.brandID = u.username
-            OR LOWER(p.brand) = LOWER(u.name)
-            OR LOWER(p.brand) = LOWER(u.username)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.name COLLATE utf8mb4_general_ci)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
+            OR (p.brandID COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
         )
-        WHERE (LOWER(u.role) = 'brand' OR u.role IS NULL)
+        WHERE (LOWER(CAST(u.role AS CHAR)) = 'brand' OR u.role IS NULL)
           AND (p.isDeleted = 0 OR p.isDeleted IS NULL)
           AND (p.status != 'inactive' OR p.status IS NULL)
         ORDER BY c.categoryID ASC, u.name ASC
