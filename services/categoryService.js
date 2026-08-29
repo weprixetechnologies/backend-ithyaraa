@@ -177,6 +177,16 @@ const fetchCategoriesBrandsMap = async () => {
     }
 };
 
+const fetchMegamenuCategoriesBrands = async () => {
+    try {
+        const data = await categoryModel.getMegamenuCategoriesBrands();
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error in fetchMegamenuCategoriesBrands service:', error);
+        return { success: false, message: 'Failed to fetch megamenu categories brands map', error: error.message };
+    }
+};
+
 module.exports = {
     uploadCategory,
     getAllCategories,
@@ -187,6 +197,7 @@ module.exports = {
     bulkSetFeaturedCategories,
     reorderFeaturedCategories,
     fetchBrandsByCategoryID,
-    fetchCategoriesBrandsMap
+    fetchCategoriesBrandsMap,
+    fetchMegamenuCategoriesBrands
 };
 

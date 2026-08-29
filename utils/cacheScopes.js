@@ -29,6 +29,7 @@ const SCOPE = {
   CATEGORY_DETAIL: (categoryID) => `cache:categories:detail:${categoryID}`,
   CATEGORY_BRANDS: (categoryID) => `cache:categories:brands:${categoryID}`,
   CATEGORIES_BRANDS_MAP: 'cache:categories:brands_map',
+  CATEGORIES_MEGAMENU_BRANDS: 'cache:categories:megamenu_brands',
 
   // ========== OFFERS ==========
   OFFERS_ALL: 'cache:offers:all',

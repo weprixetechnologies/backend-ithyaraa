@@ -245,6 +245,65 @@ const getAllCategoriesBrandsMap = async () => {
     return map;
 };
 
+const getMegamenuCategoriesBrands = async () => {
+    const query = `
+        SELECT DISTINCT 
+            c.categoryID,
+            u.uid, 
+            u.username, 
+            u.emailID,
+            u.name, 
+            u.profilePhoto, 
+            u.verifiedEmail
+        FROM categories c
+        JOIN products p ON (
+            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', c.categoryID))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(c.categoryID AS CHAR)))
+            OR JSON_CONTAINS(p.categories, CAST(c.categoryID AS JSON))
+            OR JSON_CONTAINS(p.categories, CAST(c.categoryID AS CHAR))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', c.categoryName))
+            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":', c.categoryID, '%')
+            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"categoryid":"', c.categoryID, '"%')
+            OR LOWER(CAST(p.categories AS CHAR)) LIKE CONCAT('%"', LOWER(c.categoryName), '"%')
+        )
+        JOIN users u ON (
+            p.brandID = u.uid 
+            OR p.brand = u.uid 
+            OR p.brand = u.name 
+            OR p.brand = u.username 
+            OR p.brandID = u.username
+            OR LOWER(p.brand) = LOWER(u.name)
+            OR LOWER(p.brand) = LOWER(u.username)
+        )
+        WHERE (LOWER(u.role) = 'brand' OR u.role IS NULL)
+          AND (p.isDeleted = 0 OR p.isDeleted IS NULL)
+          AND (p.status != 'inactive' OR p.status IS NULL)
+        ORDER BY c.categoryID ASC, u.name ASC
+    `;
+    const [rows] = await db.query(query);
+    const map = {};
+    if (Array.isArray(rows)) {
+        for (const row of rows) {
+            const catID = String(row.categoryID);
+            if (!map[catID]) map[catID] = [];
+            
+            // Deduplicate by brand UID per category
+            const exists = map[catID].some(b => b.uid === row.uid);
+            if (!exists) {
+                map[catID].push({
+                    uid: row.uid,
+                    username: row.username,
+                    emailID: row.emailID,
+                    name: row.name,
+                    profilePhoto: row.profilePhoto,
+                    verifiedEmail: row.verifiedEmail
+                });
+            }
+        }
+    }
+    return map;
+};
+
 module.exports = {
     getCategoryByID,
     insertCategory,
@@ -256,7 +315,8 @@ module.exports = {
     bulkSetFeatured,
     updateFeaturedOrder,
     getBrandsByCategoryID,
-    getAllCategoriesBrandsMap
+    getAllCategoriesBrandsMap,
+    getMegamenuCategoriesBrands
 };
 
 // Fetch all categories: categoryID and categoryName only

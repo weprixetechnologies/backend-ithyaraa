@@ -250,6 +250,34 @@ const getCategoriesBrandsMap = async (req, res) => {
     }
 };
 
+const getMegamenuCategoriesBrands = async (req, res) => {
+    try {
+        const cacheKey = SCOPE.CATEGORIES_MEGAMENU_BRANDS;
+        const shouldFlush = req.query.flush === 'true' || req.query.flush === '1' || req.query.refresh === 'true';
+
+        if (shouldFlush) {
+            try { await deleteCache(cacheKey); } catch (e) { console.error(e); }
+        } else {
+            const cached = await getCache(cacheKey);
+            if (cached) {
+                return res.status(200).json({ success: true, data: cached, cached: true });
+            }
+        }
+
+        const result = await categoryService.fetchMegamenuCategoriesBrands();
+        if (result.success) {
+            // Cache for 3600 seconds (1 hour) in Redis for high-performance ISR / megamenu rendering
+            try { await setCache(cacheKey, result.data, 3600); } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (error) {
+        console.error('getMegamenuCategoriesBrands error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 module.exports = {
     postCategory,
     getCategories,
@@ -260,6 +288,7 @@ module.exports = {
     bulkSetFeatured,
     reorderFeaturedCategories,
     getBrandsByCategoryID,
-    getCategoriesBrandsMap
+    getCategoriesBrandsMap,
+    getMegamenuCategoriesBrands
 };
 

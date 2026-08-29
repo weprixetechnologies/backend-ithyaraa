@@ -6,6 +6,7 @@ const categoryController = require('./../../controllers/categoryController');
 // Public routes (no auth required)
 router.get('/public', categoryController.getCategories);
 router.get('/brands-map', categoryController.getCategoriesBrandsMap);
+router.get('/megamenu-brands', categoryController.getMegamenuCategoriesBrands);
 router.get('/featured', categoryController.getFeaturedCategories);
 router.get('/public/:categoryID', categoryController.getCategoryByID);
 router.get('/:categoryID/brands', categoryController.getBrandsByCategoryID);
