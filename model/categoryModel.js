@@ -151,7 +151,8 @@ const updateFeaturedOrder = async (reorderedItems) => {
 };
 
 const getBrandsByCategoryID = async (categoryID) => {
-    const query = `
+    const catIDStr = String(categoryID);
+    const queryExternal = `
         SELECT DISTINCT 
             u.uid, 
             u.username, 
@@ -180,70 +181,87 @@ const getBrandsByCategoryID = async (categoryID) => {
           )
         ORDER BY u.name ASC
     `;
-    const [rows] = await db.query(query, [categoryID, categoryID, categoryID, categoryID, categoryID, categoryID]);
-    return rows || [];
-};
 
-const getAllCategoriesBrandsMap = async () => {
-    const query = `
-        SELECT DISTINCT 
-            c.categoryID,
-            u.uid, 
-            u.username, 
-            u.emailID,
-            u.name, 
-            u.profilePhoto, 
-            u.verifiedEmail
-        FROM categories c
-        JOIN products p ON (
-            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', c.categoryID))
-            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(c.categoryID AS CHAR)))
-            OR JSON_CONTAINS(p.categories, JSON_QUOTE(CAST(c.categoryID AS CHAR)))
-            OR JSON_CONTAINS(p.categories, JSON_ARRAY(c.categoryID))
-            OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(c.categoryID AS CHAR)))
-            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', c.categoryName))
-            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', c.categoryID, '%'))
-            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', c.categoryID, '"%'))
-            OR (LOWER(CAST(p.categories AS CHAR)) COLLATE utf8mb4_general_ci LIKE CONCAT('%"', LOWER(CAST(c.categoryName AS CHAR)) COLLATE utf8mb4_general_ci, '"%'))
-        )
-        JOIN users u ON (
+    const queryInHouse = `
+        SELECT COUNT(*) as inhouseCount
+        FROM products p
+        LEFT JOIN users u ON (
             p.brandID = u.uid 
             OR p.brand = u.uid 
             OR (p.brand COLLATE utf8mb4_general_ci = u.name COLLATE utf8mb4_general_ci)
             OR (p.brand COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
             OR (p.brandID COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
         )
-        WHERE (LOWER(CAST(u.role AS CHAR)) = 'brand' OR u.role IS NULL)
-          AND (p.isDeleted = 0 OR p.isDeleted IS NULL)
+        WHERE (p.isDeleted = 0 OR p.isDeleted IS NULL)
           AND (p.status != 'inactive' OR p.status IS NULL)
-        ORDER BY u.name ASC
+          AND (
+            p.brandID IS NULL 
+            OR TRIM(p.brandID) = '' 
+            OR p.brand IS NULL 
+            OR TRIM(p.brand) = ''
+            OR LOWER(CAST(p.brand AS CHAR)) IN ('ithyaraa', 'inhouse', 'in house')
+            OR LOWER(CAST(p.brandID AS CHAR)) IN ('ithyaraa', 'inhouse', 'in house')
+            OR u.uid IS NULL
+          )
+          AND (
+            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS UNSIGNED)))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS CHAR)))
+            OR JSON_CONTAINS(p.categories, JSON_QUOTE(CAST(? AS CHAR)))
+            OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(? AS CHAR)))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', ?, '%'))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', ?, '"%'))
+          )
     `;
-    const [rows] = await db.query(query);
-    const map = {};
-    if (Array.isArray(rows)) {
-        for (const row of rows) {
-            const catID = String(row.categoryID);
-            if (!map[catID]) map[catID] = [];
-            
-            // Check for duplicates
-            const exists = map[catID].some(b => b.uid === row.uid);
-            if (!exists) {
-                map[catID].push({
-                    uid: row.uid,
-                    username: row.username,
-                    emailID: row.emailID,
-                    name: row.name,
-                    profilePhoto: row.profilePhoto,
-                    verifiedEmail: row.verifiedEmail
-                });
-            }
+
+    const [rowsExternal] = await db.query(queryExternal, [catIDStr, catIDStr, catIDStr, catIDStr, catIDStr, catIDStr]);
+    const [[{ inhouseCount }]] = await db.query(queryInHouse, [catIDStr, catIDStr, catIDStr, catIDStr, catIDStr, catIDStr]);
+
+    const brands = rowsExternal ? [...rowsExternal] : [];
+
+    if (inhouseCount > 0) {
+        const [ithyaraaUserRows] = await db.query(
+            `SELECT uid, username, emailID, name, profilePhoto, verifiedEmail 
+             FROM users 
+             WHERE (LOWER(CAST(username AS CHAR)) = 'ithyaraa' OR LOWER(CAST(name AS CHAR)) = 'ithyaraa')
+             LIMIT 1`
+        );
+
+        const ithyaraaBrandObj = (ithyaraaUserRows && ithyaraaUserRows.length > 0) ? {
+            uid: ithyaraaUserRows[0].uid || "ithyaraa-inhouse",
+            username: ithyaraaUserRows[0].username || "ithyaraa",
+            emailID: ithyaraaUserRows[0].emailID || "support@ithyaraa.com",
+            name: ithyaraaUserRows[0].name || "Ithyaraa",
+            profilePhoto: ithyaraaUserRows[0].profilePhoto || "/ithyaraa-logo.png",
+            verifiedEmail: ithyaraaUserRows[0].verifiedEmail ?? 1
+        } : {
+            uid: "ithyaraa-inhouse",
+            username: "ithyaraa",
+            emailID: "support@ithyaraa.com",
+            name: "Ithyaraa",
+            profilePhoto: "/ithyaraa-logo.png",
+            verifiedEmail: 1
+        };
+
+        const exists = brands.some(b => 
+            b.uid === ithyaraaBrandObj.uid || 
+            b.username?.toLowerCase() === 'ithyaraa' || 
+            b.name?.toLowerCase() === 'ithyaraa'
+        );
+
+        if (!exists) {
+            brands.unshift(ithyaraaBrandObj);
         }
     }
-    return map;
+
+    return brands;
+};
+
+const getAllCategoriesBrandsMap = async () => {
+    return getMegamenuCategoriesBrands();
 };
 
 const getMegamenuCategoriesBrands = async () => {
-    const query = `
+    const queryExternal = `
         SELECT DISTINCT 
             c.categoryID,
             u.uid, 
@@ -276,15 +294,76 @@ const getMegamenuCategoriesBrands = async () => {
           AND (p.status != 'inactive' OR p.status IS NULL)
         ORDER BY c.categoryID ASC, u.name ASC
     `;
-    const [rows] = await db.query(query);
+
+    const queryInHouseCategories = `
+        SELECT DISTINCT 
+            c.categoryID
+        FROM categories c
+        JOIN products p ON (
+            JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', c.categoryID))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(c.categoryID AS CHAR)))
+            OR JSON_CONTAINS(p.categories, JSON_QUOTE(CAST(c.categoryID AS CHAR)))
+            OR JSON_CONTAINS(p.categories, JSON_ARRAY(c.categoryID))
+            OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(c.categoryID AS CHAR)))
+            OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', c.categoryName))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', c.categoryID, '%'))
+            OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', c.categoryID, '"%'))
+            OR (LOWER(CAST(p.categories AS CHAR)) COLLATE utf8mb4_general_ci LIKE CONCAT('%"', LOWER(CAST(c.categoryName AS CHAR)) COLLATE utf8mb4_general_ci, '"%'))
+        )
+        LEFT JOIN users u ON (
+            p.brandID = u.uid 
+            OR p.brand = u.uid 
+            OR (p.brand COLLATE utf8mb4_general_ci = u.name COLLATE utf8mb4_general_ci)
+            OR (p.brand COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
+            OR (p.brandID COLLATE utf8mb4_general_ci = u.username COLLATE utf8mb4_general_ci)
+        )
+        WHERE (p.isDeleted = 0 OR p.isDeleted IS NULL)
+          AND (p.status != 'inactive' OR p.status IS NULL)
+          AND (
+            p.brandID IS NULL 
+            OR TRIM(p.brandID) = '' 
+            OR p.brand IS NULL 
+            OR TRIM(p.brand) = ''
+            OR LOWER(CAST(p.brand AS CHAR)) IN ('ithyaraa', 'inhouse', 'in house')
+            OR LOWER(CAST(p.brandID AS CHAR)) IN ('ithyaraa', 'inhouse', 'in house')
+            OR u.uid IS NULL
+          )
+    `;
+
+    const [ithyaraaUserRows] = await db.query(
+        `SELECT uid, username, emailID, name, profilePhoto, verifiedEmail 
+         FROM users 
+         WHERE (LOWER(CAST(username AS CHAR)) = 'ithyaraa' OR LOWER(CAST(name AS CHAR)) = 'ithyaraa')
+         LIMIT 1`
+    );
+
+    const ithyaraaBrandObj = (ithyaraaUserRows && ithyaraaUserRows.length > 0) ? {
+        uid: ithyaraaUserRows[0].uid || "ithyaraa-inhouse",
+        username: ithyaraaUserRows[0].username || "ithyaraa",
+        emailID: ithyaraaUserRows[0].emailID || "support@ithyaraa.com",
+        name: ithyaraaUserRows[0].name || "Ithyaraa",
+        profilePhoto: ithyaraaUserRows[0].profilePhoto || "/ithyaraa-logo.png",
+        verifiedEmail: ithyaraaUserRows[0].verifiedEmail ?? 1
+    } : {
+        uid: "ithyaraa-inhouse",
+        username: "ithyaraa",
+        emailID: "support@ithyaraa.com",
+        name: "Ithyaraa",
+        profilePhoto: "/ithyaraa-logo.png",
+        verifiedEmail: 1
+    };
+
+    const [rowsExternal] = await db.query(queryExternal);
+    const [rowsInHouseCats] = await db.query(queryInHouseCategories);
+
     const map = {};
-    if (Array.isArray(rows)) {
-        for (const row of rows) {
+
+    if (Array.isArray(rowsExternal)) {
+        for (const row of rowsExternal) {
             const catID = String(row.categoryID);
             if (!map[catID]) map[catID] = [];
             
-            // Deduplicate by brand UID per category
-            const exists = map[catID].some(b => b.uid === row.uid);
+            const exists = map[catID].some(b => b.uid === row.uid || b.name?.toLowerCase() === row.name?.toLowerCase());
             if (!exists) {
                 map[catID].push({
                     uid: row.uid,
@@ -297,6 +376,24 @@ const getMegamenuCategoriesBrands = async () => {
             }
         }
     }
+
+    if (Array.isArray(rowsInHouseCats)) {
+        for (const row of rowsInHouseCats) {
+            const catID = String(row.categoryID);
+            if (!map[catID]) map[catID] = [];
+
+            const exists = map[catID].some(b => 
+                b.uid === ithyaraaBrandObj.uid || 
+                b.username?.toLowerCase() === 'ithyaraa' || 
+                b.name?.toLowerCase() === 'ithyaraa'
+            );
+
+            if (!exists) {
+                map[catID].unshift(ithyaraaBrandObj);
+            }
+        }
+    }
+
     return map;
 };
 
