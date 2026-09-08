@@ -57,6 +57,8 @@ async function searchBrands(searchText) {
 }
 
 /**
+ * Build SQL WHERE condition for brand filtering
+ */
 function buildBrandCondition(brandIDs = [], filterType = '') {
     if (filterType === 'only_inhouse') {
         return { condition: "(oi.brandID IS NULL OR oi.brandID = 'inhouse')", params: [] };
