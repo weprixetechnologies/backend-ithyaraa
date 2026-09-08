@@ -32,9 +32,9 @@ const fetchCategoryByID = async (categoryID) => {
 };
 
 
-const getAllCategories = async ({ query }) => {
+const getAllCategories = async ({ query = {} }) => {
     const page = parseInt(query.page) || 1;
-    const limit = parseInt(query.limit) || 10;
+    const limit = query.limit !== undefined ? parseInt(query.limit) : 1000;
 
     const filters = {
         categoryName: query.categoryName || null
@@ -46,8 +46,8 @@ const getAllCategories = async ({ query }) => {
         return {
             success: true,
             currentPage: page,
-            totalItems: total,
-            totalPages: Math.ceil(total / limit),
+            totalItems: total || data?.length || 0,
+            totalPages: limit ? Math.ceil((total || data?.length || 0) / limit) : 1,
             data
         };
     } catch (error) {
@@ -157,6 +157,16 @@ const reorderFeaturedCategories = async (reorderedItems) => {
     }
 };
 
+const reorderAllCategories = async (reorderedItems) => {
+    try {
+        await categoryModel.updateCategoryOrder(reorderedItems);
+        return { success: true, message: 'Categories reordered successfully' };
+    } catch (error) {
+        console.error('Error in reorderAllCategories service:', error);
+        return { success: false, message: 'Failed to reorder categories', error: error.message };
+    }
+};
+
 const fetchBrandsByCategoryID = async (categoryID) => {
     try {
         const data = await categoryModel.getBrandsByCategoryID(categoryID);
@@ -196,6 +206,7 @@ module.exports = {
     fetchFeaturedCategories,
     bulkSetFeaturedCategories,
     reorderFeaturedCategories,
+    reorderAllCategories,
     fetchBrandsByCategoryID,
     fetchCategoriesBrandsMap,
     fetchMegamenuCategoriesBrands

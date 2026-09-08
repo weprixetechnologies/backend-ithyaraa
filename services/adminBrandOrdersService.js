@@ -24,39 +24,41 @@ async function searchBrands(searchText) {
 }
 
 /**
- * Get brand orders (reusing Brand Panel logic)
- * @param {string} brandID - Brand UID
+ * Get brand orders
+ * @param {Array|string} brandIDs - Array of Brand UIDs or single brandID
+ * @param {string} filterType - Preset filter type ('all', 'except_inhouse', 'only_inhouse', 'custom')
  * @param {string} fromDate - Start date (YYYY-MM-DD)
  * @param {string} toDate - End date (YYYY-MM-DD)
  * @param {number} page - Page number
  * @param {number} limit - Items per page
  * @returns {Promise<Object>} Orders with pagination
  */
-async function getBrandOrders(brandID, fromDate, toDate, page = 1, limit = 10) {
+async function getBrandOrders(brandIDs, filterType = '', fromDate = '', toDate = '', page = 1, limit = 10) {
     try {
-        if (!brandID) {
-            throw new Error('brandID is required');
+        let parsedBrandIDs = [];
+        if (Array.isArray(brandIDs)) {
+            parsedBrandIDs = brandIDs.filter(Boolean);
+        } else if (typeof brandIDs === 'string' && brandIDs.trim()) {
+            parsedBrandIDs = brandIDs.split(',').map(s => s.trim()).filter(Boolean);
         }
 
         // Get total count
-        const total = await adminBrandOrdersModel.getBrandOrdersCount(brandID, fromDate, toDate);
+        const total = await adminBrandOrdersModel.getBrandOrdersCount(parsedBrandIDs, filterType, fromDate, toDate);
 
-        // Get orders (same query logic as Brand Panel)
-        const orders = await adminBrandOrdersModel.getBrandOrders(brandID, fromDate, toDate, page, limit);
+        // Get orders
+        const orders = await adminBrandOrdersModel.getBrandOrders(parsedBrandIDs, filterType, fromDate, toDate, page, limit);
 
-        // Enrich orders with items (orderDetail and customer info already in query)
+        // Enrich orders with items
         const enrichedOrders = await Promise.all(
             orders.map(async (order) => {
-                // Get items for this brand
-                const items = await adminBrandOrdersModel.getOrderItemsForBrand(order.orderID, brandID);
-
-                // Customer name from joined query or fallback
+                const items = await adminBrandOrdersModel.getOrderItemsForBrand(order.orderID, parsedBrandIDs, filterType);
                 const customerName = order.customerName || order.customerUsername || 'N/A';
 
                 return {
                     orderID: order.orderID,
                     orderDate: order.orderDate || order.createdAt,
                     customerName: customerName,
+                    brandNames: order.brandNames || 'Ithyaraa',
                     paymentStatus: order.paymentStatus || 'N/A',
                     orderStatus: order.orderStatus || 'N/A',
                     paymentMode: order.paymentMode || 'N/A',
@@ -71,7 +73,7 @@ async function getBrandOrders(brandID, fromDate, toDate, page = 1, limit = 10) {
             orders: enrichedOrders,
             pagination: {
                 currentPage: parseInt(page),
-                totalPages: Math.ceil(total / limit),
+                totalPages: Math.ceil(total / limit) || 1,
                 totalOrders: total,
                 hasNext: page < Math.ceil(total / limit),
                 hasPrev: page > 1

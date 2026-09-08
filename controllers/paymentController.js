@@ -49,7 +49,7 @@ const handleTokenPayment = async (req, res) => {
             : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay";
 
         const frontendUrlBase = (process.env.FRONTEND_URL || 'https://ithyaraa.com').replace(/\/+$/, '');
-        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
 
         // Since the token flow is exclusively used by the mobile app, 
         // we always redirect back to the app using the deep link.

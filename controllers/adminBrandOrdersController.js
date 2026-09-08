@@ -27,17 +27,22 @@ const searchBrands = async (req, res) => {
 
 /**
  * Get brand orders
- * GET /api/admin/orders/by-brand?brandID=&fromDate=&toDate=&page=&limit=
+ * GET /api/admin/orders/by-brand?brandIDs=&filterType=&fromDate=&toDate=&page=&limit=
  */
 const getBrandOrders = async (req, res) => {
     try {
-        const { brandID, fromDate, toDate, page = 1, limit = 10 } = req.query;
+        const { brandID, brandIDs, filterType, fromDate, toDate, page = 1, limit = 10 } = req.query;
 
-        if (!brandID) {
-            return res.status(400).json({
-                success: false,
-                message: 'brandID is required'
-            });
+        // Parse brandIDs: handle comma-separated string, array, or fallback to brandID
+        let parsedBrandIDs = [];
+        if (brandIDs) {
+            if (Array.isArray(brandIDs)) {
+                parsedBrandIDs = brandIDs;
+            } else if (typeof brandIDs === 'string') {
+                parsedBrandIDs = brandIDs.split(',').map(s => s.trim()).filter(Boolean);
+            }
+        } else if (brandID) {
+            parsedBrandIDs = [brandID];
         }
 
         // Validate date format if provided
@@ -55,8 +60,11 @@ const getBrandOrders = async (req, res) => {
             });
         }
 
+        const effectiveFilterType = filterType || (parsedBrandIDs.length === 0 ? 'all' : 'custom');
+
         const result = await adminBrandOrdersService.getBrandOrders(
-            brandID,
+            parsedBrandIDs,
+            effectiveFilterType,
             fromDate,
             toDate,
             parseInt(page),

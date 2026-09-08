@@ -196,6 +196,28 @@ const reorderFeaturedCategories = async (req, res) => {
     }
 };
 
+const reorderAllCategories = async (req, res) => {
+    const { reorderedItems } = req.body;
+    if (!Array.isArray(reorderedItems)) {
+        return res.status(400).json({ success: false, message: 'reorderedItems must be an array' });
+    }
+    try {
+        const result = await categoryService.reorderAllCategories(reorderedItems);
+        if (result.success) {
+            try {
+                await deleteCache(SCOPE.CATEGORIES_ALL);
+                await deleteCache(SCOPE.CATEGORIES_FEATURED);
+            } catch (e) { console.error(e); }
+            res.status(200).json(result);
+        } else {
+            res.status(400).json(result);
+        }
+    } catch (error) {
+        console.error('reorderAllCategories error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
 const getBrandsByCategoryID = async (req, res) => {
     const { categoryID } = req.params;
 
@@ -287,6 +309,7 @@ module.exports = {
     getFeaturedCategories,
     bulkSetFeatured,
     reorderFeaturedCategories,
+    reorderAllCategories,
     getBrandsByCategoryID,
     getCategoriesBrandsMap,
     getMegamenuCategoriesBrands

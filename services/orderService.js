@@ -318,8 +318,8 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
         // Non-blocking
     }
 
-    // Schedule delayed order expiry for online payments
-    if (newOrder && newOrder.orderID && paymentMode === 'online') {
+    // Schedule delayed order expiry for online/prepaid payments
+    if (newOrder && newOrder.orderID && (String(paymentMode).toLowerCase() === 'prepaid' || String(paymentMode).toLowerCase() === 'online')) {
         const { scheduleOrderExpiry } = require('../queue/orderExpiryProducer');
         await scheduleOrderExpiry(newOrder.orderID, 30 * 60 * 1000); // 30 minutes
     }
@@ -969,12 +969,14 @@ async function updateOrderStatus(orderId, orderStatus) {
 
         // Handle coin state transitions based on status change
         const coinsAmount = order.coinsEarned || 0;
-        const wasReturnedOrCancelled = (oldStatus === 'Cancelled' || oldStatus === 'Returned');
-        const isNowReturnedOrCancelled = (orderStatus === 'Cancelled' || orderStatus === 'Returned');
+        const oldStatusLower = String(oldStatus || '').toLowerCase();
+        const newStatusLower = String(orderStatus || '').toLowerCase();
+        const wasReturnedOrCancelled = (oldStatusLower === 'cancelled' || oldStatusLower === 'returned');
+        const isNowReturnedOrCancelled = (newStatusLower === 'cancelled' || newStatusLower === 'returned');
 
         if (hasPendingCoins || coinsAmount > 0) {
             try {
-                if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
+                if (newStatusLower === 'delivered' && oldStatusLower !== 'delivered') {
                     if (wasReturnedOrCancelled && coinsAmount > 0) {
                         const reapplyResult = await coinModel.reapplyCoinsForOrder(uid, orderId, coinsAmount, 'order');
                         if (reapplyResult.success) {
@@ -985,21 +987,21 @@ async function updateOrderStatus(orderId, orderStatus) {
                         console.log(`[Coins] Completed pending coins for order ${orderId}`);
                     }
                 } else if (isNowReturnedOrCancelled && !wasReturnedOrCancelled) {
-                    if (oldStatus === 'Delivered') {
+                    if (oldStatusLower === 'delivered') {
                         const result = await coinModel.reverseEarnedCoins(uid, orderId);
                         if (result.success) {
-                            console.log(`[Coins] Reversed ${result.coinsReversed} earned coins for ${orderStatus.toLowerCase()} order ${orderId}`);
+                            console.log(`[Coins] Reversed ${result.coinsReversed} earned coins for ${newStatusLower} order ${orderId}`);
                         } else {
                             console.log(`[Coins] ${result.message} for order ${orderId}`);
                         }
                     } else {
                         await coinModel.reversePendingCoins(uid, orderId);
-                        console.log(`[Coins] Reversed pending coins for ${orderStatus.toLowerCase()} order ${orderId}`);
+                        console.log(`[Coins] Reversed pending coins for ${newStatusLower} order ${orderId}`);
                     }
-                } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && orderStatus !== 'Delivered' && coinsAmount > 0) {
+                } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && newStatusLower !== 'delivered' && coinsAmount > 0) {
                     const reapplyResult = await coinModel.reapplyCoinsToPending(uid, orderId, coinsAmount, 'order');
                     if (reapplyResult.success) {
-                        console.log(`[Coins] Re-applied ${coinsAmount} coins as pending for order ${orderId} (status back to ${orderStatus})`);
+                        console.log(`[Coins] Re-applied ${coinsAmount} coins as pending for order ${orderId} (status back to ${newStatusLower})`);
                     }
                 }
             } catch (coinErr) {
@@ -1010,10 +1012,7 @@ async function updateOrderStatus(orderId, orderStatus) {
 
         // Handle affiliate refer settlement: on delivery confirm (lock until return period); on return/cancel revert; on revert back from return/cancel re-apply
         try {
-            const wasReturnedOrCancelled = (oldStatus === 'Cancelled' || oldStatus === 'Returned');
-            const isNowReturnedOrCancelled = (orderStatus === 'Cancelled' || orderStatus === 'Returned');
-
-            if (orderStatus === 'Delivered' && oldStatus !== 'Delivered') {
+            if (newStatusLower === 'delivered' && oldStatusLower !== 'delivered') {
                 if (wasReturnedOrCancelled) {
                     const reapplyResult = await affiliateModel.reapplyReferSettlementOnDelivery(orderId, new Date());
                     if (reapplyResult.updated > 0) {
@@ -1026,10 +1025,10 @@ async function updateOrderStatus(orderId, orderStatus) {
                     }
                 }
             } else if (isNowReturnedOrCancelled && !wasReturnedOrCancelled) {
-                if (oldStatus === 'Delivered') {
+                if (oldStatusLower === 'delivered') {
                     const revertResult = await affiliateModel.revertReferSettlementOnReturn(orderId);
                     if (revertResult.reverted > 0) {
-                        console.log(`[Affiliate] Reverted ${revertResult.reverted} refer settlement(s) for ${orderStatus.toLowerCase()} order ${orderId}`);
+                        console.log(`[Affiliate] Reverted ${revertResult.reverted} refer settlement(s) for ${newStatusLower} order ${orderId}`);
                     }
                 } else {
                     const cancelResult = await affiliateModel.revertPendingReferSettlementOnCancel(orderId);
@@ -1037,10 +1036,10 @@ async function updateOrderStatus(orderId, orderStatus) {
                         console.log(`[Affiliate] Reverted ${cancelResult.reverted} pending refer settlement(s) for cancelled order ${orderId}`);
                     }
                 }
-            } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && orderStatus !== 'Delivered') {
+            } else if (wasReturnedOrCancelled && !isNowReturnedOrCancelled && newStatusLower !== 'delivered') {
                 const reapplyPendingResult = await affiliateModel.reapplyReferSettlementToPending(orderId);
                 if (reapplyPendingResult.updated > 0) {
-                    console.log(`[Affiliate] Re-applied ${reapplyPendingResult.updated} refer settlement(s) to pending for order ${orderId} (status back to ${orderStatus})`);
+                    console.log(`[Affiliate] Re-applied ${reapplyPendingResult.updated} refer settlement(s) to pending for order ${orderId} (status back to ${newStatusLower})`);
                 }
             }
         } catch (affiliateErr) {
@@ -1950,8 +1949,8 @@ async function runExpirySafetyNet() {
         const [stuckOrders] = await db.query(
             `SELECT orderID FROM orderDetail 
              WHERE paymentStatus = 'pending' 
-             AND paymentMode = 'online' 
-             AND created < NOW() - INTERVAL 1 HOUR`
+             AND (LOWER(paymentMode) = 'prepaid' OR LOWER(paymentMode) = 'online') 
+             AND createdAt < NOW() - INTERVAL 1 HOUR`
         );
 
         for (const order of stuckOrders) {

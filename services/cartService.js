@@ -568,12 +568,9 @@ async function getCart(uid) {
         // Write recomputed pricing (flash + offers) to DB
         await cartModel.updateCartItems(items);
 
-        // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
+        // Summary with detailed offer and product discount breakdown
         const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-        const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
-        const total = selectedItems.reduce((sum, i) => sum + Math.round((i.lineTotalAfter || 0) * 100), 0) / 100;
-        const totalDiscount = (Math.round(subtotal * 100) - Math.round(total * 100)) / 100;
-        const summary = { subtotal, total, totalDiscount, anyModifications: items.some(it => it.isFlashSale) };
+        const summary = buildCartSummary(selectedItems, items.some(it => it.isFlashSale));
 
         // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
         if (summary.total < 999) {
@@ -788,13 +785,9 @@ async function getCart(uid) {
     });
 
 
-    // Summary: subtotal = sum(regularPrice * quantity), total = sum(lineTotalAfter), totalDiscount = subtotal - total
+    // Summary with detailed offer and product discount breakdown
     const selectedItems = items.filter(i => i.selected === true || i.selected === 1 || i.selected === null);
-    const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
-    const total = selectedItems.reduce((sum, i) => sum + Math.round((i.lineTotalAfter || 0) * 100), 0) / 100;
-    const totalDiscount = (Math.round(subtotal * 100) - Math.round(total * 100)) / 100;
-
-    const summary = { subtotal, total, totalDiscount, anyModifications };
+    const summary = buildCartSummary(selectedItems, anyModifications);
 
     // Shipping Fee Logic: Brand-Specific + Inhouse (Admin)
     if (summary.total < 999) {
@@ -837,6 +830,79 @@ async function getCart(uid) {
 
 
 // --- Offer helpers with fixed numeric handling ---
+function getOfferTitle(offer) {
+    if (!offer) return 'Special Offer';
+    if (offer.offerName && offer.offerName.trim()) return offer.offerName.trim();
+    if (offer.offerType === 'buy_x_get_y') return `Buy ${offer.buyCount} Get ${offer.getCount} Free`;
+    if (offer.offerType === 'buy_x_at_x') return `Buy ${offer.buyCount} @ ₹${offer.buyAt}`;
+    if (offer.offerType === 'buy_x_get_off') return `Buy ${offer.buyCount} Get ${offer.discountType === 'percentage' ? offer.discountValue + '% Off' : '₹' + offer.discountValue + ' Off'}`;
+    return 'Special Offer';
+}
+
+function buildCartSummary(selectedItems, anyModifications) {
+    const subtotal = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.regularPrice) || 0) * 100) * (Number(i.quantity) || 0), 0) / 100;
+    const total = selectedItems.reduce((sum, i) => sum + Math.round((Number(i.lineTotalAfter) || 0) * 100), 0) / 100;
+    const totalDiscount = Math.max(0, (Math.round(subtotal * 100) - Math.round(total * 100)) / 100);
+
+    // Product Discount (MRP vs unitPriceBefore/lineTotalBefore)
+    const productDiscount = selectedItems.reduce((sum, i) => {
+        const regTotal = (Number(i.regularPrice) || 0) * (Number(i.quantity) || 0);
+        const beforeTotal = Number(i.lineTotalBefore ?? ((Number(i.unitPriceBefore) || Number(i.regularPrice) || 0) * (Number(i.quantity) || 0))) || 0;
+        return sum + Math.max(0, Math.round((regTotal - beforeTotal) * 100));
+    }, 0) / 100;
+
+    // Offer Discount (lineTotalBefore vs lineTotalAfter)
+    const offerDiscount = selectedItems.reduce((sum, i) => {
+        const beforeTotal = Number(i.lineTotalBefore ?? ((Number(i.unitPriceBefore) || Number(i.regularPrice) || 0) * (Number(i.quantity) || 0))) || 0;
+        const afterTotal = Number(i.lineTotalAfter ?? ((Number(i.unitPriceAfter) || Number(i.regularPrice) || 0) * (Number(i.quantity) || 0))) || 0;
+        return sum + Math.max(0, Math.round((beforeTotal - afterTotal) * 100));
+    }, 0) / 100;
+
+    // Build appliedOffers list
+    const appliedOffersMap = new Map();
+    selectedItems.forEach(i => {
+        if (i.offerApplied && i.offerID) {
+            const beforeTotal = Number(i.lineTotalBefore ?? ((Number(i.unitPriceBefore) || Number(i.regularPrice) || 0) * (Number(i.quantity) || 0))) || 0;
+            const afterTotal = Number(i.lineTotalAfter ?? ((Number(i.unitPriceAfter) || Number(i.regularPrice) || 0) * (Number(i.quantity) || 0))) || 0;
+            const disc = Math.max(0, Math.round((beforeTotal - afterTotal) * 100)) / 100;
+
+            if (!appliedOffersMap.has(i.offerID)) {
+                appliedOffersMap.set(i.offerID, {
+                    offerID: i.offerID,
+                    offerName: i.offerName || 'Special Offer',
+                    offerType: i.offerType || 'offer',
+                    discountAmount: 0,
+                    appliedProducts: []
+                });
+            }
+            const offerEntry = appliedOffersMap.get(i.offerID);
+            offerEntry.discountAmount = (Math.round(offerEntry.discountAmount * 100) + Math.round(disc * 100)) / 100;
+            offerEntry.appliedProducts.push({
+                cartItemID: i.cartItemID,
+                productID: i.productID,
+                name: i.name,
+                quantity: i.quantity,
+                featuredImage: i.featuredImage,
+                lineTotalBefore: beforeTotal,
+                lineTotalAfter: afterTotal,
+                discountAmount: disc
+            });
+        }
+    });
+
+    const appliedOffers = Array.from(appliedOffersMap.values());
+
+    return {
+        subtotal,
+        total,
+        totalDiscount,
+        productDiscount,
+        offerDiscount,
+        appliedOffers,
+        anyModifications
+    };
+}
+
 function applyBuyXGetY(affectedItems, offer) {
     const groupSize = offer.buyCount + offer.getCount;
     const totalQty = affectedItems.reduce((sum, i) => sum + i.quantity, 0);
@@ -845,6 +911,8 @@ function applyBuyXGetY(affectedItems, offer) {
     let qtyLeftFree = numGroups * offer.getCount;
 
     console.log(`[BUY_X_GET_X] totalQty=${totalQty}, numGroups=${numGroups}, paidQty=${qtyLeftPaid}, freeQty=${qtyLeftFree}`);
+
+    const offerTitle = getOfferTitle(offer);
 
     for (const item of affectedItems) {
         const base = Number(item.unitPriceBefore ?? item.overridePrice ?? item.salePrice ?? item.regularPrice);
@@ -869,6 +937,15 @@ function applyBuyXGetY(affectedItems, offer) {
 
         item.offerApplied = true;
         item.offerStatus = 'applied';
+        item.offerName = offerTitle;
+        item.offerType = offer.offerType;
+        item.offerDetails = {
+            offerID: offer.offerID,
+            offerName: offerTitle,
+            offerType: offer.offerType,
+            buyCount: offer.buyCount,
+            getCount: offer.getCount
+        };
 
         console.log(`[BUY_X_GET_X] Item ${item.cartItemID} unitArray=${unitArray} unitPriceAfter=${item.unitPriceAfter}`);
     }
@@ -887,6 +964,8 @@ function applyBuyXAtXxx(affectedItems, offer) {
     let remainderCount = remainder * numGroups;
 
     console.log(`[BUY_X_AT_X] totalQty=${totalQty}, eligibleQty=${eligibleQty}, discBase=${discBase}, remainder=${remainder}`);
+
+    const offerTitle = getOfferTitle(offer);
 
     for (const item of affectedItems) {
         const basePaise = Math.round((item.unitPriceBefore ?? item.overridePrice ?? item.salePrice ?? item.regularPrice) * 100);
@@ -913,6 +992,15 @@ function applyBuyXAtXxx(affectedItems, offer) {
 
         item.offerApplied = true;
         item.offerStatus = 'applied';
+        item.offerName = offerTitle;
+        item.offerType = offer.offerType;
+        item.offerDetails = {
+            offerID: offer.offerID,
+            offerName: offerTitle,
+            offerType: offer.offerType,
+            buyCount: offer.buyCount,
+            buyAt: offer.buyAt
+        };
 
         console.log(`[BUY_X_AT_X] Item ${item.cartItemID} unitArray=${unitArray} unitPriceAfter=${item.unitPriceAfter}`);
     }
@@ -925,6 +1013,8 @@ function applyBuyXGetOff(affectedItems, offer) {
     const productScope = offer.productScope || 'different_product';
 
     console.log(`[BUY_X_GET_OFF] buyCount=${buyCount}, discountType=${discountType}, discountValue=${discountValue}, productScope=${productScope}`);
+
+    const offerTitle = getOfferTitle(offer);
 
     const applyToGroup = (groupItems) => {
         const totalQty = groupItems.reduce((sum, i) => sum + i.quantity, 0);
@@ -960,6 +1050,16 @@ function applyBuyXGetOff(affectedItems, offer) {
             item.unitPriceAfter = Math.round(item.unitPriceAfter * 100) / 100;
             item.offerApplied = true;
             item.offerStatus = 'applied';
+            item.offerName = offerTitle;
+            item.offerType = offer.offerType;
+            item.offerDetails = {
+                offerID: offer.offerID,
+                offerName: offerTitle,
+                offerType: offer.offerType,
+                buyCount: offer.buyCount,
+                discountType,
+                discountValue
+            };
 
             console.log(`[BUY_X_GET_OFF] Item ${item.cartItemID || item.productID} unitArray=${unitArray} unitPriceAfter=${item.unitPriceAfter}`);
         }

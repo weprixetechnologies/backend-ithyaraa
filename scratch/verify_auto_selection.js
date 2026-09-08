@@ -2,7 +2,7 @@ const axios = require('axios');
 const db = require('../utils/dbconnect');
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI2MThJMlZLQSIsInVzZXJuYW1lIjoicm9uaXRzYXJrYXJfMDEiLCJlbWFpbElEIjoicm9uaXRzYXJrYXIuZGV2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3ODAyMDYyMCwiZXhwIjoxNzc4NjI1NDIwfQ.XRwWW4ap6BBgwgvuzg6JpvqlCB4sERHXGUJr-FE5ySY';
-const BASE_URL = 'https://backend.ithyaraa.com/api/cart'; // Adjust port if needed
+const BASE_URL = 'http://localhost:7885/api/cart'; // Adjust port if needed
 
 const testProductID = 'ITHYP4c8SB';
 const testVariationID = 'VAR-P25SQFL';

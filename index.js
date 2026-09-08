@@ -198,6 +198,11 @@ app.use('/api/admin/offer-section-items', offerSectionItemsRouter);
 const homeCategoryAdminRouter = require('./router/admin/homeCategoryAdminRouter');
 app.use('/api/admin/home-categories', homeCategoryAdminRouter);
 
+// Product Badges System
+const productBadgesRoutes = require('./routes/productBadgesRoutes');
+app.use('/api', productBadgesRoutes);
+
+
 // Custom tabbed categories (admin managed)
 const customTabbedCategoryAdminRouter = require('./router/admin/customTabbedCategoryAdminRouter');
 app.use('/api/admin/custom-tabbed-categories', customTabbedCategoryAdminRouter);

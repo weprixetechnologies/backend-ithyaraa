@@ -49,8 +49,8 @@ async function sendOrderConfirmationEmail(user, order, paymentMode, merchantOrde
             totalDiscount: order.orderData.summary.totalDiscount,
             total: order.orderData.summary.total,
             isCOD: paymentMode === 'COD',
-            trackOrderUrl: `${process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'}/track-order/${order.orderID}`,
-            websiteUrl: process.env.FRONTEND_URL || 'https://backend.ithyaraa.com'
+            trackOrderUrl: `${process.env.FRONTEND_URL || 'http://localhost:7885'}/track-order/${order.orderID}`,
+            websiteUrl: process.env.FRONTEND_URL || 'http://localhost:7885'
         };
 
         // Generate invoice PDF for attachment
@@ -294,7 +294,7 @@ const placeOrderController = async (req, res) => {
 
         const merchantOrderId = randomUUID();
         // Normalize FRONTEND_URL - remove trailing slashes
-        const frontendUrlBase = (process.env.FRONTEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const frontendUrlBase = (process.env.FRONTEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         // Construct redirect URL and normalize to prevent double slashes (preserve protocol)
         let redirectUrl = `${frontendUrlBase}/order-status/order-summary/${order.orderID}`.replace(/([^:]\/)\/+/g, '$1');
 
@@ -302,7 +302,7 @@ const placeOrderController = async (req, res) => {
             redirectUrl = `ithyaraa://deeplink/payment/success?order_id=${order.orderID}`;
         }
         // Use order-specific webhook endpoint - ensure no trailing slashes
-        const backendUrl = (process.env.BACKEND_URL || 'https://backend.ithyaraa.com').replace(/\/+$/, '');
+        const backendUrl = (process.env.BACKEND_URL || 'http://localhost:7885').replace(/\/+$/, '');
         const callbackUrl = `${backendUrl}/api/phonepe/webhook/order`;
 
         console.log('[ORDER] PhonePe callback URL:', callbackUrl);
@@ -435,7 +435,7 @@ const getOrderSummariesController = async (req, res) => {
 const getOrderDetailsByOrderIDController = async (req, res) => {
     try {
         const uid = req.user.uid;
-        const { orderID } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const { items, orderDetail } = await orderService.getOrderDetailsByOrderID(orderID, uid);
         return res.status(200).json({ success: true, items, orderDetail });
     } catch (error) {
@@ -518,7 +518,7 @@ module.exports.getMyReturnsController = getMyReturnsController;
 
 const updateOrderController = async (req, res) => {
     try {
-        const { orderID } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         if (!orderID) {
             return res.status(400).json({ success: false, message: 'orderID is required' });
         }
@@ -569,12 +569,12 @@ const updateOrderController = async (req, res) => {
 // Get order details by order ID
 const getOrderDetailsController = async (req, res) => {
     try {
-        const { orderId } = req.params;
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        const orderID = req.params.orderID || req.params.orderId;
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const orderDetails = await orderService.getOrderDetails(orderId, req.user.uid);
+        const orderDetails = await orderService.getOrderDetails(orderID, req.user.uid);
         if (!orderDetails) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -589,12 +589,12 @@ const getOrderDetailsController = async (req, res) => {
 // Get order details by order ID for admin
 const getAdminOrderDetailsController = async (req, res) => {
     try {
-        const { orderId } = req.params;
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        const orderID = req.params.orderID || req.params.orderId;
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const orderDetails = await orderService.getAdminOrderDetails(orderId);
+        const orderDetails = await orderService.getAdminOrderDetails(orderID);
         if (!orderDetails) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -724,11 +724,11 @@ const returnOrderController = async (req, res) => {
 // Update order status
 const updateOrderStatusController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const { orderStatus } = req.body;
 
-        if (!orderId || !orderStatus) {
-            return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' });
+        if (!orderID || !orderStatus) {
+            return res.status(400).json({ success: false, message: 'orderID and orderStatus are required' });
         }
 
         const validStatuses = ['pending', 'preparing', 'shipped', 'delivered', 'cancelled', 'returned'];
@@ -737,7 +737,7 @@ const updateOrderStatusController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid order status: ' + orderStatus });
         }
 
-        const updated = await orderService.updateOrderStatus(orderId, orderStatus);
+        const updated = await orderService.updateOrderStatus(orderID, orderStatus);
         if (!updated) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -752,11 +752,11 @@ const updateOrderStatusController = async (req, res) => {
 // Update payment status
 const updatePaymentStatusController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const { paymentStatus } = req.body;
 
-        if (!orderId || !paymentStatus) {
-            return res.status(400).json({ success: false, message: 'orderId and paymentStatus are required' });
+        if (!orderID || !paymentStatus) {
+            return res.status(400).json({ success: false, message: 'orderID and paymentStatus are required' });
         }
 
         const validStatuses = ['pending', 'successful', 'failed', 'refunded'];
@@ -765,7 +765,7 @@ const updatePaymentStatusController = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid payment status' });
         }
 
-        const updated = await orderService.updatePaymentStatus(orderId, paymentStatus);
+        const updated = await orderService.updatePaymentStatus(orderID, paymentStatus);
         if (!updated) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -780,14 +780,14 @@ const updatePaymentStatusController = async (req, res) => {
 // Generate invoice
 const generateInvoiceController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const { action = 'download' } = req.query; // 'download' or 'data'
 
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const result = await orderService.generateInvoice(orderId);
+        const result = await orderService.generateInvoice(orderID);
         if (!result || !result.success) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -806,7 +806,7 @@ const generateInvoiceController = async (req, res) => {
                 success: true,
                 data: result.data,
                 invoice: {
-                    orderId: result.invoice.orderId,
+                    orderID: result.invoice.orderId || result.invoice.orderID,
                     invoiceNumber: result.invoice.invoiceNumber,
                     fileName: result.invoice.fileName,
                     generatedAt: result.invoice.generatedAt
@@ -822,16 +822,16 @@ const generateInvoiceController = async (req, res) => {
 // Generate invoice for user (with ownership check)
 const generateInvoiceForUserController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const uid = req.user.uid; // Get user ID from JWT
         const { action = 'download' } = req.query; // 'download' or 'data'
 
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
         // Get order details and verify ownership
-        const order = await orderModel.getOrderByID(orderId);
+        const order = await orderModel.getOrderByID(orderID);
         if (!order) {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
@@ -841,7 +841,7 @@ const generateInvoiceForUserController = async (req, res) => {
             return res.status(403).json({ success: false, message: 'You do not have permission to access this order' });
         }
 
-        const result = await orderService.generateInvoice(orderId);
+        const result = await orderService.generateInvoice(orderID);
         if (!result || !result.success) {
             return res.status(404).json({ success: false, message: 'Failed to generate invoice' });
         }
@@ -876,13 +876,13 @@ const generateInvoiceForUserController = async (req, res) => {
 // Email invoice to customer
 const emailInvoiceController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
 
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const result = await orderService.emailInvoice(orderId);
+        const result = await orderService.emailInvoice(orderID);
         if (!result || !result.success) {
             return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
         }
@@ -901,19 +901,19 @@ const emailInvoiceController = async (req, res) => {
 // Update order items tracking (for admin): shipment AWB and/or return AWB; match by orderItemID or name+variationName
 const updateOrderItemsTrackingController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const { items } = req.body; // [{ orderItemID?, name?, variationName?, trackingCode?, deliveryCompany?, returnTrackingCode?, returnDeliveryCompany?, itemStatus? }]
         if (!Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: 'Items array is required' });
         }
 
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
         const [verify] = await db.query(
             `SELECT 1 FROM orderDetail WHERE orderID = ? LIMIT 1`,
-            [orderId]
+            [orderID]
         );
         if (verify.length === 0) {
             return res.status(404).json({ success: false, message: 'Order not found' });
@@ -959,7 +959,7 @@ const updateOrderItemsTrackingController = async (req, res) => {
             if (updates.length === 0) continue;
 
             const setClause = updates.join(', ');
-            params.push(orderId);
+            params.push(orderID);
             let whereClause;
             const whereParams = [];
             if (it.orderItemID != null) {
@@ -986,7 +986,7 @@ const updateOrderItemsTrackingController = async (req, res) => {
             if (result.affectedRows > 0) {
                 let finalOIDM = it.orderItemID;
                 if (!finalOIDM) {
-                    const [row] = await db.query(`SELECT orderItemID FROM order_items WHERE orderID = ? AND ${whereClause} LIMIT 1`, [orderId, ...whereParams]);
+                    const [row] = await db.query(`SELECT orderItemID FROM order_items WHERE orderID = ? AND ${whereClause} LIMIT 1`, [orderID, ...whereParams]);
                     if (row && row[0]) finalOIDM = row[0].orderItemID;
                 }
 
@@ -1020,12 +1020,12 @@ const updateOrderItemsTrackingController = async (req, res) => {
             const now = new Date();
             await db.query(
                 `UPDATE orderDetail SET deliveredAt = ? WHERE orderID = ? AND deliveredAt IS NULL`,
-                [now, orderId]
+                [now, orderID]
             );
             const lockUntil = new Date(now.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
             await db.query(
                 `UPDATE order_items SET coinLockUntil = ? WHERE orderID = ? AND coinLockUntil IS NULL AND itemStatus = 'delivered'`,
-                [lockUntil, orderId]
+                [lockUntil, orderID]
             );
         }
 
@@ -1039,14 +1039,14 @@ const updateOrderItemsTrackingController = async (req, res) => {
 // Email invoice to customer (user-facing)
 const emailInvoiceToCustomerController = async (req, res) => {
     try {
-        const { orderId } = req.params;
+        const orderID = req.params.orderID || req.params.orderId;
         const uid = req.user.uid; // Get user ID from JWT
 
-        if (!orderId) {
-            return res.status(400).json({ success: false, message: 'orderId is required' });
+        if (!orderID) {
+            return res.status(400).json({ success: false, message: 'orderID is required' });
         }
 
-        const result = await orderService.emailInvoiceToCustomer(orderId, uid);
+        const result = await orderService.emailInvoiceToCustomer(orderID, uid);
         if (!result || !result.success) {
             return res.status(404).json({ success: false, message: result.message || 'Failed to send invoice' });
         }

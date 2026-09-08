@@ -20,8 +20,9 @@ router.put('/edit/:categoryID', authAdminMiddleware.verifyAccessToken, categoryC
 // Delete category by ID
 router.delete('/delete/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.deleteCategory);
 
-// Featured Management
+// Reordering
 router.put('/bulk-featured', authAdminMiddleware.verifyAccessToken, categoryController.bulkSetFeatured);
 router.put('/reorder', authAdminMiddleware.verifyAccessToken, categoryController.reorderFeaturedCategories);
+router.put('/reorder-all', authAdminMiddleware.verifyAccessToken, categoryController.reorderAllCategories);
 
 module.exports = router;

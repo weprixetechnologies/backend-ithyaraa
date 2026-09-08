@@ -12,23 +12,23 @@ router.get('/get-order-summaries', userAuth.verifyAccessToken, orderController.g
 router.get('/order-details/:orderID', userAuth.verifyAccessToken, orderController.getOrderDetailsByOrderIDController);
 router.get('/my-returns', userAuth.verifyAccessToken, orderController.getMyReturnsController);
 router.post('/return-order', userAuth.verifyAccessToken, orderController.returnOrderController);
-// router.get('/order-details/:orderId', userAuth.verifyAccessToken, orderController.getOrderDetailsController);
+// router.get('/order-details/:orderID', userAuth.verifyAccessToken, orderController.getOrderDetailsController);
 router.put('/update/:orderID', userAuth.verifyAccessToken, orderController.updateOrderController);
-router.get('/generate-invoice/:orderId', userAuth.verifyAccessToken, orderController.generateInvoiceForUserController);
-router.post('/email-invoice/:orderId', userAuth.verifyAccessToken, orderController.emailInvoiceToCustomerController);
+router.get('/generate-invoice/:orderID', userAuth.verifyAccessToken, orderController.generateInvoiceForUserController);
+router.post('/email-invoice/:orderID', userAuth.verifyAccessToken, orderController.emailInvoiceToCustomerController);
 
 // Admin routes
 router.get('/admin/all', authAdminMiddleware.verifyAccessToken, orderController.getAllOrdersController);
-router.get('/admin/order-details/:orderId', authAdminMiddleware.verifyAccessToken, orderController.getAdminOrderDetailsController);
+router.get('/admin/order-details/:orderID', authAdminMiddleware.verifyAccessToken, orderController.getAdminOrderDetailsController);
 router.get('/admin/refund-queries', authAdminMiddleware.verifyAccessToken, orderController.getRefundQueriesController);
 router.get('/admin/refund-queries-resolved', authAdminMiddleware.verifyAccessToken, orderController.getResolvedRefundQueriesController);
 router.put('/admin/refund-queries/:refundQueryID/status', authAdminMiddleware.verifyAccessToken, orderController.updateRefundQueryStatusController);
 router.post('/admin/approve-return/:orderItemID', authAdminMiddleware.verifyAccessToken, orderController.approveReturnRequestController);
 router.post('/admin/reject-return/:orderItemID', authAdminMiddleware.verifyAccessToken, orderController.rejectReturnRequestController);
-router.put('/admin/update-status/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updateOrderStatusController);
-router.put('/admin/update-payment-status/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updatePaymentStatusController);
-router.put('/admin/update-items-tracking/:orderId', authAdminMiddleware.verifyAccessToken, orderController.updateOrderItemsTrackingController);
-router.get('/admin/generate-invoice/:orderId', authAdminMiddleware.verifyAccessToken, orderController.generateInvoiceController);
-router.post('/admin/email-invoice/:orderId', authAdminMiddleware.verifyAccessToken, orderController.emailInvoiceController);
+router.put('/admin/update-status/:orderID', authAdminMiddleware.verifyAccessToken, orderController.updateOrderStatusController);
+router.put('/admin/update-payment-status/:orderID', authAdminMiddleware.verifyAccessToken, orderController.updatePaymentStatusController);
+router.put('/admin/update-items-tracking/:orderID', authAdminMiddleware.verifyAccessToken, orderController.updateOrderItemsTrackingController);
+router.get('/admin/generate-invoice/:orderID', authAdminMiddleware.verifyAccessToken, orderController.generateInvoiceController);
+router.post('/admin/email-invoice/:orderID', authAdminMiddleware.verifyAccessToken, orderController.emailInvoiceController);
 
 module.exports = router;

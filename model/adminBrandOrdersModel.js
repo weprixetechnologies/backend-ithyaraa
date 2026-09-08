@@ -57,32 +57,58 @@ async function searchBrands(searchText) {
 }
 
 /**
- * Get brand orders count (reusing Brand Panel logic)
- * @param {string} brandID - Brand UID
- * @param {string} fromDate - Start date (YYYY-MM-DD)
- * @param {string} toDate - End date (YYYY-MM-DD)
- * @param {Array} whereConditions - Additional WHERE conditions
- * @param {Array} queryParams - Query parameters
- * @returns {Promise<number>} Total count of unique orders
+function buildBrandCondition(brandIDs = [], filterType = '') {
+    if (filterType === 'only_inhouse') {
+        return { condition: "(oi.brandID IS NULL OR oi.brandID = 'inhouse')", params: [] };
+    }
+    if (filterType === 'except_inhouse') {
+        return { condition: "(oi.brandID IS NOT NULL AND oi.brandID != 'inhouse')", params: [] };
+    }
+    if (filterType === 'all') {
+        return { condition: "1=1", params: [] };
+    }
+
+    // Custom selection or single brandID
+    const ids = Array.isArray(brandIDs) ? brandIDs.filter(Boolean) : (brandIDs ? [String(brandIDs)] : []);
+    if (ids.length === 0) {
+        return { condition: "1=1", params: [] };
+    }
+
+    const hasInhouse = ids.includes('inhouse');
+    const realUIDs = ids.filter(id => id !== 'inhouse');
+
+    if (hasInhouse && realUIDs.length > 0) {
+        const placeholders = realUIDs.map(() => '?').join(',');
+        return {
+            condition: `(oi.brandID IN (${placeholders}) OR oi.brandID IS NULL OR oi.brandID = 'inhouse')`,
+            params: realUIDs
+        };
+    } else if (hasInhouse) {
+        return { condition: "(oi.brandID IS NULL OR oi.brandID = 'inhouse')", params: [] };
+    } else {
+        const placeholders = realUIDs.map(() => '?').join(',');
+        return {
+            condition: `oi.brandID IN (${placeholders})`,
+            params: realUIDs
+        };
+    }
+}
+
+/**
+ * Get brand orders count
  */
-async function getBrandOrdersCount(brandID, fromDate, toDate, whereConditions = [], queryParams = []) {
+async function getBrandOrdersCount(brandIDs, filterType, fromDate, toDate, whereConditions = [], queryParams = []) {
     try {
-        // Build date filter
-        const dateFilter = fromDate && toDate
-            ? `DATE(oi.createdAt) BETWEEN ? AND ?`
-            : null;
+        const brandCond = buildBrandCondition(brandIDs, filterType);
 
-        // Base conditions
-        let conditions = ['oi.brandID = ?'];
-        let params = [brandID];
+        let conditions = [brandCond.condition];
+        let params = [...brandCond.params];
 
-        // Add date filter if provided
-        if (dateFilter) {
-            conditions.push(dateFilter);
+        if (fromDate && toDate) {
+            conditions.push(`DATE(oi.createdAt) BETWEEN ? AND ?`);
             params.push(fromDate, toDate);
         }
 
-        // Add additional conditions
         conditions = conditions.concat(whereConditions);
         params = params.concat(queryParams);
 
@@ -103,50 +129,35 @@ async function getBrandOrdersCount(brandID, fromDate, toDate, whereConditions = 
 }
 
 /**
- * Get brand orders with pagination (reusing Brand Panel logic)
- * @param {string} brandID - Brand UID
- * @param {string} fromDate - Start date (YYYY-MM-DD)
- * @param {string} toDate - End date (YYYY-MM-DD)
- * @param {number} page - Page number
- * @param {number} limit - Items per page
- * @param {Array} whereConditions - Additional WHERE conditions
- * @param {Array} queryParams - Query parameters
- * @returns {Promise<Array>} Array of orders
+ * Get brand orders with pagination
  */
-async function getBrandOrders(brandID, fromDate, toDate, page = 1, limit = 10, whereConditions = [], queryParams = []) {
+async function getBrandOrders(brandIDs, filterType, fromDate, toDate, page = 1, limit = 10, whereConditions = [], queryParams = []) {
     try {
         const offset = (page - 1) * limit;
+        const brandCond = buildBrandCondition(brandIDs, filterType);
 
-        // Build date filter
-        const dateFilter = fromDate && toDate
-            ? `DATE(oi.createdAt) BETWEEN ? AND ?`
-            : null;
+        let conditions = [brandCond.condition];
+        let params = [...brandCond.params];
 
-        // Base conditions
-        let conditions = ['oi.brandID = ?'];
-        let params = [brandID];
-
-        // Add date filter if provided
-        if (dateFilter) {
-            conditions.push(dateFilter);
+        if (fromDate && toDate) {
+            conditions.push(`DATE(oi.createdAt) BETWEEN ? AND ?`);
             params.push(fromDate, toDate);
         }
 
-        // Add additional conditions
         conditions = conditions.concat(whereConditions);
         params = params.concat(queryParams);
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Get orders grouped by orderID with orderDetail and customer info (optimized with JOINs)
         const ordersQuery = `
             SELECT 
                 oi.orderID,
                 oi.uid,
                 oi.createdAt,
-                COUNT(oi.orderID) as itemCount,
+                COUNT(oi.orderItemID) as itemCount,
                 SUM(oi.lineTotalAfter) as brandOrderAmount,
-                GROUP_CONCAT(oi.name SEPARATOR ', ') as itemNames,
+                GROUP_CONCAT(DISTINCT oi.name SEPARATOR ', ') as itemNames,
+                GROUP_CONCAT(DISTINCT CASE WHEN oi.brandID IS NULL OR oi.brandID = 'inhouse' THEN 'Ithyaraa' ELSE COALESCE(u_brand.name, u_brand.username, 'Ithyaraa') END SEPARATOR ', ') as brandNames,
                 od.paymentMode,
                 od.paymentStatus,
                 od.orderStatus,
@@ -156,6 +167,7 @@ async function getBrandOrders(brandID, fromDate, toDate, page = 1, limit = 10, w
             FROM order_items oi
             LEFT JOIN orderDetail od ON oi.orderID = od.orderID
             LEFT JOIN users u ON od.uid = u.uid
+            LEFT JOIN users u_brand ON oi.brandID = u_brand.uid
             ${whereClause}
             GROUP BY oi.orderID, oi.uid, oi.createdAt, od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt, u.name, u.username
             ORDER BY oi.createdAt DESC
@@ -173,13 +185,9 @@ async function getBrandOrders(brandID, fromDate, toDate, page = 1, limit = 10, w
 
 /**
  * Get order details for admin brand orders view
- * @param {string} orderID - Order ID
- * @param {string} brandID - Brand UID
- * @returns {Promise<Object>} Order details with orderDetail info
  */
 async function getOrderDetailsForBrand(orderID, brandID) {
     try {
-        // Get orderDetail info
         const [orderDetailRows] = await db.query(
             `SELECT od.orderID, od.uid, od.paymentMode, od.paymentStatus, od.orderStatus, od.createdAt
              FROM orderDetail od
@@ -192,7 +200,6 @@ async function getOrderDetailsForBrand(orderID, brandID) {
             return null;
         }
 
-        // Get customer info
         const orderDetail = orderDetailRows[0];
         const [userRows] = await db.query(
             `SELECT uid, name, username, emailID
@@ -220,13 +227,16 @@ async function getOrderDetailsForBrand(orderID, brandID) {
 }
 
 /**
- * Get order items for a specific brand in an order
- * @param {string} orderID - Order ID
- * @param {string} brandID - Brand UID
- * @returns {Promise<Array>} Array of order items
+ * Get order items for a specific brand or set of brands in an order
  */
-async function getOrderItemsForBrand(orderID, brandID) {
+async function getOrderItemsForBrand(orderID, brandIDs, filterType) {
     try {
+        const brandCond = buildBrandCondition(brandIDs, filterType);
+        let conditions = ['oi.orderID = ?', brandCond.condition];
+        let params = [orderID, ...brandCond.params];
+
+        const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
         const [items] = await db.query(
             `SELECT 
                 oi.name,
@@ -235,14 +245,16 @@ async function getOrderItemsForBrand(orderID, brandID) {
                 oi.unitPriceAfter,
                 oi.lineTotalAfter,
                 oi.itemStatus,
-                oi.featuredImage
+                oi.featuredImage,
+                oi.brandID,
+                CASE WHEN oi.brandID IS NULL OR oi.brandID = 'inhouse' THEN 'Ithyaraa' ELSE COALESCE(u_brand.name, u_brand.username, 'Ithyaraa') END as brandName
             FROM order_items oi
-            WHERE oi.orderID = ? AND oi.brandID = ?
+            LEFT JOIN users u_brand ON oi.brandID = u_brand.uid
+            ${whereClause}
             ORDER BY oi.createdAt ASC`,
-            [orderID, brandID]
+            params
         );
 
-        // Parse featuredImage for each item
         return items.map(item => ({
             ...item,
             featuredImage: item.featuredImage ? JSON.parse(item.featuredImage) : [{ imgUrl: '/placeholder-product.jpg' }]

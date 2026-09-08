@@ -1,11 +1,13 @@
 const db = require('../utils/dbconnect');
 
 const insertCategory = async ({ categoryName, featuredImage, count, categoryBanner, slug, isFeatured }) => {
+    const [[maxRow]] = await db.query('SELECT MAX(`order`) as maxOrder FROM categories');
+    const nextOrder = (maxRow?.maxOrder || 0) + 1;
     const query = `
-        INSERT INTO categories (categoryName, featuredImage, count, categoryBanner, slug, isFeatured)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO categories (categoryName, featuredImage, count, categoryBanner, slug, isFeatured, \`order\`)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
-    const [result] = await db.query(query, [categoryName, featuredImage, count, categoryBanner, slug, isFeatured || 0]);
+    const [result] = await db.query(query, [categoryName, featuredImage, count, categoryBanner, slug, isFeatured || 0, nextOrder]);
     return result.insertId;
 };
 
@@ -19,20 +21,24 @@ const getFilteredCategories = async ({ filters, page, limit }) => {
         values.push(`%${filters.categoryName}%`);
     }
 
-    const offset = (page - 1) * limit;
+    let limitClause = '';
+    if (limit && limit > 0) {
+        const offset = (page - 1) * limit;
+        limitClause = 'LIMIT ? OFFSET ?';
+        values.push(limit, offset);
+    }
 
-    // Query for paginated data only
+    // Query for data ordered by `order` ASC
     const dataQuery = `
         SELECT * FROM categories 
         ${whereClause}
-        ORDER BY createdOn DESC
-        LIMIT ? OFFSET ?
+        ORDER BY \`order\` ASC, createdOn DESC
+        ${limitClause}
     `;
-    const [data] = await db.query(dataQuery, [...values, limit, offset]);
+    const [data] = await db.query(dataQuery, values);
 
     return {
         data
-        // no total count
     };
 };
 
@@ -145,6 +151,18 @@ const updateFeaturedOrder = async (reorderedItems) => {
         await db.query(
             'UPDATE categories SET featuredOrder = ? WHERE categoryID = ?',
             [item.featuredOrder, item.categoryID]
+        );
+    }
+    return true;
+};
+
+const updateCategoryOrder = async (reorderedItems) => {
+    // reorderedItems is an array of { categoryID, order }
+    for (const item of reorderedItems) {
+        const orderVal = item.order !== undefined ? item.order : item.sortOrder;
+        await db.query(
+            'UPDATE categories SET `order` = ? WHERE categoryID = ?',
+            [orderVal, item.categoryID]
         );
     }
     return true;
@@ -407,6 +425,7 @@ module.exports = {
     getFeaturedCategories,
     bulkSetFeatured,
     updateFeaturedOrder,
+    updateCategoryOrder,
     getBrandsByCategoryID,
     getAllCategoriesBrandsMap,
     getMegamenuCategoriesBrands

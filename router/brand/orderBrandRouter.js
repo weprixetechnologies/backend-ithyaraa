@@ -1101,10 +1101,11 @@ orderBrandRouter.get('/orders/:id', authBrandMiddleware.verifyAccessToken, async
             if (item.comboID) {
                 try {
                     const comboItemsQuery = `
-                        SELECT ci.name, ci.quantity, ci.featuredImage, v.variationName, v.variationValues
-                        FROM combo_items ci
-                        LEFT JOIN variations v ON ci.variationID = v.variationID
-                        WHERE ci.comboID = ?
+                        SELECT oci.productID, oci.quantity, p.name, p.featuredImage, v.variationSlug AS variationName, v.variationValues
+                        FROM order_combo_items oci
+                        JOIN products p ON oci.productID = p.productID
+                        LEFT JOIN variations v ON oci.variationID = v.variationID
+                        WHERE oci.comboID = ?
                     `;
                     const [comboDetails] = await db.query(comboItemsQuery, [item.comboID]);
                     processedItem.comboItems = comboDetails.map(ci => ({

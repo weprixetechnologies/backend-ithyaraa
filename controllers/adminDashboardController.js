@@ -21,7 +21,7 @@ const getDashboardStatsController = async (req, res) => {
             `SELECT COALESCE(SUM(total), 0) as total 
              FROM orderDetail 
              WHERE paymentStatus = 'successful' 
-             AND orderStatus != 'Cancelled'`
+             AND LOWER(orderStatus) != 'cancelled'`
         );
 
         // Total products
