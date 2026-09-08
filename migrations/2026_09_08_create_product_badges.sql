@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS `product_badges` (
 CREATE TABLE IF NOT EXISTS `product_badge_mappings` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `badgeID` INT NOT NULL,
-  `productID` BIGINT NOT NULL,
+  `productID` VARCHAR(255) NOT NULL,
   `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `ux_badge_product` (`badgeID`, `productID`),

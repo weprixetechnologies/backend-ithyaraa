@@ -18,6 +18,14 @@ async function runMigration() {
             await db.query(statement);
         }
 
+        // Alter column productID to VARCHAR(255) if table was previously created as BIGINT
+        try {
+            await db.query(`ALTER TABLE product_badge_mappings MODIFY COLUMN productID VARCHAR(255) NOT NULL`);
+            console.log('Altered product_badge_mappings.productID column type to VARCHAR(255)!');
+        } catch (alterErr) {
+            console.log('Column alter note:', alterErr.message);
+        }
+
         console.log('Product badges migration executed successfully!');
 
         // Check if sample badges should be seeded
