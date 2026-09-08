@@ -813,7 +813,7 @@ async function getCart(uid) {
     }
     summary.total = (Math.round(summary.total * 100) + Math.round(summary.shipping * 100)) / 100;
 
-    console.log(`[SUMMARY] subtotal=${subtotal}, total=${summary.total}, totalDiscount=${totalDiscount}, shipping=${summary.shipping}`);
+    console.log(`[SUMMARY] subtotal=${summary.subtotal}, total=${summary.total}, totalDiscount=${summary.totalDiscount}, shipping=${summary.shipping}`);
 
     // Update DB: cart_items and cartDetail
     await cartModel.updateCartItems(items);
