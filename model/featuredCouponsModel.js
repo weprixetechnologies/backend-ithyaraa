@@ -17,23 +17,24 @@ const create = async ({ popupImage, iconImage, couponCode }) => {
 };
 
 /**
- * Get the active featured coupon (only one at a time)
+ * Get active featured coupons (all active coupons for floating modal)
  */
 const getActive = async () => {
     try {
         const [rows] = await db.query(
-            `SELECT id, popupImage, iconImage, couponCode, isActive, createdAt, updatedAt
-             FROM featured_coupons
-             WHERE isActive = 1
-             ORDER BY id DESC
-             LIMIT 1`
+            `SELECT fc.id, fc.popupImage, fc.iconImage, fc.couponCode, fc.isActive, fc.createdAt, fc.updatedAt,
+                    c.couponID, c.discountType, c.discountValue, c.minOrderValue, c.usageLimit, c.couponUsage
+             FROM featured_coupons fc
+             LEFT JOIN coupons c ON fc.couponCode = c.couponCode
+             WHERE fc.isActive = 1
+             ORDER BY fc.id DESC`
         );
         return {
             success: true,
-            data: rows.length > 0 ? rows[0] : null
+            data: rows
         };
     } catch (error) {
-        console.error('Error getting active featured coupon:', error);
+        console.error('Error getting active featured coupons:', error);
         return { success: false, error: error.message };
     }
 };
@@ -44,9 +45,11 @@ const getActive = async () => {
 const getAll = async () => {
     try {
         const [rows] = await db.query(
-            `SELECT id, popupImage, iconImage, couponCode, isActive, createdAt, updatedAt
-             FROM featured_coupons
-             ORDER BY id DESC`
+            `SELECT fc.id, fc.popupImage, fc.iconImage, fc.couponCode, fc.isActive, fc.createdAt, fc.updatedAt,
+                    c.couponID, c.discountType, c.discountValue, c.minOrderValue, c.usageLimit, c.couponUsage
+             FROM featured_coupons fc
+             LEFT JOIN coupons c ON fc.couponCode = c.couponCode
+             ORDER BY fc.id DESC`
         );
         return { success: true, data: rows };
     } catch (error) {

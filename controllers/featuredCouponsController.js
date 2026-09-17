@@ -7,12 +7,12 @@ const { SCOPE } = require('../utils/cacheScopes');
  */
 const createCoupon = async (req, res) => {
     try {
-        const { popupImage, iconImage, couponCode } = req.body;
+        const { popupImage = "", iconImage = "", couponCode } = req.body;
 
-        if (!popupImage || !iconImage || !couponCode) {
+        if (!couponCode) {
             return res.status(400).json({
                 success: false,
-                message: 'popupImage, iconImage and couponCode are required'
+                message: 'couponCode is required'
             });
         }
 
