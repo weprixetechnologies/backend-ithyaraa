@@ -73,13 +73,13 @@ const getAllTagSections = async () => {
         // Fetch count of tagged products for each section
         const enriched = await Promise.all(
             sections.map(async (sec) => {
-                const tagPattern = `%${sec.tag}%`;
+                const cleanTag = String(sec.tag).trim().toLowerCase();
                 const [countRows] = await db.query(
                     `SELECT COUNT(*) AS productCount 
                      FROM products 
-                     WHERE (sectionid = ? OR sectionid LIKE ? OR FIND_IN_SET(?, sectionid)) 
+                     WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', ''))) 
                        AND isDeleted = 0`,
-                    [sec.tag, tagPattern, sec.tag]
+                    [cleanTag, cleanTag]
                 );
                 return {
                     ...sec,
@@ -166,26 +166,25 @@ const deleteTagSection = async (id) => {
 const getProductsByTag = async (tag, { page = 1, limit = 50 } = {}) => {
     try {
         const cleanTag = String(tag).trim().toLowerCase();
-        const tagPattern = `%${cleanTag}%`;
         const offset = (page - 1) * limit;
 
         const [rows] = await db.query(
             `SELECT productID, name, sectionid, regularPrice, salePrice, discountType, discountValue,
                     offerID, featuredImage, brand, categories, type, status, createdAt
              FROM products
-             WHERE (sectionid = ? OR sectionid LIKE ? OR FIND_IN_SET(?, sectionid))
+             WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))
                AND isDeleted = 0
              ORDER BY createdAt DESC
              LIMIT ? OFFSET ?`,
-            [cleanTag, tagPattern, cleanTag, Number(limit), Number(offset)]
+            [cleanTag, cleanTag, Number(limit), Number(offset)]
         );
 
         const [countRows] = await db.query(
             `SELECT COUNT(*) as total
              FROM products
-             WHERE (sectionid = ? OR sectionid LIKE ? OR FIND_IN_SET(?, sectionid))
+             WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))
                AND isDeleted = 0`,
-            [cleanTag, tagPattern, cleanTag]
+            [cleanTag, cleanTag]
         );
 
         const parsedProducts = rows.map(p => {
@@ -299,17 +298,16 @@ const getActiveTagSectionsWithProducts = async (productLimit = 20) => {
         const enriched = await Promise.all(
             sections.map(async (sec) => {
                 const cleanTag = String(sec.tag).trim().toLowerCase();
-                const tagPattern = `%${cleanTag}%`;
 
                 const [rows] = await db.query(
                     `SELECT productID, name, sectionid, regularPrice, salePrice, discountType, discountValue,
                             offerID, featuredImage, brand, categories, type, status, createdAt
                      FROM products
-                     WHERE (sectionid = ? OR sectionid LIKE ? OR FIND_IN_SET(?, sectionid))
+                     WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))
                        AND isDeleted = 0
                      ORDER BY createdAt DESC
                      LIMIT ?`,
-                    [cleanTag, tagPattern, cleanTag, Number(productLimit)]
+                    [cleanTag, cleanTag, Number(productLimit)]
                 );
 
                 const parsedProducts = rows.map(p => {

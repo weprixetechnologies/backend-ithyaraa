@@ -423,7 +423,7 @@ const getProductCount = async (query) => {
         'overridePrice', 'tab1', 'tab2', 'tab3', 'productID',
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID'
     ];
-    const likeFields = ['name', 'type', 'productID', 'sectionid'];
+    const likeFields = ['name', 'type', 'productID'];
 
     for (const key in query) {
         if (!allowedFilters.includes(key)) continue;
@@ -436,6 +436,9 @@ const getProductCount = async (query) => {
         } else if (key === 'categoryName') {
             filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
             values.push(`%${cleanedValue}%`);
+        } else if (key === 'sectionid') {
+            filters.push(`(sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))`);
+            values.push(cleanedValue, cleanedValue);
         } else if (likeFields.includes(key)) {
             filters.push(`${key} LIKE ?`);
             values.push(`%${cleanedValue}%`);
@@ -492,7 +495,7 @@ const fetchPaginatedProducts = async (query) => {
         'sectionid', 'featuredImage', 'categoryID', 'categoryName', 'brandID',
         'brand', 'brandName', 'minPrice', 'maxPrice'
     ];
-    const likeFields = ['name', 'productID', 'sectionid'];
+    const likeFields = ['name', 'productID'];
 
     for (const key in query) {
         if (!allowedFilters.includes(key)) continue;
@@ -506,6 +509,9 @@ const fetchPaginatedProducts = async (query) => {
         } else if (key === 'categoryName') {
             filters.push(`JSON_EXTRACT(categories, '$[*].categoryName') LIKE ?`);
             values.push(`%${cleanedValue}%`);
+        } else if (key === 'sectionid') {
+            filters.push(`(sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))`);
+            values.push(cleanedValue, cleanedValue);
         } else if (key === 'brand' || key === 'brandName') {
             filters.push(`(brand LIKE ? OR brandID LIKE ?)`);
             values.push(`%${cleanedValue}%`, `%${cleanedValue}%`);
@@ -695,8 +701,8 @@ async function getShopProductsPublic(query) {
     if (query.sectionid) {
         const sectionIds = String(query.sectionid).split(',').map(s => s.trim()).filter(Boolean);
         if (sectionIds.length > 0) {
-            filters.push(`(${sectionIds.map(() => `sectionid = ?`).join(' OR ')})`);
-            values.push(...sectionIds);
+            filters.push(`(${sectionIds.map(() => `(sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))`).join(' OR ')})`);
+            sectionIds.forEach(id => values.push(id, id));
         }
     }
 
