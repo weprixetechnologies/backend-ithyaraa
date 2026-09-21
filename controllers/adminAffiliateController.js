@@ -140,7 +140,50 @@ const getTransactionStatuses = async (req, res) => {
     }
 };
 
-// PUT /admin/affiliates/:uid/commission - Update affiliate commission percentage (admin only)
+// GET /admin/settings/affiliate-commission — Get global default affiliate commission %
+const getDefaultCommission = async (req, res) => {
+    try {
+        const settingsModel = require('../model/settingsModel');
+        const value = await settingsModel.getSetting('default_affiliate_commission');
+        const defaultCommissionPercentage = value !== null ? parseFloat(value) : 10; // fallback 10%
+        return res.status(200).json({
+            success: true,
+            data: {
+                defaultCommissionPercentage,
+                description: 'This % is used for all affiliates who do not have a custom commission rate set.'
+            }
+        });
+    } catch (error) {
+        console.error('getDefaultCommission error:', error);
+        return res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// PUT /admin/settings/affiliate-commission — Update global default affiliate commission %
+const updateDefaultCommission = async (req, res) => {
+    try {
+        const { defaultCommissionPercentage } = req.body;
+        if (defaultCommissionPercentage == null) {
+            return res.status(400).json({ success: false, error: 'defaultCommissionPercentage is required' });
+        }
+        const num = parseFloat(defaultCommissionPercentage);
+        if (isNaN(num) || num < 0 || num > 100) {
+            return res.status(400).json({ success: false, error: 'defaultCommissionPercentage must be a number between 0 and 100' });
+        }
+        const settingsModel = require('../model/settingsModel');
+        await settingsModel.updateSetting('default_affiliate_commission', num.toString());
+        return res.status(200).json({
+            success: true,
+            message: 'Default affiliate commission updated successfully',
+            data: { defaultCommissionPercentage: num }
+        });
+    } catch (error) {
+        console.error('updateDefaultCommission error:', error);
+        return res.status(500).json({ success: false, error: error.message || 'Server error' });
+    }
+};
+
+// PUT /admin/affiliates/:uid/commission - Update per-user affiliate commission percentage (admin only)
 const updateCommissionPercentage = async (req, res) => {
     try {
         const { uid } = req.params;
@@ -148,14 +191,14 @@ const updateCommissionPercentage = async (req, res) => {
         if (!uid || commissionPercentage == null) {
             return res.status(400).json({ success: false, error: 'uid and commissionPercentage are required' });
         }
-        
+
         const usersService = require('../services/usersService');
         const updatedUser = await usersService.updateUserByuid(uid, { commissionPercentage: parseFloat(commissionPercentage) });
-        
+
         if (!updatedUser) {
             return res.status(404).json({ success: false, error: 'User not found or update failed' });
         }
-        
+
         return res.status(200).json({
             success: true,
             message: 'Commission percentage updated successfully',
@@ -175,5 +218,7 @@ module.exports = {
     updateTransactionStatus,
     createManualTransaction,
     getTransactionStatuses,
-    updateCommissionPercentage
+    updateCommissionPercentage,
+    getDefaultCommission,
+    updateDefaultCommission
 };

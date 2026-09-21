@@ -12,6 +12,14 @@ const createComboProduct = async (payload) => {
         throw new Error('Product type must be combo');
     }
 
+    // Server-side slot guard: max 5 products per combo
+    const MAX_COMBO_SLOTS = 5;
+    if (Array.isArray(payload.products) && payload.products.length > MAX_COMBO_SLOTS) {
+        const error = new Error(`A combo can have at most ${MAX_COMBO_SLOTS} products. You selected ${payload.products.length}.`);
+        error.statusCode = 400;
+        throw error;
+    }
+
     // Force comboID and handle featuredImage JSON
     payload.productID = comboID;
 
@@ -95,6 +103,14 @@ async function fetchComboWithProductsUser(comboID) {
 }
 
 async function editComboProduct(productID, updateData, productIDs) {
+    // Server-side slot guard: max 5 products per combo
+    const MAX_COMBO_SLOTS = 5;
+    if (Array.isArray(productIDs) && productIDs.length > MAX_COMBO_SLOTS) {
+        const error = new Error(`A combo can have at most ${MAX_COMBO_SLOTS} products. You selected ${productIDs.length}.`);
+        error.statusCode = 400;
+        throw error;
+    }
+
     // 1. Update combo main product
     const affectedRows = await comboModel.updateComboProduct(productID, updateData);
     if (affectedRows === 0) {

@@ -232,10 +232,17 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                 const referrerUser = referrerUsers[0];
 
                 if (referrerUser) {
-                    // Calculate total commission for this referrer (dynamic % or 10% default)
+                    // Calculate total commission for this referrer
+                    // Use user-specific rate if set, else fall back to global default from settings
+                    let defaultRate = 0.10; // absolute fallback if settings table has nothing
+                    try {
+                        const globalDefault = await settingsModel.getSetting('default_affiliate_commission');
+                        if (globalDefault !== null) defaultRate = parseFloat(globalDefault) / 100;
+                    } catch (_) { /* non-blocking */ }
+
                     const commissionRate = (referrerUser.commissionPercentage != null)
                         ? (Number(referrerUser.commissionPercentage) / 100)
-                        : 0.10;
+                        : defaultRate;
                     let totalCommissionPaise = 0;
                     for (const item of cartData.items) {
                         const itemAmountPaise = Math.round((item.salePrice || item.regularPrice || 0) * 100) * item.quantity;
@@ -273,13 +280,20 @@ async function placeOrder(uid, addressID, paymentMode = 'cod', couponCode = null
                 const assignedUser = await usersModel.findUserByEmail(assignedUserEmail);
 
                 if (assignedUser && assignedUser.uid && !creditedUsers.has(assignedUser.uid)) {
-                    // Dynamic commission based on user settings (default 20%)
+                    // Dynamic commission based on user settings
+                    // Use user-specific rate if set, else fall back to global default from settings
                     const orderTotal = Number(finalSummary.total) || 0;
                     console.log('Order total:', orderTotal);
 
+                    let defaultRate = 0.10; // absolute fallback if settings table has nothing
+                    try {
+                        const globalDefault = await settingsModel.getSetting('default_affiliate_commission');
+                        if (globalDefault !== null) defaultRate = parseFloat(globalDefault) / 100;
+                    } catch (_) { /* non-blocking */ }
+
                     const commissionRate = (assignedUser.commissionPercentage != null)
                         ? (Number(assignedUser.commissionPercentage) / 100)
-                        : 0.20;
+                        : defaultRate;
 
                     const orderTotalPaise = Math.round(orderTotal * 100);
                     const commissionPaise = Math.round(orderTotalPaise * commissionRate);

@@ -7,6 +7,11 @@ router.get('/affiliates', authAdminMiddleware.verifyAccessToken, adminAffiliateC
 router.get('/affiliates/transactions/statuses', authAdminMiddleware.verifyAccessToken, adminAffiliateController.getTransactionStatuses);
 router.post('/affiliates/transactions/manual', authAdminMiddleware.verifyAccessToken, adminAffiliateController.createManualTransaction);
 router.put('/affiliates/transactions/:txnID/status', authAdminMiddleware.verifyAccessToken, adminAffiliateController.updateTransactionStatus);
+
+// Global default affiliate commission settings — must come before /:uid to avoid param collisions
+router.get('/settings/affiliate-commission', authAdminMiddleware.verifyAccessToken, adminAffiliateController.getDefaultCommission);
+router.put('/settings/affiliate-commission', authAdminMiddleware.verifyAccessToken, adminAffiliateController.updateDefaultCommission);
+
 router.put('/affiliates/:uid/commission', authAdminMiddleware.verifyAccessToken, adminAffiliateController.updateCommissionPercentage);
 router.get('/affiliates/:uid', authAdminMiddleware.verifyAccessToken, adminAffiliateController.getAffiliateByUid);
 router.put('/affiliates/:uid/approve', authAdminMiddleware.verifyAccessToken, adminAffiliateController.approveAffiliate);
