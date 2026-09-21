@@ -39,21 +39,44 @@ const reprimeTagCache = async (tag) => {
 };
 
 /**
+ * Clear all section tag caches and reprime active sections
+ */
+const clearAllTagCaches = async () => {
+    try {
+        console.log(`[CLEAR ALL TAG CACHES] Flushing section_products:* and homepage_tag_sections:*`);
+        await clearByPattern(`section_products:*`);
+        await clearByPattern(`${CACHE_KEY_ACTIVE_SECTIONS}*`);
+        await clearByPattern(`products:page:*`);
+
+        const freshActive = await model.getActiveTagSectionsWithProducts(20);
+        if (freshActive && freshActive.success) {
+            await setCache(`${CACHE_KEY_ACTIVE_SECTIONS}:20`, freshActive, CACHE_TTL_SECTION_PRODUCTS);
+        }
+        return { success: true, message: 'All section tag caches cleared' };
+    } catch (err) {
+        console.error('Error clearing all tag caches:', err);
+        return { success: false, error: err.message };
+    }
+};
+
+/**
  * Get active tag sections along with their tagged products (Redis cached)
  */
-const getActiveTagSectionsCached = async (productLimit = 20) => {
+const getActiveTagSectionsCached = async (productLimit = 20, options = {}) => {
     const cacheKey = `${CACHE_KEY_ACTIVE_SECTIONS}:${productLimit}`;
-    try {
-        const cached = await getCache(cacheKey);
-        if (cached) {
-            console.log(`[CACHE HIT] Active homepage tag sections with products`);
-            return cached;
+    if (!options.nocache && !options.refresh) {
+        try {
+            const cached = await getCache(cacheKey);
+            if (cached) {
+                console.log(`[CACHE HIT] Active homepage tag sections with products`);
+                return cached;
+            }
+        } catch (err) {
+            console.error('Error fetching cached active tag sections:', err);
         }
-    } catch (err) {
-        console.error('Error fetching cached active tag sections:', err);
     }
 
-    console.log(`[CACHE MISS] Fetching active homepage tag sections from DB`);
+    console.log(`[CACHE MISS/RELOAD] Fetching active homepage tag sections from DB`);
     const freshData = await model.getActiveTagSectionsWithProducts(productLimit);
 
     if (freshData && freshData.success) {
@@ -74,8 +97,8 @@ const getSectionProductsCached = async (tag, options = {}) => {
     const cleanTag = String(tag).trim().toLowerCase();
     const cacheKey = getCacheKeyForTag(cleanTag);
 
-    // Only read from cache for default page 1 queries
-    if ((!options.page || options.page === 1) && (!options.limit || options.limit === 50)) {
+    // Only read from cache for default page 1 queries when nocache is not true
+    if (!options.nocache && !options.refresh && (!options.page || options.page === 1) && (!options.limit || options.limit === 50)) {
         const cached = await getCache(cacheKey);
         if (cached) {
             console.log(`[CACHE HIT] Section tag products for '${cleanTag}'`);
@@ -83,7 +106,7 @@ const getSectionProductsCached = async (tag, options = {}) => {
         }
     }
 
-    console.log(`[CACHE MISS] Fetching section tag products for '${cleanTag}' from DB`);
+    console.log(`[CACHE MISS/RELOAD] Fetching section tag products for '${cleanTag}' from DB`);
     const freshData = await model.getProductsByTag(cleanTag, options);
 
     if (freshData && freshData.success && (!options.page || options.page === 1)) {
@@ -171,6 +194,7 @@ module.exports = {
     bulkAddTag,
     bulkRemoveTag,
     reprimeTagCache,
+    clearAllTagCaches,
     getAllTagSections: model.getAllTagSections,
     getTagSectionByTag: model.getTagSectionByTag
 };

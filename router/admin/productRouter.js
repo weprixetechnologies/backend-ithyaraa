@@ -14,6 +14,8 @@ productRouter.post('/bulk-sale-update', authAdminMiddleware.verifyAccessToken, p
 productRouter.post('/bulk-assign-section', authAdminMiddleware.verifyAccessToken, productController.bulkAssignSection)
 productRouter.post('/bulk-remove-section', authAdminMiddleware.verifyAccessToken, productController.bulkRemoveSection)
 productRouter.get('/count-product', authAdminMiddleware.verifyAccessToken, productController.getProductPageCount)
+productRouter.get('/reorder-list', authAdminMiddleware.verifyAccessToken, productController.getProductsForReorder)
+productRouter.put('/reorder', authAdminMiddleware.verifyAccessToken, productController.reorderProducts)
 
 // Public routes (no auth required)
 productRouter.get('/all-products', productController.getPaginatedProducts)

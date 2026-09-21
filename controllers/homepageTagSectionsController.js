@@ -70,8 +70,9 @@ const getSectionProducts = async (req, res) => {
         const { tag } = req.params;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
+        const nocache = req.query.nocache === 'true' || req.query.refresh === 'true';
 
-        const result = await service.getSectionProductsCached(tag, { page, limit });
+        const result = await service.getSectionProductsCached(tag, { page, limit, nocache, refresh: nocache });
         if (!result.success) return res.status(500).json(result);
         return res.status(200).json(result);
     } catch (error) {
@@ -138,11 +139,25 @@ const bulkRemoveTag = async (req, res) => {
 const getActiveTagSections = async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 20;
-        const result = await service.getActiveTagSectionsCached(limit);
+        const nocache = req.query.nocache === 'true' || req.query.refresh === 'true';
+        const result = await service.getActiveTagSectionsCached(limit, { nocache, refresh: nocache });
         if (!result.success) return res.status(500).json(result);
         return res.status(200).json(result);
     } catch (error) {
         console.error('Error in getActiveTagSections:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Clear all section tag caches manually
+ */
+const clearAllTagCaches = async (req, res) => {
+    try {
+        const result = await service.clearAllTagCaches();
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Error in clearAllTagCaches:', error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -155,5 +170,6 @@ module.exports = {
     deleteTagSection,
     getSectionProducts,
     bulkAddTag,
-    bulkRemoveTag
+    bulkRemoveTag,
+    clearAllTagCaches
 };

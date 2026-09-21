@@ -463,8 +463,45 @@ const searchProducts = async (req, res) => {
         const result = await service.searchProducts(q);
         return res.status(200).json(result);
     } catch (e) {
-        console.error('searchProducts error:', e);
+// ─────────────────────────────────────────────
+// Admin: Get Products For Reordering
+// ─────────────────────────────────────────────
+const getProductsForReorder = async (req, res) => {
+    try {
+        const { search, categoryID, brandID } = req.query;
+        const result = await service.getProductsForReorderService({ search, categoryID, brandID });
+        return res.status(200).json(result);
+    } catch (e) {
+        console.error('getProductsForReorder error:', e);
         return res.status(500).json({ success: false, message: 'Server error', data: [], total: 0 });
+    }
+};
+
+// ─────────────────────────────────────────────
+// Admin: Bulk Reorder Products
+// ─────────────────────────────────────────────
+const reorderProducts = async (req, res) => {
+    try {
+        const { reorderedItems } = req.body;
+        if (!Array.isArray(reorderedItems) || reorderedItems.length === 0) {
+            return res.status(400).json({ success: false, message: 'reorderedItems must be a non-empty array' });
+        }
+
+        const result = await service.reorderProductsService(reorderedItems);
+        if (result.success) {
+            // Invalidate product & shop caches so storefront immediately shows new order
+            try {
+                await invalidateProductCaches();
+            } catch (cacheErr) {
+                console.error('Failed to invalidate product caches after reorder:', cacheErr);
+            }
+            return res.status(200).json(result);
+        } else {
+            return res.status(400).json(result);
+        }
+    } catch (e) {
+        console.error('reorderProducts error:', e);
+        return res.status(500).json({ success: false, message: 'Server error', error: e.message });
     }
 };
 
@@ -486,5 +523,7 @@ module.exports = {
     bulkRemoveSection,
     shopList,
     searchProducts,
-    getDeletedProducts
+    getDeletedProducts,
+    getProductsForReorder,
+    reorderProducts
 };

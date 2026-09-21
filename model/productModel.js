@@ -605,6 +605,70 @@ const bulkUploadVariations = async (variationsArray) => {
 };
 
 // ─────────────────────────────────────────────
+// Reordering Methods
+// ─────────────────────────────────────────────
+const getProductsForReorder = async ({ search, categoryID, brandID } = {}) => {
+    let query = `
+        SELECT productID, name, regularPrice, salePrice,
+               featuredImage, brand, brandID, categories,
+               COALESCE(displayOrder, 0) as displayOrder,
+               createdAt, status
+        FROM products
+        WHERE (isDeleted = 0 OR isDeleted IS NULL)
+    `;
+    const params = [];
+
+    if (search && search.trim()) {
+        query += ` AND (name LIKE ? OR productID LIKE ?)`;
+        params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+    }
+
+    if (categoryID) {
+        query += ` AND (JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?)) OR JSON_CONTAINS(categories, JSON_OBJECT('categoryID', CAST(? AS CHAR))))`;
+        params.push(categoryID, categoryID);
+    }
+
+    if (brandID) {
+        query += ` AND (brandID = ? OR brand = ?)`;
+        params.push(brandID, brandID);
+    }
+
+    query += ` ORDER BY CASE WHEN COALESCE(displayOrder, 0) > 0 THEN 0 ELSE 1 END ASC, displayOrder ASC, createdAt DESC`;
+
+    const [rows] = await db.query(query, params);
+    return rows;
+};
+
+const bulkUpdateProductDisplayOrder = async (reorderedItems) => {
+    // reorderedItems: [{ productID, displayOrder }]
+    if (!Array.isArray(reorderedItems) || reorderedItems.length === 0) {
+        return { success: false, message: 'Invalid reorder items' };
+    }
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        for (const item of reorderedItems) {
+            const orderVal = item.displayOrder !== undefined ? parseInt(item.displayOrder, 10) : 0;
+            await connection.query(
+                `UPDATE products SET displayOrder = ? WHERE productID = ?`,
+                [orderVal, item.productID]
+            );
+        }
+
+        await connection.commit();
+        return { success: true, message: 'Products reordered successfully' };
+    } catch (error) {
+        await connection.rollback();
+        console.error('Error bulk updating product display order:', error);
+        throw error;
+    } finally {
+        connection.release();
+    }
+};
+
+// ─────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────
 module.exports = {
@@ -623,5 +687,7 @@ module.exports = {
     getProductWithVariations,
     getProductByID,
     deleteProduct,
-    getDeletedProducts
+    getDeletedProducts,
+    getProductsForReorder,
+    bulkUpdateProductDisplayOrder
 };

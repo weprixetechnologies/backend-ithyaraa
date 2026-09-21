@@ -740,18 +740,26 @@ async function getShopProductsPublic(query) {
     if (query.search) { filters.push(`name LIKE ?`); values.push(`%${query.search}%`); }
     if (query.offerID) { filters.push(`offerID = ?`); values.push(query.offerID); }
 
-    const allowedSort = new Set(['createdAt', 'name', 'salePrice', 'regularPrice']);
-    const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'createdAt';
+    const allowedSort = new Set(['displayOrder', 'createdAt', 'name', 'salePrice', 'regularPrice']);
+    const sortBy = allowedSort.has(query.sortBy) ? query.sortBy : 'displayOrder';
     const sortOrder = String(query.sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    let orderClause = '';
+    if (sortBy === 'displayOrder') {
+        orderClause = `ORDER BY CASE WHEN COALESCE(displayOrder, 0) > 0 THEN 0 ELSE 1 END ASC, displayOrder ASC, createdAt DESC`;
+    } else {
+        orderClause = `ORDER BY ${sortBy} ${sortOrder}`;
+    }
 
     let baseQuery = `
         SELECT productID, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
-               brand, brandID, featuredImage, categories, sectionid, createdAt
-        FROM products WHERE  isDeleted = 0
+               brand, brandID, featuredImage, categories, sectionid, createdAt,
+               COALESCE(displayOrder, 0) as displayOrder
+        FROM products WHERE isDeleted = 0
     `;
     if (filters.length > 0) baseQuery += ` AND ${filters.join(' AND ')}`;
-    baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
+    baseQuery += ` ${orderClause}`;
 
     let countQuery = `SELECT COUNT(*) AS total FROM products where isDeleted = 0`;
     if (filters.length > 0) countQuery += ` AND ${filters.join(' AND ')}`;
@@ -922,6 +930,34 @@ async function searchProducts(query) {
     }
 }
 
+const getProductsForReorderService = async (params) => {
+    try {
+        const products = await model.getProductsForReorder(params);
+        products.forEach(row => {
+            try {
+                if (typeof row.featuredImage === 'string') row.featuredImage = JSON.parse(row.featuredImage);
+                if (typeof row.categories === 'string') row.categories = JSON.parse(row.categories);
+            } catch (e) {
+                // Keep as is if already parsed or invalid JSON
+            }
+        });
+        return { success: true, data: products, total: products.length };
+    } catch (error) {
+        console.error('Error fetching products for reorder:', error);
+        return { success: false, message: 'Error fetching products for reorder', error: error.message };
+    }
+};
+
+const reorderProductsService = async (reorderedItems) => {
+    try {
+        const result = await model.bulkUpdateProductDisplayOrder(reorderedItems);
+        return result;
+    } catch (error) {
+        console.error('Error reordering products:', error);
+        return { success: false, message: 'Error reordering products', error: error.message };
+    }
+};
+
 // ─────────────────────────────────────────────
 // Single export block
 // FIX: removed orphan mid-file
@@ -945,5 +981,7 @@ module.exports = {
     bulkRemoveSection,
     handleCrossSells,
     searchProducts,
-    getDeletedProducts
+    getDeletedProducts,
+    getProductsForReorderService,
+    reorderProductsService
 };
