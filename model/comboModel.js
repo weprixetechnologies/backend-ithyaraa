@@ -19,12 +19,14 @@ const createProduct = async (product) => {
         tab3,
         overridePrice,
         galleryImage,
-        offerID } = product;
+        offerID,
+        brand,
+        brandID } = product;
 
     const query = `
         INSERT INTO products 
-        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status,  categories, tab1, tab2, tab3, overridePrice,galleryImage, offerID)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status, categories, tab1, tab2, tab3, overridePrice, galleryImage, offerID, brand, brandID)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     console.log('Product ', product);
 
@@ -32,16 +34,19 @@ const createProduct = async (product) => {
         productID, name, description, type, JSON.stringify(featuredImage || []),
         regularPrice, salePrice, discountType, discountValue, status,
         JSON.stringify(categories || []),
-        tab1 || null, tab2 || null, tab3 || null, overridePrice || null, JSON.stringify(galleryImage || []), offerID || null
+        tab1 || null, tab2 || null, tab3 || null, overridePrice || null, JSON.stringify(galleryImage || []), offerID || null,
+        brand || 'In-house Brand', brandID || 'inhouse'
     ];
 
     await db.query(query, values);
 };
+
 // Get product by productID
 const getProductByID = async (productID) => {
     const [rows] = await db.query(`SELECT * FROM products WHERE productID = ?`, [productID]);
     return rows[0];
 };
+
 // Get all products
 const getAllProducts = async () => {
     const [rows] = await db.query(`SELECT * FROM products`);
@@ -59,6 +64,7 @@ const addComboItem = async (comboID, product) => {
         ]
     );
 };
+
 // Fetch combo product details
 async function getComboDetails(comboID) {
     const [rows] = await db.query(
@@ -67,6 +73,7 @@ async function getComboDetails(comboID) {
     );
     return rows[0] || null;
 }
+
 // Fetch associated product IDs in the combo
 async function getComboItems(comboID) {
     const [rows] = await db.query(
@@ -75,6 +82,7 @@ async function getComboItems(comboID) {
     );
     return rows.map(row => row.productID);
 }
+
 async function getComboItemsUser(comboID) {
     const [rows] = await db.query(
         `SELECT * FROM combo_item WHERE comboID = ?`,
@@ -100,7 +108,7 @@ async function updateComboProduct(productID, data) {
     const allowedColumns = [
         "name", "description", "type", "featuredImage", "regularPrice", "salePrice",
         "discountType", "discountValue", "status", "categories", "tab1", "tab2", "tab3",
-        "overridePrice", "offerID", "galleryImage"
+        "overridePrice", "offerID", "galleryImage", "brand", "brandID"
     ];
 
     for (const key of Object.keys(data)) {
@@ -137,6 +145,7 @@ const deleteProductByID = async (productID) => {
     );
     return result.affectedRows;
 };
+
 const deleteComboItemsByComboID = async (comboID) => {
     const [result] = await db.query(
         'DELETE FROM combo_item WHERE comboID = ?',
@@ -145,4 +154,4 @@ const deleteComboItemsByComboID = async (comboID) => {
     return result.affectedRows;
 };
 
-module.exports = { createProduct, getProductByID, getComboItemsUser, getAllProducts, addComboItem, getComboDetails, getComboItems, updateComboProduct, deleteComboItems, deleteComboItemsByComboID, deleteProductByID }
+module.exports = { createProduct, getProductByID, getComboItemsUser, getAllProducts, addComboItem, getComboDetails, getComboItems, updateComboProduct, deleteComboItems, deleteComboItemsByComboID, deleteProductByID };

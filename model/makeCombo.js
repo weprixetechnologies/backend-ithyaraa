@@ -20,12 +20,14 @@ const insertProduct = async (product) => {
         offerID,
         galleryImage,
         requiredSelections,
+        brand,
+        brandID,
     } = product;
 
     const query = `
         INSERT INTO products 
-        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status, categories, tab1, tab2, tab3, overridePrice, offerID, galleryImage, requiredSelections)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (productID, name, description, type, featuredImage, regularPrice, salePrice, discountType, discountValue, status, categories, tab1, tab2, tab3, overridePrice, offerID, galleryImage, requiredSelections, brand, brandID)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     console.log('Product ', product);
 
@@ -36,6 +38,8 @@ const insertProduct = async (product) => {
         tab1 || null, tab2 || null, tab3 || null, overridePrice || null, offerID || null,
         JSON.stringify(galleryImage || []),
         requiredSelections != null ? parseInt(requiredSelections, 10) : null,
+        brand || 'In-house Brand',
+        brandID || 'inhouse',
     ];
 
     await db.query(query, values);
@@ -130,13 +134,15 @@ const getComboDetailsWithProducts = async (comboID) => {
         products
     };
 };
+
 const updateProduct = async (productID, data) => {
     // Define allowed columns based on your products table
     const allowedFields = new Set([
         'id', 'name', 'productID', 'description', 'regularPrice', 'salePrice',
         'discountType', 'discountValue', 'type', 'offerID', 'overridePrice',
         'tab1', 'tab2', 'tab3', 'featuredImage',
-        'categories', 'galleryImage', 'requiredSelections'
+        'categories', 'galleryImage', 'requiredSelections',
+        'brand', 'brandID'
     ]);
 
     const fields = [];
@@ -169,11 +175,9 @@ const updateProduct = async (productID, data) => {
     await db.query(query, [...values, productID]);
 };
 
-
 const deleteComboItems = async (comboID) => {
     await db.query(`DELETE FROM make_combo_items WHERE comboID = ?`, [comboID]);
 };
-
 
 module.exports = {
     insertProduct,

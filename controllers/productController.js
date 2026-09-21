@@ -62,7 +62,8 @@ const addProduct = async (req, res) => {
             return res.status(500).json({ message: 'Failed to generate product ID' });
         }
 
-        const uploadProduct = await model.uploadProduct({ ...payload, productID });
+        const brandID = payload.brandID || 'inhouse';
+        const uploadProduct = await model.uploadProduct({ ...payload, productID, brandID });
         if (!uploadProduct.success) {
             return res.status(500).json({ message: 'Product upload failed', error: uploadProduct.error });
         }

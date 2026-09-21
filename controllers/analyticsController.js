@@ -439,8 +439,14 @@ const getUnifiedAnalyticsController = async (req, res) => {
         try {
             const [brandsRes] = await db.query(`
                 SELECT 
-                    oi.brandID,
-                    COALESCE(NULLIF(b.name, ''), b.username, oi.brandID, 'In-house Brand') as brandName,
+                    CASE 
+                        WHEN oi.brandID IS NULL OR LOWER(oi.brandID) IN ('inhouse', 'admin') THEN 'inhouse'
+                        ELSE oi.brandID 
+                    END as brandID,
+                    CASE 
+                        WHEN oi.brandID IS NULL OR LOWER(oi.brandID) IN ('inhouse', 'admin') THEN 'In-house Brand'
+                        ELSE COALESCE(NULLIF(b.name, ''), b.username, oi.brandID)
+                    END as brandName,
                     COUNT(DISTINCT oi.orderID) as ordersCount,
                     COALESCE(SUM(oi.lineTotalAfter), 0) as brandRevenue
                 FROM order_items oi
@@ -448,7 +454,15 @@ const getUnifiedAnalyticsController = async (req, res) => {
                 JOIN orderDetail od ON oi.orderID = od.orderID
                 WHERE od.paymentStatus = 'successful' AND LOWER(od.orderStatus) != 'cancelled'
                   ${getDateCondition(range, 'oi.createdAt').sql}
-                GROUP BY oi.brandID, b.name, b.username
+                GROUP BY 
+                    CASE 
+                        WHEN oi.brandID IS NULL OR LOWER(oi.brandID) IN ('inhouse', 'admin') THEN 'inhouse'
+                        ELSE oi.brandID 
+                    END,
+                    CASE 
+                        WHEN oi.brandID IS NULL OR LOWER(oi.brandID) IN ('inhouse', 'admin') THEN 'In-house Brand'
+                        ELSE COALESCE(NULLIF(b.name, ''), b.username, oi.brandID)
+                    END
                 ORDER BY brandRevenue DESC
                 LIMIT 5
             `);
