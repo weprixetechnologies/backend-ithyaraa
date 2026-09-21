@@ -45,6 +45,7 @@ const coinRouter = require('./router/coinRouter')
 const coinsAdminRouter = require('./router/admin/coinsAdminRouter')
 const flashSaleAdminRouter = require('./router/admin/flashSaleRouter')
 const adminDashboardRouter = require('./router/adminDashboardRouter')
+const analyticsRouter = require('./router/analyticsRouter')
 const brandAdminRouter = require('./router/admin/brandAdminRouter')
 const brandBankDetailsAdminRouter = require('./router/admin/brandBankDetailsAdminRouter')
 const brandBankDetailsRouter = require('./router/brand/brandBankDetailsRouter')
@@ -159,6 +160,7 @@ app.use('/api/brand-applications', brandApplicationRouter)
 
 
 // ADMIN ROUTE - Register dashboard BEFORE adminAuthRouter to avoid conflicts
+app.use('/api/admin/analytics', analyticsRouter);
 app.use('/api/admin', adminDashboardRouter);
 app.use('/api/admin', brandAdminRouter);
 app.use('/api/admin', brandBankDetailsAdminRouter);
