@@ -51,7 +51,6 @@ const getRetentionAnalyticsController = async (req, res) => {
         const avgOrdersPerCustomer = parseFloat(Number(buyerStats[0]?.avgOrdersPerCustomer || 0).toFixed(2));
 
         // 2. Average Days Between 1st and 2nd Order (Repeat Purchase Interval)
-        // Fixed: qualified o1.uid to resolve ambiguous column error
         const [intervalRes] = await db.query(`
             SELECT AVG(days_between) as avgDaysBetween
             FROM (
@@ -223,7 +222,6 @@ const getOnboardingAnalyticsController = async (req, res) => {
         const verifiedUsers = Number(verifiedRes[0]?.count || 0);
 
         // Step 3: Interest (Added to Cart or Wishlist)
-        // Fixed: Table names are cartDetail and wishlistDetail
         const [interestRes] = await db.query(`
             SELECT COUNT(DISTINCT u.uid) as count
             FROM users u
@@ -411,7 +409,6 @@ const getUnifiedAnalyticsController = async (req, res) => {
         `);
 
         // 6. Top 5 Categories Performance
-        // Fixed: products table has categories JSON field or join categories safely
         let topCategories = [];
         try {
             const [categoriesRes] = await db.query(`
@@ -437,21 +434,29 @@ const getUnifiedAnalyticsController = async (req, res) => {
         }
 
         // 7. Top Brand Performance
-        const [topBrands] = await db.query(`
-            SELECT 
-                b.brandID,
-                b.brandName,
-                COUNT(DISTINCT oi.orderID) as ordersCount,
-                COALESCE(SUM(oi.lineTotalAfter), 0) as brandRevenue
-            FROM order_items oi
-            JOIN users b ON oi.brandID = b.uid
-            JOIN orderDetail od ON oi.orderID = od.orderID
-            WHERE od.paymentStatus = 'successful' AND LOWER(od.orderStatus) != 'cancelled'
-              ${getDateCondition(range, 'oi.createdAt').sql}
-            GROUP BY b.brandID, b.brandName
-            ORDER BY brandRevenue DESC
-            LIMIT 5
-        `);
+        // Fixed: users table has name, username, uid (no brandID or brandName column on users)
+        let topBrands = [];
+        try {
+            const [brandsRes] = await db.query(`
+                SELECT 
+                    oi.brandID,
+                    COALESCE(NULLIF(b.name, ''), b.username, oi.brandID, 'In-house Brand') as brandName,
+                    COUNT(DISTINCT oi.orderID) as ordersCount,
+                    COALESCE(SUM(oi.lineTotalAfter), 0) as brandRevenue
+                FROM order_items oi
+                LEFT JOIN users b ON oi.brandID = b.uid
+                JOIN orderDetail od ON oi.orderID = od.orderID
+                WHERE od.paymentStatus = 'successful' AND LOWER(od.orderStatus) != 'cancelled'
+                  ${getDateCondition(range, 'oi.createdAt').sql}
+                GROUP BY oi.brandID, b.name, b.username
+                ORDER BY brandRevenue DESC
+                LIMIT 5
+            `);
+            topBrands = brandsRes;
+        } catch (brandErr) {
+            console.warn('Brand analytics fallback triggered:', brandErr.message);
+            topBrands = [];
+        }
 
         // 8. Auto-generated Executive Highlights & Insights
         const totalRevenue = parseFloat(Number(kpiRes[0]?.totalRevenue || 0).toFixed(2));
