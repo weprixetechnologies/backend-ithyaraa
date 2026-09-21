@@ -463,6 +463,11 @@ const searchProducts = async (req, res) => {
         const result = await service.searchProducts(q);
         return res.status(200).json(result);
     } catch (e) {
+        console.error('searchProducts error:', e);
+        return res.status(500).json({ success: false, message: 'Server error', data: [], total: 0 });
+    }
+};
+
 // ─────────────────────────────────────────────
 // Admin: Get Products For Reordering
 // ─────────────────────────────────────────────
