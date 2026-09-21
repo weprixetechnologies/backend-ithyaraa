@@ -21,14 +21,6 @@ const createCombo = async (data) => {
     const { products, ...comboData } = data;
     console.log('data', products);
 
-    // Server-side slot guard: max 5 products per make-combo
-    const MAX_COMBO_SLOTS = 5;
-    if (Array.isArray(products) && products.length > MAX_COMBO_SLOTS) {
-        const error = new Error(`A make-combo can have at most ${MAX_COMBO_SLOTS} products. You selected ${products.length}.`);
-        error.statusCode = 400;
-        throw error;
-    }
-
     // 1. Generate unique comboID
     const comboID = await generateUniqueComboID();
 
@@ -110,14 +102,6 @@ const getComboDetailsForUser = async (comboID) => {
 };
 const updateComboProduct = async (productID, updateData) => {
     const { products, ...productInfo } = updateData;
-
-    // Server-side slot guard: max 5 products per make-combo
-    const MAX_COMBO_SLOTS = 5;
-    if (Array.isArray(products) && products.length > MAX_COMBO_SLOTS) {
-        const error = new Error(`A make-combo can have at most ${MAX_COMBO_SLOTS} products. You selected ${products.length}.`);
-        error.statusCode = 400;
-        throw error;
-    }
 
     // 1. Update main product
     await makeComboModel.updateProduct(productID, productInfo);
