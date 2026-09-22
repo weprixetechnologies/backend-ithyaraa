@@ -610,7 +610,7 @@ const bulkUploadVariations = async (variationsArray) => {
 const getProductsForReorder = async ({ search, categoryID, brandID } = {}) => {
     let query = `
         SELECT productID, name, regularPrice, salePrice,
-               featuredImage, brand, brandID, categories,
+               featuredImage, brand, brandID, categories, type, discountType,
                COALESCE(displayOrder, 0) as displayOrder,
                createdAt, status
         FROM products
