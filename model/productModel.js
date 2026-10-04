@@ -669,6 +669,98 @@ const bulkUpdateProductDisplayOrder = async (reorderedItems) => {
 };
 
 // ─────────────────────────────────────────────
+// Brand Reordering Methods
+// ─────────────────────────────────────────────
+let isBrandDisplayOrderChecked = false;
+const ensureBrandDisplayOrderColumn = async () => {
+    if (isBrandDisplayOrderChecked) return;
+    try {
+        const [columns] = await db.query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+             WHERE TABLE_SCHEMA = DATABASE() 
+               AND TABLE_NAME = 'products' 
+               AND COLUMN_NAME = 'brandDisplayOrder'`
+        );
+
+        if (columns.length === 0) {
+            console.log('[Migration] Auto-adding brandDisplayOrder column to products...');
+            await db.query(`ALTER TABLE products ADD COLUMN brandDisplayOrder INT DEFAULT 0`);
+            try {
+                await db.query(`ALTER TABLE products ADD INDEX idx_products_brand_display_order (brandID, brandDisplayOrder)`);
+            } catch (_) {}
+            console.log('[Migration] brandDisplayOrder column auto-added.');
+        }
+        isBrandDisplayOrderChecked = true;
+    } catch (e) {
+        // If DB query fails (e.g. offline/mock), don't block
+        console.error('ensureBrandDisplayOrderColumn notice:', e.message);
+    }
+};
+
+const getBrandProductsForReorder = async ({ brandID, brandName, search, categoryID } = {}) => {
+    await ensureBrandDisplayOrderColumn();
+    let query = `
+        SELECT productID, name, regularPrice, salePrice,
+               featuredImage, brand, brandID, categories, type, discountType,
+               COALESCE(brandDisplayOrder, 0) as brandDisplayOrder,
+               COALESCE(brandDisplayOrder, COALESCE(displayOrder, 0)) as displayOrder,
+               createdAt, status
+        FROM products
+        WHERE (isDeleted = 0 OR isDeleted IS NULL)
+          AND (brandID = ? OR brand = ?)
+    `;
+    const params = [brandID, brandName || brandID];
+
+    if (search && search.trim()) {
+        query += ` AND (name LIKE ? OR productID LIKE ?)`;
+        params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+    }
+
+    if (categoryID) {
+        query += ` AND (JSON_CONTAINS(categories, JSON_OBJECT('categoryID', ?)) OR JSON_CONTAINS(categories, JSON_OBJECT('categoryID', CAST(? AS CHAR))))`;
+        params.push(categoryID, categoryID);
+    }
+
+    query += ` ORDER BY CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN 0 WHEN COALESCE(displayOrder, 0) > 0 THEN 1 ELSE 2 END ASC, CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN brandDisplayOrder ELSE displayOrder END ASC, createdAt DESC`;
+
+    const [rows] = await db.query(query, params);
+    return rows;
+};
+
+const bulkUpdateBrandProductDisplayOrder = async (brandID, reorderedItems) => {
+    // reorderedItems: [{ productID, displayOrder }]
+    if (!Array.isArray(reorderedItems) || reorderedItems.length === 0) {
+        return { success: false, message: 'Invalid reorder items' };
+    }
+
+    await ensureBrandDisplayOrderColumn();
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        for (const item of reorderedItems) {
+            const orderVal = item.displayOrder !== undefined ? parseInt(item.displayOrder, 10) : 0;
+            await connection.query(
+                `UPDATE products 
+                 SET brandDisplayOrder = ? 
+                 WHERE productID = ? AND (brandID = ? OR brand = ?)`,
+                [orderVal, item.productID, brandID, brandID]
+            );
+        }
+
+        await connection.commit();
+        return { success: true, message: 'Brand products reordered successfully' };
+    } catch (error) {
+        await connection.rollback();
+        console.error('Error bulk updating brand product display order:', error);
+        throw error;
+    } finally {
+        connection.release();
+    }
+};
+
+// ─────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────
 module.exports = {
@@ -689,5 +781,8 @@ module.exports = {
     deleteProduct,
     getDeletedProducts,
     getProductsForReorder,
-    bulkUpdateProductDisplayOrder
+    bulkUpdateProductDisplayOrder,
+    getBrandProductsForReorder,
+    bulkUpdateBrandProductDisplayOrder,
+    ensureBrandDisplayOrderColumn
 };

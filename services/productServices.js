@@ -480,6 +480,9 @@ const paginate = async ({ baseQuery, values, page, limit, db }) => {
 };
 
 const fetchPaginatedProducts = async (query) => {
+    if (model.ensureBrandDisplayOrderColumn) {
+        await model.ensureBrandDisplayOrderColumn();
+    }
     let page = parseInt(query.page) || 1;
     let limit = parseInt(query.limit) || 20;
     if (page < 1) page = 1;
@@ -537,11 +540,24 @@ const fetchPaginatedProducts = async (query) => {
         SELECT
             productID, name, sectionid, regularPrice, salePrice,
             discountType, discountValue, offerID, featuredImage,
-            brand, brandID, categories, type, status, createdAt
+            brand, brandID, categories, type, status, createdAt,
+            COALESCE(brandDisplayOrder, 0) as brandDisplayOrder,
+            COALESCE(displayOrder, 0) as displayOrder
         FROM products WHERE productID IS NOT NULL AND isDeleted = 0
     `;
     if (filters.length > 0) baseQuery += ` AND ${filters.join(' AND ')}`;
-    baseQuery += ` ORDER BY createdAt DESC`;
+
+    if (query.sortBy === 'price_low_to_high' || query.sortBy === 'price_asc') {
+        baseQuery += ` ORDER BY COALESCE(salePrice, regularPrice) ASC, createdAt DESC`;
+    } else if (query.sortBy === 'price_high_to_low' || query.sortBy === 'price_desc') {
+        baseQuery += ` ORDER BY COALESCE(salePrice, regularPrice) DESC, createdAt DESC`;
+    } else if (query.sortBy === 'newest') {
+        baseQuery += ` ORDER BY createdAt DESC`;
+    } else if (query.brandID || query.brand || query.sortBy === 'displayOrder' || query.sortBy === 'brandDisplayOrder') {
+        baseQuery += ` ORDER BY CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN 0 WHEN COALESCE(displayOrder, 0) > 0 THEN 1 ELSE 2 END ASC, CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN brandDisplayOrder ELSE displayOrder END ASC, createdAt DESC`;
+    } else {
+        baseQuery += ` ORDER BY createdAt DESC`;
+    }
 
     return paginate({ baseQuery, values, page, limit, db });
 };
@@ -656,6 +672,9 @@ const getProductDetails = async (productID) => {
 };
 
 async function getShopProductsPublic(query) {
+    if (model.ensureBrandDisplayOrderColumn) {
+        await model.ensureBrandDisplayOrderColumn();
+    }
     const page = Math.max(1, parseInt(query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
     const type = query.type || 'variable';
@@ -746,7 +765,11 @@ async function getShopProductsPublic(query) {
 
     let orderClause = '';
     if (sortBy === 'displayOrder') {
-        orderClause = `ORDER BY CASE WHEN COALESCE(displayOrder, 0) > 0 THEN 0 ELSE 1 END ASC, displayOrder ASC, createdAt DESC`;
+        if (query.brandID) {
+            orderClause = `ORDER BY CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN 0 WHEN COALESCE(displayOrder, 0) > 0 THEN 1 ELSE 2 END ASC, CASE WHEN COALESCE(brandDisplayOrder, 0) > 0 THEN brandDisplayOrder ELSE displayOrder END ASC, createdAt DESC`;
+        } else {
+            orderClause = `ORDER BY CASE WHEN COALESCE(displayOrder, 0) > 0 THEN 0 ELSE 1 END ASC, displayOrder ASC, createdAt DESC`;
+        }
     } else {
         orderClause = `ORDER BY ${sortBy} ${sortOrder}`;
     }
@@ -755,6 +778,7 @@ async function getShopProductsPublic(query) {
         SELECT productID, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
                brand, brandID, featuredImage, categories, sectionid, createdAt,
+               COALESCE(brandDisplayOrder, 0) as brandDisplayOrder,
                COALESCE(displayOrder, 0) as displayOrder
         FROM products WHERE isDeleted = 0
     `;
@@ -958,6 +982,34 @@ const reorderProductsService = async (reorderedItems) => {
     }
 };
 
+const getBrandProductsForReorderService = async (params) => {
+    try {
+        const products = await model.getBrandProductsForReorder(params);
+        products.forEach(row => {
+            try {
+                if (typeof row.featuredImage === 'string') row.featuredImage = JSON.parse(row.featuredImage);
+                if (typeof row.categories === 'string') row.categories = JSON.parse(row.categories);
+            } catch (e) {
+                // Keep as is if already parsed or invalid JSON
+            }
+        });
+        return { success: true, data: products, total: products.length };
+    } catch (error) {
+        console.error('Error fetching brand products for reorder:', error);
+        return { success: false, message: 'Error fetching brand products for reorder', error: error.message };
+    }
+};
+
+const bulkUpdateBrandProductDisplayOrderService = async (brandID, reorderedItems) => {
+    try {
+        const result = await model.bulkUpdateBrandProductDisplayOrder(brandID, reorderedItems);
+        return result;
+    } catch (error) {
+        console.error('Error reordering brand products:', error);
+        return { success: false, message: 'Error reordering brand products', error: error.message };
+    }
+};
+
 // ─────────────────────────────────────────────
 // Single export block
 // FIX: removed orphan mid-file
@@ -983,5 +1035,7 @@ module.exports = {
     searchProducts,
     getDeletedProducts,
     getProductsForReorderService,
-    reorderProductsService
+    reorderProductsService,
+    getBrandProductsForReorderService,
+    bulkUpdateBrandProductDisplayOrderService
 };

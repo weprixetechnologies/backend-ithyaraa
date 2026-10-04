@@ -21,4 +21,9 @@ productBrandRouter.get('/count-product', authBrandMiddleware.verifyAccessToken, 
 // Get product details (brand-specific)
 productBrandRouter.get('/details/:productID', authBrandMiddleware.verifyAccessToken, brandProductController.getBrandProductDetails)
 
+// Reorder products (brand-specific)
+productBrandRouter.get('/reorder-list', authBrandMiddleware.verifyAccessToken, brandProductController.getBrandProductsForReorder)
+productBrandRouter.put('/reorder', authBrandMiddleware.verifyAccessToken, brandProductController.reorderBrandProducts)
+
 module.exports = productBrandRouter
+

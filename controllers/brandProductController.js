@@ -3,6 +3,21 @@ const imageModel = require('./../model/imagesModel')
 const imageService = require('./../services/imageService')
 const service = require('./../services/productServices');
 const db = require('../utils/dbconnect');
+const { deleteCache, clearByPattern } = require('../utils/cacheHelper');
+const { SCOPE } = require('../utils/cacheScopes');
+
+const invalidateProductCaches = async (productID = null) => {
+    const tasks = [
+        deleteCache(SCOPE.OFFERS_LIST),
+        deleteCache(SCOPE.PRODUCTS_ALL),
+        clearByPattern('products:page:*'),
+        clearByPattern('shop:products:*'),
+        clearByPattern('homepage_tag_sections:*'),
+        clearByPattern('section_products:*'),
+    ];
+    if (productID) tasks.push(deleteCache(SCOPE.PRODUCT_DETAIL(productID)));
+    await Promise.allSettled(tasks);
+};
 
 // Add brand product
 const addBrandProduct = async (req, res) => {
@@ -388,11 +403,66 @@ const getBrandProductDetails = async (req, res) => {
     }
 };
 
+// ─────────────────────────────────────────────
+// Brand: Get Products For Reordering
+// ─────────────────────────────────────────────
+const getBrandProductsForReorder = async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const brandName = req.user.name || req.user.username;
+        const { search, categoryID } = req.query;
+
+        const result = await service.getBrandProductsForReorderService({
+            brandID,
+            brandName,
+            search,
+            categoryID
+        });
+
+        return res.status(200).json(result);
+    } catch (e) {
+        console.error('getBrandProductsForReorder error:', e);
+        return res.status(500).json({ success: false, message: 'Server error', data: [], total: 0 });
+    }
+};
+
+// ─────────────────────────────────────────────
+// Brand: Bulk Reorder Products
+// ─────────────────────────────────────────────
+const reorderBrandProducts = async (req, res) => {
+    try {
+        const brandID = req.user.uid;
+        const { reorderedItems } = req.body;
+
+        if (!Array.isArray(reorderedItems) || reorderedItems.length === 0) {
+            return res.status(400).json({ success: false, message: 'reorderedItems must be a non-empty array' });
+        }
+
+        const result = await service.bulkUpdateBrandProductDisplayOrderService(brandID, reorderedItems);
+
+        if (result.success) {
+            try {
+                await invalidateProductCaches();
+            } catch (cacheErr) {
+                console.error('Failed to invalidate product caches after brand reorder:', cacheErr);
+            }
+            return res.status(200).json(result);
+        } else {
+            return res.status(400).json(result);
+        }
+    } catch (e) {
+        console.error('reorderBrandProducts error:', e);
+        return res.status(500).json({ success: false, message: 'Server error', error: e.message });
+    }
+};
+
 module.exports = {
     addBrandProduct,
     editBrandProduct,
     deleteBrandProduct,
     getBrandProducts,
     getBrandProductCount,
-    getBrandProductDetails
+    getBrandProductDetails,
+    getBrandProductsForReorder,
+    reorderBrandProducts
 };
