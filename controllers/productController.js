@@ -433,7 +433,12 @@ const bulkRemoveSection = async (req, res) => {
 const shopList = async (req, res) => {
     try {
         const { page, limit, ...filters } = req.query;
-        const cacheKey = SCOPE.SHOP_PRODUCTS_PAGE(page || 1, limit || 10, filters);
+        const pageNum = parseInt(page) || 1;
+        const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 12));
+        const cacheKey = SCOPE.SHOP_PRODUCTS_PAGE(pageNum, limitNum, filters);
+
+        // Set CDN and browser caching headers
+        res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
 
         const cached = await getCache(cacheKey);
         if (cached) {
@@ -441,7 +446,7 @@ const shopList = async (req, res) => {
         }
 
         const result = await service.getShopProductsPublic(req.query);
-        try { await setCache(cacheKey, result); } catch (e) { console.error(e); }
+        try { await setCache(cacheKey, result, 300); } catch (e) { console.error(e); }
 
         return res.status(200).json(result);
     } catch (e) {

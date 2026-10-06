@@ -456,15 +456,15 @@ const getProductWithVariations = async (productID) => {
         `SELECT p.*, u.shippingCharge AS brandShippingCharge
          FROM products p
          LEFT JOIN users u ON p.brandID = u.uid
-         WHERE p.productID = ? LIMIT 1`,
-        [productID]
+         WHERE (p.productID = ? OR p.slug = ?) LIMIT 1`,
+        [productID, productID]
     );
     if (productRows.length === 0) return null;
 
     const product = productRows[0];
     const [variationRows] = await db.query(
         `SELECT * FROM variations WHERE productID = ?`,
-        [productID]
+        [product.productID]
     );
     product.variations = variationRows;
     return product;
@@ -476,8 +476,8 @@ const getProductByID = async (productID) => {
             `SELECT p.*, u.shippingCharge AS brandShippingCharge
              FROM products p
              LEFT JOIN users u ON p.brandID = u.uid
-             WHERE p.productID = ? LIMIT 1`,
-            [productID]
+             WHERE (p.productID = ? OR p.slug = ?) LIMIT 1`,
+            [productID, productID]
         );
         if (!rows || rows.length === 0) return null;
         return rows[0];
@@ -697,6 +697,35 @@ const ensureBrandDisplayOrderColumn = async () => {
     }
 };
 
+let isPerformanceIndexesChecked = false;
+const ensureProductPerformanceIndexes = async () => {
+    if (isPerformanceIndexesChecked) return;
+    try {
+        const [existingIndexes] = await db.query(`SHOW INDEX FROM products`);
+        const indexNames = new Set(existingIndexes.map(r => r.Key_name));
+
+        if (!indexNames.has('idx_products_isDeleted')) {
+            try { await db.query(`ALTER TABLE products ADD INDEX idx_products_isDeleted (isDeleted)`); } catch (_) {}
+        }
+        if (!indexNames.has('idx_products_salePrice')) {
+            try { await db.query(`ALTER TABLE products ADD INDEX idx_products_salePrice (salePrice)`); } catch (_) {}
+        }
+        if (!indexNames.has('idx_products_createdAt')) {
+            try { await db.query(`ALTER TABLE products ADD INDEX idx_products_createdAt (createdAt)`); } catch (_) {}
+        }
+        if (!indexNames.has('idx_products_status')) {
+            try { await db.query(`ALTER TABLE products ADD INDEX idx_products_status (status(32))`); } catch (_) {}
+        }
+        if (!indexNames.has('idx_products_displayOrder')) {
+            try { await db.query(`ALTER TABLE products ADD INDEX idx_products_displayOrder (displayOrder)`); } catch (_) {}
+        }
+        isPerformanceIndexesChecked = true;
+    } catch (e) {
+        // If DB query fails (e.g. offline/mock), don't block
+        console.error('ensureProductPerformanceIndexes notice:', e.message);
+    }
+};
+
 const getBrandProductsForReorder = async ({ brandID, brandName, search, categoryID } = {}) => {
     await ensureBrandDisplayOrderColumn();
     let query = `
@@ -784,5 +813,6 @@ module.exports = {
     bulkUpdateProductDisplayOrder,
     getBrandProductsForReorder,
     bulkUpdateBrandProductDisplayOrder,
-    ensureBrandDisplayOrderColumn
+    ensureBrandDisplayOrderColumn,
+    ensureProductPerformanceIndexes
 };

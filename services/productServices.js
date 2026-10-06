@@ -675,6 +675,9 @@ async function getShopProductsPublic(query) {
     if (model.ensureBrandDisplayOrderColumn) {
         await model.ensureBrandDisplayOrderColumn();
     }
+    if (model.ensureProductPerformanceIndexes) {
+        await model.ensureProductPerformanceIndexes();
+    }
     const page = Math.max(1, parseInt(query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(query.limit) || 12));
     const type = query.type || 'variable';
@@ -775,7 +778,7 @@ async function getShopProductsPublic(query) {
     }
 
     let baseQuery = `
-        SELECT productID, name, regularPrice, salePrice,
+        SELECT productID, slug, name, regularPrice, salePrice,
                discountType, discountValue, type, status,
                brand, brandID, featuredImage, categories, sectionid, createdAt,
                COALESCE(brandDisplayOrder, 0) as brandDisplayOrder,
