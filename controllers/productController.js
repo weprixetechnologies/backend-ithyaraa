@@ -438,7 +438,7 @@ const shopList = async (req, res) => {
         const cacheKey = SCOPE.SHOP_PRODUCTS_PAGE(pageNum, limitNum, filters);
 
         // Set CDN and browser caching headers
-        res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+        res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
 
         const cached = await getCache(cacheKey);
         if (cached) {
