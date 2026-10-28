@@ -1297,4 +1297,107 @@ const autoUpdateCartSelection = async (uid) => {
     };
 };
 
-module.exports = { addToCart, getCart, removeCartItem, addCartCombo, updateCartItemsSelected, updateCartItemQuantityWithStockCheck, autoUpdateCartSelection };
+/**
+ * Merge an anonymous guest cart into a registered user cart.
+ * Moves/combines cart_items from guestUid into userUid, updates totals, and cleans up guest records.
+ */
+async function mergeGuestCart(guestUid, userUid) {
+    if (!guestUid || !userUid || guestUid === userUid) {
+        return { success: false, message: 'Invalid or identical guest and user UIDs' };
+    }
+
+    try {
+        console.log(`🛒 Merging guest cart [${guestUid}] into user cart [${userUid}]`);
+
+        // 1. Check if guest cart exists in cartDetail
+        const [guestCartRows] = await db.query(
+            `SELECT * FROM cartDetail WHERE uid = ? LIMIT 1`,
+            [guestUid]
+        );
+        if (!guestCartRows || guestCartRows.length === 0) {
+            console.log(`No guest cart found for ${guestUid}`);
+            return { success: true, message: 'No guest cart found' };
+        }
+        const guestCart = guestCartRows[0];
+
+        // 2. Fetch all cart_items for guestCart
+        const [guestItems] = await db.query(
+            `SELECT * FROM cart_items WHERE cartID = ?`,
+            [guestCart.cartID]
+        );
+
+        if (!guestItems || guestItems.length === 0) {
+            // Delete empty guest cartDetail
+            await db.query(`DELETE FROM cartDetail WHERE cartID = ?`, [guestCart.cartID]);
+            return { success: true, message: 'Guest cart had no items' };
+        }
+
+        // 3. Ensure user has a cartDetail
+        const userCart = await cartModel.getOrCreateCart(userUid);
+
+        // 4. Merge items
+        for (const item of guestItems) {
+            // If it's a combo product (has comboID) or has custom inputs, reassign it directly to user's cart
+            if (item.comboID || (item.custom_inputs && item.custom_inputs !== '{}' && item.custom_inputs !== 'null')) {
+                await db.query(
+                    `UPDATE cart_items SET cartID = ?, uid = ? WHERE cartItemID = ?`,
+                    [userCart.cartID, userUid, item.cartItemID]
+                );
+                continue;
+            }
+
+            // Normal / variable item: check if user's cart already has this product and variation
+            const existingUserItem = await cartModel.getCartItemWithVariation(
+                userCart.cartID,
+                item.productID,
+                item.variationID
+            );
+
+            if (existingUserItem && !existingUserItem.comboID) {
+                // Combine quantities
+                const newQuantity = Number(existingUserItem.quantity) + Number(item.quantity);
+                const unitPrice = Number(existingUserItem.unitPriceBefore) || Number(existingUserItem.salePrice) || Number(existingUserItem.regularPrice) || 0;
+                const newLineTotalBefore = (Math.round(unitPrice * 100) * newQuantity) / 100;
+                const newLineTotalAfter = newLineTotalBefore;
+
+                await cartModel.updateCartItemQuantity(
+                    existingUserItem.cartItemID,
+                    newQuantity,
+                    newLineTotalBefore,
+                    newLineTotalAfter
+                );
+
+                // Remove the guest item since quantity has been merged
+                await db.query(`DELETE FROM cart_items WHERE cartItemID = ?`, [item.cartItemID]);
+            } else {
+                // Transfer item to user's cart
+                await db.query(
+                    `UPDATE cart_items SET cartID = ?, uid = ? WHERE cartItemID = ?`,
+                    [userCart.cartID, userUid, item.cartItemID]
+                );
+            }
+        }
+
+        // If guest cart had a referBy, transfer to user cart if user cart doesn't have one
+        if (guestCart.referBy) {
+            await db.query(
+                `UPDATE cartDetail SET referBy = COALESCE(NULLIF(referBy, ''), ?) WHERE cartID = ?`,
+                [guestCart.referBy, userCart.cartID]
+            );
+        }
+
+        // 5. Delete the guest cartDetail record
+        await db.query(`DELETE FROM cartDetail WHERE cartID = ?`, [guestCart.cartID]);
+
+        // 6. Recalculate user's cart totals & discounts
+        await cartModel.updateCartTotals(userCart.cartID);
+
+        console.log(`✅ Successfully merged guest cart into user cart [cartID: ${userCart.cartID}]`);
+        return { success: true, message: 'Cart merged successfully' };
+    } catch (error) {
+        console.error('❌ Error merging guest cart:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+module.exports = { addToCart, getCart, removeCartItem, addCartCombo, updateCartItemsSelected, updateCartItemQuantityWithStockCheck, autoUpdateCartSelection, mergeGuestCart };

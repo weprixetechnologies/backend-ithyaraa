@@ -5,7 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "nodemon index.js",
-    "migrate:megamenu": "node scripts/run_megamenu_migration.js"
+    "migrate:megamenu": "node scripts/run_megamenu_migration.js",
+    "migrate:guest-cart": "node scripts/run_guest_cart_migration.js"
   },
   "author": "ronit",
   "license": "ISC",

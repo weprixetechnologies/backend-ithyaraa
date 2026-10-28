@@ -1,4 +1,5 @@
 const usersService = require('../services/usersService');
+const cartService = require('../services/cartService');
 const jwt = require('jsonwebtoken');
 const { normalizePhoneNumber } = require('../utils/phoneUtils');
 
@@ -48,6 +49,16 @@ const createUser = async (req, res) => {
             return res.status(409).json(result); // USER EXIST
         }
 
+        // Merge guest cart if guestToken was provided during signup
+        const guestId = req.headers['x-guest-token'] || req.body?.guestToken;
+        if (guestId && result.uid && result.uid !== guestId) {
+            try {
+                await cartService.mergeGuestCart(guestId, result.uid);
+            } catch (mergeErr) {
+                console.error('Error merging guest cart on createUser:', mergeErr);
+            }
+        }
+
         return res.status(201).json(result); // Created
     } catch (error) {
         console.error('Error creating user:', error);
@@ -57,7 +68,8 @@ const createUser = async (req, res) => {
 
 const loginUser = async (req, res) => {
     try {
-        const { email, phonenumber, password } = req.body;
+        const { email, phonenumber, password, guestToken } = req.body;
+        const guestId = req.headers['x-guest-token'] || guestToken;
         console.log(req.body);
         if ((!email && !phonenumber) || !password) {
             return res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -74,10 +86,17 @@ const loginUser = async (req, res) => {
             return res.status(401).json(result);
         }
 
-        // ✅ Queue email after successful login
-
-
-
+        // Merge guest cart if guestId was provided
+        if (guestId && result.accessToken) {
+            try {
+                const decoded = jwt.decode(result.accessToken);
+                if (decoded && decoded.uid && decoded.uid !== guestId) {
+                    await cartService.mergeGuestCart(guestId, decoded.uid);
+                }
+            } catch (mergeErr) {
+                console.error('Error merging guest cart on login:', mergeErr);
+            }
+        }
 
         return res.status(200).json(result);
     } catch (error) {
