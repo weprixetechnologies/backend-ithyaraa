@@ -278,7 +278,81 @@ const getAllCategoriesBrandsMap = async () => {
     return getMegamenuCategoriesBrands();
 };
 
+let isMegamenuProductsChecked = false;
+const ensureMegamenuProductsColumn = async () => {
+    if (isMegamenuProductsChecked) return;
+    try {
+        const [columns] = await db.query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+             WHERE TABLE_SCHEMA = DATABASE() 
+               AND TABLE_NAME = 'categories' 
+               AND COLUMN_NAME = 'megamenuProducts'`
+        );
+        if (columns.length === 0) {
+            console.log('[Migration] Auto-adding megamenuProducts column to categories...');
+            await db.query(`ALTER TABLE categories ADD COLUMN megamenuProducts JSON DEFAULT NULL`);
+            console.log('[Migration] megamenuProducts column auto-added.');
+        }
+        isMegamenuProductsChecked = true;
+    } catch (e) {
+        console.error('ensureMegamenuProductsColumn notice:', e.message);
+    }
+};
+
+const updateCategoryMegamenuProducts = async (categoryID, productIDs) => {
+    await ensureMegamenuProductsColumn();
+    const jsonStr = JSON.stringify(Array.isArray(productIDs) ? productIDs : []);
+    await db.query(
+        `UPDATE categories SET megamenuProducts = ? WHERE categoryID = ?`,
+        [jsonStr, categoryID]
+    );
+    return { success: true, message: 'Category megamenu products updated' };
+};
+
+const getCategoryMegamenuProducts = async (categoryID) => {
+    await ensureMegamenuProductsColumn();
+    const [[category]] = await db.query(
+        `SELECT categoryID, categoryName, megamenuProducts FROM categories WHERE categoryID = ?`,
+        [categoryID]
+    );
+    if (!category) return null;
+
+    let productIDs = [];
+    if (category.megamenuProducts) {
+        try {
+            productIDs = typeof category.megamenuProducts === 'string'
+                ? JSON.parse(category.megamenuProducts)
+                : category.megamenuProducts;
+        } catch (e) {
+            productIDs = [];
+        }
+    }
+
+    let products = [];
+    if (Array.isArray(productIDs) && productIDs.length > 0) {
+        const [rows] = await db.query(
+            `SELECT productID, name, slug, regularPrice, salePrice, featuredImage, brand, brandID, status
+             FROM products
+             WHERE productID IN (?)
+               AND (isDeleted = 0 OR isDeleted IS NULL)`,
+            [productIDs]
+        );
+        // Retain selected order
+        const mapById = new Map(rows.map(r => [String(r.productID), r]));
+        products = productIDs.map(id => mapById.get(String(id))).filter(Boolean);
+    }
+
+    return {
+        categoryID: category.categoryID,
+        categoryName: category.categoryName,
+        productIDs,
+        products
+    };
+};
+
 const getMegamenuCategoriesBrands = async () => {
+    await ensureMegamenuProductsColumn();
+
     const queryExternal = `
         SELECT DISTINCT 
             c.categoryID,
@@ -374,16 +448,17 @@ const getMegamenuCategoriesBrands = async () => {
     const [rowsExternal] = await db.query(queryExternal);
     const [rowsInHouseCats] = await db.query(queryInHouseCategories);
 
-    const map = {};
+    // 1. Build temporary brands map
+    const brandsMap = {};
 
     if (Array.isArray(rowsExternal)) {
         for (const row of rowsExternal) {
             const catID = String(row.categoryID);
-            if (!map[catID]) map[catID] = [];
+            if (!brandsMap[catID]) brandsMap[catID] = [];
             
-            const exists = map[catID].some(b => b.uid === row.uid || b.name?.toLowerCase() === row.name?.toLowerCase());
+            const exists = brandsMap[catID].some(b => b.uid === row.uid || b.name?.toLowerCase() === row.name?.toLowerCase());
             if (!exists) {
-                map[catID].push({
+                brandsMap[catID].push({
                     uid: row.uid,
                     username: row.username,
                     emailID: row.emailID,
@@ -398,18 +473,91 @@ const getMegamenuCategoriesBrands = async () => {
     if (Array.isArray(rowsInHouseCats)) {
         for (const row of rowsInHouseCats) {
             const catID = String(row.categoryID);
-            if (!map[catID]) map[catID] = [];
+            if (!brandsMap[catID]) brandsMap[catID] = [];
 
-            const exists = map[catID].some(b => 
+            const exists = brandsMap[catID].some(b => 
                 b.uid === ithyaraaBrandObj.uid || 
                 b.username?.toLowerCase() === 'ithyaraa' || 
                 b.name?.toLowerCase() === 'ithyaraa'
             );
 
             if (!exists) {
-                map[catID].unshift(ithyaraaBrandObj);
+                brandsMap[catID].unshift(ithyaraaBrandObj);
             }
         }
+    }
+
+    // 2. Query all categories to build the single JSON containing both brands and carousel products
+    const [allCategories] = await db.query(
+        `SELECT categoryID, categoryName, megamenuProducts FROM categories ORDER BY \`order\` ASC, categoryID ASC`
+    );
+
+    const map = {};
+
+    for (const cat of allCategories) {
+        const catID = String(cat.categoryID);
+        const categoryBrands = brandsMap[catID] || [];
+
+        let productIDs = [];
+        if (cat.megamenuProducts) {
+            try {
+                productIDs = typeof cat.megamenuProducts === 'string'
+                    ? JSON.parse(cat.megamenuProducts)
+                    : cat.megamenuProducts;
+            } catch (e) {
+                productIDs = [];
+            }
+        }
+
+        let categoryProducts = [];
+
+        // If admin selected specific products for this category
+        if (Array.isArray(productIDs) && productIDs.length > 0) {
+            const [selectedProdRows] = await db.query(
+                `SELECT productID, name, slug, regularPrice, salePrice, featuredImage, brand, brandID, status
+                 FROM products
+                 WHERE productID IN (?)
+                   AND (isDeleted = 0 OR isDeleted IS NULL)
+                   AND (status != 'inactive' OR status IS NULL)`,
+                [productIDs]
+            );
+            const prodMap = new Map(selectedProdRows.map(p => [String(p.productID), p]));
+            categoryProducts = productIDs.map(id => prodMap.get(String(id))).filter(Boolean);
+        }
+
+        // If no products chosen by admin, fallback to top active products for this category
+        if (categoryProducts.length === 0) {
+            const [fallbackRows] = await db.query(
+                `SELECT productID, name, slug, regularPrice, salePrice, featuredImage, brand, brandID, status
+                 FROM products p
+                 WHERE (p.isDeleted = 0 OR p.isDeleted IS NULL)
+                   AND (p.status != 'inactive' OR p.status IS NULL)
+                   AND (
+                       JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', ?))
+                       OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryID', CAST(? AS CHAR)))
+                       OR JSON_CONTAINS(p.categories, JSON_QUOTE(CAST(? AS CHAR)))
+                       OR JSON_CONTAINS(p.categories, JSON_ARRAY(?))
+                       OR JSON_CONTAINS(p.categories, JSON_ARRAY(CAST(? AS CHAR)))
+                       OR JSON_CONTAINS(p.categories, JSON_OBJECT('categoryName', ?))
+                       OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":', ?, '%'))
+                       OR (CAST(p.categories AS CHAR) COLLATE utf8mb4_general_ci LIKE CONCAT('%"categoryid":"', ?, '"%'))
+                       OR (LOWER(CAST(p.categories AS CHAR)) COLLATE utf8mb4_general_ci LIKE CONCAT('%"', LOWER(CAST(? AS CHAR)) COLLATE utf8mb4_general_ci, '"%'))
+                   )
+                 ORDER BY COALESCE(p.displayOrder, 999999) ASC, p.createdAt DESC
+                 LIMIT 12`,
+                [
+                    cat.categoryID, cat.categoryID, cat.categoryID,
+                    cat.categoryID, cat.categoryID, cat.categoryName,
+                    cat.categoryID, cat.categoryID, cat.categoryName
+                ]
+            );
+            categoryProducts = fallbackRows || [];
+        }
+
+        map[catID] = {
+            brands: categoryBrands,
+            products: categoryProducts
+        };
     }
 
     return map;
@@ -428,7 +576,9 @@ module.exports = {
     updateCategoryOrder,
     getBrandsByCategoryID,
     getAllCategoriesBrandsMap,
-    getMegamenuCategoriesBrands
+    getMegamenuCategoriesBrands,
+    updateCategoryMegamenuProducts,
+    getCategoryMegamenuProducts
 };
 
 // Fetch all categories: categoryID and categoryName only

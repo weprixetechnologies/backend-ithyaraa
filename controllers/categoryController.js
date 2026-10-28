@@ -288,14 +288,83 @@ const getMegamenuCategoriesBrands = async (req, res) => {
 
         const result = await categoryService.fetchMegamenuCategoriesBrands();
         if (result.success) {
-            // Cache for 3600 seconds (1 hour) in Redis for high-performance ISR / megamenu rendering
-            try { await setCache(cacheKey, result.data, 3600); } catch (e) { console.error(e); }
+            // Store in Redis with NO TTL (ttl = 0), revalidation to be done from admin panel only
+            try { await setCache(cacheKey, result.data, 0); } catch (e) { console.error(e); }
             res.status(200).json(result);
         } else {
             res.status(500).json(result);
         }
     } catch (error) {
         console.error('getMegamenuCategoriesBrands error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const revalidateMegamenu = async (req, res) => {
+    try {
+        const cacheKey = SCOPE.CATEGORIES_MEGAMENU_BRANDS;
+        try { await deleteCache(cacheKey); } catch (e) { console.error(e); }
+
+        const result = await categoryService.fetchMegamenuCategoriesBrands();
+        if (result.success) {
+            // Re-cache with NO TTL (ttl = 0)
+            try { await setCache(cacheKey, result.data, 0); } catch (e) { console.error(e); }
+            return res.status(200).json({
+                success: true,
+                message: 'Mega menu cache revalidated successfully in Redis with no TTL',
+                data: result.data
+            });
+        }
+        res.status(500).json(result);
+    } catch (error) {
+        console.error('revalidateMegamenu error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const updateCategoryMegamenuProducts = async (req, res) => {
+    try {
+        const { categoryID, productIDs } = req.body;
+        if (!categoryID) {
+            return res.status(400).json({ success: false, message: 'categoryID is required' });
+        }
+
+        const updateRes = await categoryService.updateMegamenuProducts(categoryID, productIDs);
+        if (!updateRes.success) {
+            return res.status(500).json(updateRes);
+        }
+
+        // Revalidate mega menu Redis cache automatically upon saving
+        const cacheKey = SCOPE.CATEGORIES_MEGAMENU_BRANDS;
+        try { await deleteCache(cacheKey); } catch (e) { console.error(e); }
+
+        const freshData = await categoryService.fetchMegamenuCategoriesBrands();
+        if (freshData.success) {
+            try { await setCache(cacheKey, freshData.data, 0); } catch (e) { console.error(e); }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Category megamenu products updated and Redis cache revalidated',
+            data: freshData.data
+        });
+    } catch (error) {
+        console.error('updateCategoryMegamenuProducts error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+const getCategoryMegamenuProducts = async (req, res) => {
+    try {
+        const { categoryID } = req.params;
+        const result = await categoryService.fetchCategoryMegamenuProducts(categoryID);
+        if (result.success) {
+            res.status(200).json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (error) {
+        console.error('getCategoryMegamenuProducts error:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
@@ -312,6 +381,9 @@ module.exports = {
     reorderAllCategories,
     getBrandsByCategoryID,
     getCategoriesBrandsMap,
-    getMegamenuCategoriesBrands
+    getMegamenuCategoriesBrands,
+    revalidateMegamenu,
+    updateCategoryMegamenuProducts,
+    getCategoryMegamenuProducts
 };
 

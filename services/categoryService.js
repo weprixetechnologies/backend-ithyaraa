@@ -197,6 +197,26 @@ const fetchMegamenuCategoriesBrands = async () => {
     }
 };
 
+const updateMegamenuProducts = async (categoryID, productIDs) => {
+    try {
+        const data = await categoryModel.updateCategoryMegamenuProducts(categoryID, productIDs);
+        return data;
+    } catch (error) {
+        console.error('Error in updateMegamenuProducts service:', error);
+        return { success: false, message: 'Failed to update category megamenu products', error: error.message };
+    }
+};
+
+const fetchCategoryMegamenuProducts = async (categoryID) => {
+    try {
+        const data = await categoryModel.getCategoryMegamenuProducts(categoryID);
+        return { success: true, data };
+    } catch (error) {
+        console.error('Error in fetchCategoryMegamenuProducts service:', error);
+        return { success: false, message: 'Failed to fetch category megamenu products', error: error.message };
+    }
+};
+
 module.exports = {
     uploadCategory,
     getAllCategories,
@@ -209,6 +229,8 @@ module.exports = {
     reorderAllCategories,
     fetchBrandsByCategoryID,
     fetchCategoriesBrandsMap,
-    fetchMegamenuCategoriesBrands
+    fetchMegamenuCategoriesBrands,
+    updateMegamenuProducts,
+    fetchCategoryMegamenuProducts
 };
 

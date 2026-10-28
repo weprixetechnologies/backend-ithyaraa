@@ -25,4 +25,9 @@ router.put('/bulk-featured', authAdminMiddleware.verifyAccessToken, categoryCont
 router.put('/reorder', authAdminMiddleware.verifyAccessToken, categoryController.reorderFeaturedCategories);
 router.put('/reorder-all', authAdminMiddleware.verifyAccessToken, categoryController.reorderAllCategories);
 
+// Mega Menu Products & Redis Cache Revalidation
+router.get('/megamenu-products/:categoryID', authAdminMiddleware.verifyAccessToken, categoryController.getCategoryMegamenuProducts);
+router.post('/megamenu-products', authAdminMiddleware.verifyAccessToken, categoryController.updateCategoryMegamenuProducts);
+router.post('/megamenu-revalidate', authAdminMiddleware.verifyAccessToken, categoryController.revalidateMegamenu);
+
 module.exports = router;
