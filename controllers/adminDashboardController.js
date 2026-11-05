@@ -126,11 +126,20 @@ const getGlobalSettingsController = async (req, res) => {
 // Update global setting
 const updateGlobalSettingsController = async (req, res) => {
     try {
-        const { key, value } = req.body;
+        const { key, value, settings } = req.body;
+        if (settings && typeof settings === 'object') {
+            for (const [k, v] of Object.entries(settings)) {
+                await settingsModel.updateSetting(k, v !== undefined && v !== null ? String(v) : '');
+            }
+            return res.status(200).json({
+                success: true,
+                message: 'Settings updated successfully'
+            });
+        }
         if (!key) {
             return res.status(400).json({ success: false, message: 'Setting key is required' });
         }
-        await settingsModel.updateSetting(key, value);
+        await settingsModel.updateSetting(key, value !== undefined && value !== null ? String(value) : '');
         res.status(200).json({
             success: true,
             message: `Setting ${key} updated successfully`
