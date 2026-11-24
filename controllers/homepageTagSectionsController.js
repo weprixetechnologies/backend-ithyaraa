@@ -150,6 +150,33 @@ const getActiveTagSections = async (req, res) => {
 };
 
 /**
+ * Reorder products in a section tag
+ */
+const reorderSectionProducts = async (req, res) => {
+    try {
+        const { tag } = req.params;
+        const productIDs = req.body.productIDs || req.body.order || req.body.items;
+
+        if (!Array.isArray(productIDs)) {
+            return res.status(400).json({ success: false, message: 'productIDs array is required' });
+        }
+
+        const result = await service.reorderSectionProducts(tag, productIDs);
+        if (!result.success) return res.status(400).json(result);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Products reordered successfully',
+            tag: result.tag,
+            productOrder: result.productOrder
+        });
+    } catch (error) {
+        console.error('Error in reorderSectionProducts controller:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
  * Clear all section tag caches manually
  */
 const clearAllTagCaches = async (req, res) => {
@@ -171,5 +198,6 @@ module.exports = {
     getSectionProducts,
     bulkAddTag,
     bulkRemoveTag,
+    reorderSectionProducts,
     clearAllTagCaches
 };

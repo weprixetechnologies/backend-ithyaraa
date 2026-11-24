@@ -185,6 +185,18 @@ const bulkRemoveTag = async (tag, productIDs) => {
     return result;
 };
 
+/**
+ * Reorder products in a section tag and instantly re-cache
+ */
+const reorderSectionProducts = async (tag, productIDs) => {
+    const result = await model.reorderSectionProducts(tag, productIDs);
+    if (result.success && result.tag) {
+        console.log(`[REORDER PRODUCTS] Successfully reordered products for tag '${result.tag}'. Triggering reprime...`);
+        await reprimeTagCache(result.tag);
+    }
+    return result;
+};
+
 module.exports = {
     getActiveTagSectionsCached,
     getSectionProductsCached,
@@ -193,6 +205,7 @@ module.exports = {
     deleteSectionTag,
     bulkAddTag,
     bulkRemoveTag,
+    reorderSectionProducts,
     reprimeTagCache,
     clearAllTagCaches,
     getAllTagSections: model.getAllTagSections,

@@ -1,5 +1,26 @@
 const db = require('../utils/dbconnect');
 
+let isProductOrderChecked = false;
+const ensureProductOrderColumn = async () => {
+    if (isProductOrderChecked) return;
+    try {
+        const [columns] = await db.query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+             WHERE TABLE_SCHEMA = DATABASE() 
+               AND TABLE_NAME = 'homepage_tag_sections' 
+               AND COLUMN_NAME = 'productOrder'`
+        );
+        if (columns.length === 0) {
+            console.log('[Migration] Auto-adding productOrder column to homepage_tag_sections...');
+            await db.query(`ALTER TABLE homepage_tag_sections ADD COLUMN productOrder JSON DEFAULT NULL`);
+            console.log('[Migration] productOrder column auto-added to homepage_tag_sections.');
+        }
+        isProductOrderChecked = true;
+    } catch (e) {
+        console.error('ensureProductOrderColumn notice:', e.message);
+    }
+};
+
 let tableEnsuredPromise = null;
 const ensureTable = async () => {
     if (!tableEnsuredPromise) {
@@ -13,10 +34,12 @@ const ensureTable = async () => {
                         description TEXT DEFAULT NULL,
                         position INT DEFAULT 0,
                         isActive TINYINT(1) DEFAULT 1,
+                        productOrder JSON DEFAULT NULL,
                         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     )
                 `);
+                await ensureProductOrderColumn();
 
                 // Check if table is empty and seed default sections if needed
                 const [existing] = await db.query(`SELECT COUNT(*) as cnt FROM homepage_tag_sections`);
@@ -65,7 +88,7 @@ const getAllTagSections = async () => {
     await ensureTable();
     try {
         const [sections] = await db.query(
-            `SELECT id, title, tag, description, position, isActive, createdAt, updatedAt
+            `SELECT id, title, tag, description, position, isActive, productOrder, createdAt, updatedAt
              FROM homepage_tag_sections
              ORDER BY position ASC, createdAt DESC`
         );
@@ -81,9 +104,23 @@ const getAllTagSections = async () => {
                        AND isDeleted = 0`,
                     [cleanTag, cleanTag]
                 );
+
+                let parsedOrder = [];
+                if (sec.productOrder) {
+                    try {
+                        parsedOrder = typeof sec.productOrder === 'string'
+                            ? JSON.parse(sec.productOrder)
+                            : sec.productOrder;
+                        if (!Array.isArray(parsedOrder)) parsedOrder = [];
+                    } catch (_) {
+                        parsedOrder = [];
+                    }
+                }
+
                 return {
                     ...sec,
                     isActive: Boolean(sec.isActive),
+                    productOrder: parsedOrder,
                     productCount: countRows[0]?.productCount || 0
                 };
             })
@@ -161,22 +198,66 @@ const deleteTagSection = async (id) => {
 };
 
 /**
- * Get products assigned to a section tag
+ * Reorder products assigned to a section tag
+ */
+const reorderSectionProducts = async (tag, productIDs) => {
+    await ensureTable();
+    await ensureProductOrderColumn();
+    try {
+        const cleanTag = String(tag).trim().toLowerCase();
+        const cleanIDs = Array.isArray(productIDs) ? productIDs.map(String) : [];
+        const jsonStr = JSON.stringify(cleanIDs);
+
+        const [result] = await db.query(
+            `UPDATE homepage_tag_sections SET productOrder = ? WHERE tag = ? OR id = ?`,
+            [jsonStr, cleanTag, cleanTag]
+        );
+
+        return {
+            success: result.affectedRows > 0,
+            tag: cleanTag,
+            productOrder: cleanIDs
+        };
+    } catch (error) {
+        console.error('Error in reorderSectionProducts model:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Get products assigned to a section tag (respecting custom productOrder)
  */
 const getProductsByTag = async (tag, { page = 1, limit = 50 } = {}) => {
+    await ensureTable();
+    await ensureProductOrderColumn();
     try {
         const cleanTag = String(tag).trim().toLowerCase();
         const offset = (page - 1) * limit;
+
+        // Fetch section's custom product order if available
+        const [secRows] = await db.query(
+            `SELECT productOrder FROM homepage_tag_sections WHERE tag = ? OR id = ? LIMIT 1`,
+            [cleanTag, cleanTag]
+        );
+        let customOrder = [];
+        if (secRows.length > 0 && secRows[0].productOrder) {
+            try {
+                customOrder = typeof secRows[0].productOrder === 'string'
+                    ? JSON.parse(secRows[0].productOrder)
+                    : secRows[0].productOrder;
+                if (!Array.isArray(customOrder)) customOrder = [];
+            } catch (_) {
+                customOrder = [];
+            }
+        }
 
         const [rows] = await db.query(
             `SELECT productID, name, sectionid, regularPrice, salePrice, discountType, discountValue,
                     offerID, featuredImage, brand, categories, type, status, createdAt
              FROM products
              WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))
-               AND isDeleted = 0
-             ORDER BY createdAt DESC
-             LIMIT ? OFFSET ?`,
-            [cleanTag, cleanTag, Number(limit), Number(offset)]
+               AND isDeleted = 0`,
+            [cleanTag, cleanTag]
         );
 
         const [countRows] = await db.query(
@@ -187,7 +268,25 @@ const getProductsByTag = async (tag, { page = 1, limit = 50 } = {}) => {
             [cleanTag, cleanTag]
         );
 
-        const parsedProducts = rows.map(p => {
+        // Sort products using customOrder if defined, falling back to createdAt DESC
+        let sortedRows = rows;
+        if (customOrder.length > 0) {
+            const orderMap = new Map();
+            customOrder.forEach((id, idx) => orderMap.set(String(id), idx));
+
+            sortedRows = [...rows].sort((a, b) => {
+                const idxA = orderMap.has(String(a.productID)) ? orderMap.get(String(a.productID)) : 999999;
+                const idxB = orderMap.has(String(b.productID)) ? orderMap.get(String(b.productID)) : 999999;
+                if (idxA !== idxB) return idxA - idxB;
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            });
+        } else {
+            sortedRows = [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        }
+
+        const paginatedRows = sortedRows.slice(offset, offset + Number(limit));
+
+        const parsedProducts = paginatedRows.map(p => {
             let featuredImage = p.featuredImage;
             let categories = p.categories;
             try { if (typeof featuredImage === 'string') featuredImage = JSON.parse(featuredImage); } catch (_) {}
@@ -198,7 +297,7 @@ const getProductsByTag = async (tag, { page = 1, limit = 50 } = {}) => {
         return {
             success: true,
             data: parsedProducts,
-            total: countRows[0]?.total || 0,
+            total: countRows[0]?.total || sortedRows.length,
             page,
             limit
         };
@@ -279,13 +378,14 @@ const bulkRemoveTagFromProducts = async (tag, productIDs) => {
 };
 
 /**
- * Get all active tag sections along with their tagged products
+ * Get all active tag sections along with their tagged products (respecting custom productOrder)
  */
 const getActiveTagSectionsWithProducts = async (productLimit = 20) => {
     await ensureTable();
+    await ensureProductOrderColumn();
     try {
         const [sections] = await db.query(
-            `SELECT id, title, tag, description, position, isActive, createdAt, updatedAt
+            `SELECT id, title, tag, description, position, isActive, productOrder, createdAt, updatedAt
              FROM homepage_tag_sections
              WHERE isActive = 1
              ORDER BY position ASC, createdAt DESC`
@@ -299,18 +399,45 @@ const getActiveTagSectionsWithProducts = async (productLimit = 20) => {
             sections.map(async (sec) => {
                 const cleanTag = String(sec.tag).trim().toLowerCase();
 
+                let customOrder = [];
+                if (sec.productOrder) {
+                    try {
+                        customOrder = typeof sec.productOrder === 'string'
+                            ? JSON.parse(sec.productOrder)
+                            : sec.productOrder;
+                        if (!Array.isArray(customOrder)) customOrder = [];
+                    } catch (_) {
+                        customOrder = [];
+                    }
+                }
+
                 const [rows] = await db.query(
                     `SELECT productID, name, sectionid, regularPrice, salePrice, discountType, discountValue,
                             offerID, featuredImage, brand, categories, type, status, createdAt
                      FROM products
                      WHERE (sectionid = ? OR FIND_IN_SET(?, REPLACE(sectionid, ' ', '')))
-                       AND isDeleted = 0
-                     ORDER BY createdAt DESC
-                     LIMIT ?`,
-                    [cleanTag, cleanTag, Number(productLimit)]
+                       AND isDeleted = 0`,
+                    [cleanTag, cleanTag]
                 );
 
-                const parsedProducts = rows.map(p => {
+                let sortedRows = rows;
+                if (customOrder.length > 0) {
+                    const orderMap = new Map();
+                    customOrder.forEach((id, idx) => orderMap.set(String(id), idx));
+
+                    sortedRows = [...rows].sort((a, b) => {
+                        const idxA = orderMap.has(String(a.productID)) ? orderMap.get(String(a.productID)) : 999999;
+                        const idxB = orderMap.has(String(b.productID)) ? orderMap.get(String(b.productID)) : 999999;
+                        if (idxA !== idxB) return idxA - idxB;
+                        return new Date(b.createdAt) - new Date(a.createdAt);
+                    });
+                } else {
+                    sortedRows = [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                }
+
+                const limitedRows = sortedRows.slice(0, Number(productLimit));
+
+                const parsedProducts = limitedRows.map(p => {
                     let featuredImage = p.featuredImage;
                     let categories = p.categories;
                     try { if (typeof featuredImage === 'string') featuredImage = JSON.parse(featuredImage); } catch (_) {}
@@ -344,6 +471,7 @@ module.exports = {
     updateTagSection,
     deleteTagSection,
     getProductsByTag,
+    reorderSectionProducts,
     bulkAddTagToProducts,
     bulkRemoveTagFromProducts,
     getActiveTagSectionsWithProducts

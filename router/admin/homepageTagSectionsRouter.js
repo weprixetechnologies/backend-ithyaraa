@@ -11,6 +11,8 @@ router.put('/:id', controller.updateTagSection);
 router.delete('/:id', controller.deleteTagSection);
 
 router.get('/:tag/products', controller.getSectionProducts);
+router.put('/:tag/reorder-products', controller.reorderSectionProducts);
+router.post('/:tag/reorder-products', controller.reorderSectionProducts);
 router.post('/:tag/bulk-tag', controller.bulkAddTag);
 router.post('/clear-cache', controller.clearAllTagCaches);
 router.post('/:tag/bulk-untag', controller.bulkRemoveTag);
